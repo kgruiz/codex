@@ -6,7 +6,7 @@ expression: terminal.backend()
 "                                                                                "
 " ↳ first                                                                        "
 " ↳ second                                                                       "
-"   alt + ↑ edit                                                                 "
+"   Option ⌥ + ↑ edit                                                            "
 "                                                                                "
 "                                                                                "
 "                                                                                "
