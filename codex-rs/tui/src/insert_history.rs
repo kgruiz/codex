@@ -42,7 +42,7 @@ where
     // formatting as the TUI. This avoids character-level hard wrapping by the terminal.
     let wrapped = word_wrap_lines_borrowed(&lines, area.width.max(1) as usize);
     let wrapped_lines = wrapped.len() as u16;
-    let cursor_top = if area.bottom() < screen_size.height {
+    if area.bottom() < screen_size.height {
         // If the viewport is not at the bottom of the screen, scroll it down to make room.
         // Don't scroll it past the bottom of the screen.
         let scroll_amount = wrapped_lines.min(screen_size.height - area.bottom());
@@ -61,39 +61,26 @@ where
             queue!(writer, Print("\x1bM"))?;
         }
         queue!(writer, ResetScrollRegion)?;
-
-        let cursor_top = area.top().saturating_sub(1);
         area.y += scroll_amount;
         should_update_area = true;
-        cursor_top
-    } else {
-        area.top().saturating_sub(1)
-    };
+    }
 
-    // Limit the scroll region to the lines from the top of the screen to the
-    // top of the viewport. With this in place, when we add lines inside this
-    // area, only the lines in this area will be scrolled. We place the cursor
-    // at the end of the scroll region, and add lines starting there.
-    //
-    // ┌─Screen───────────────────────┐
-    // │┌╌Scroll region╌╌╌╌╌╌╌╌╌╌╌╌╌╌┐│
-    // │┆                            ┆│
-    // │┆                            ┆│
-    // │┆                            ┆│
-    // │█╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┘│
-    // │╭─Viewport───────────────────╮│
-    // ││                            ││
-    // │╰────────────────────────────╯│
-    // └──────────────────────────────┘
-    queue!(writer, SetScrollRegion(1..area.top()))?;
-
-    // NB: we are using MoveTo instead of set_cursor_position here to avoid messing with the
-    // terminal's last_known_cursor_position, which hopefully will still be accurate after we
-    // fetch/restore the cursor position. insert_history_lines should be cursor-position-neutral :)
-    queue!(writer, MoveTo(0, cursor_top))?;
+    // Insert history by scrolling the full screen upward so that new lines land directly
+    // above the viewport. Because the entire screen scrolls, rows that leave the top are
+    // captured by the terminal's real scrollback buffer instead of disappearing.
+    let history_row = area
+        .top()
+        .saturating_sub(1)
+        .min(screen_size.height.saturating_sub(1));
+    let bottom_row = screen_size.height.saturating_sub(1);
 
     for line in wrapped {
+        // Scroll everything up by one line to push older rows into scrollback.
+        queue!(writer, MoveTo(0, bottom_row))?;
         queue!(writer, Print("\r\n"))?;
+
+        // Render the new line immediately above the viewport.
+        queue!(writer, MoveTo(0, history_row))?;
         queue!(
             writer,
             SetColors(Colors::new(
@@ -120,8 +107,6 @@ where
             .collect();
         write_spans(writer, merged_spans.iter())?;
     }
-
-    queue!(writer, ResetScrollRegion)?;
 
     // Restore the cursor position to where it was before we started.
     queue!(writer, MoveTo(last_cursor_pos.x, last_cursor_pos.y))?;
