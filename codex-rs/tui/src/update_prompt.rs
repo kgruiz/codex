@@ -190,7 +190,7 @@ impl WidgetRef for &UpdatePromptScreen {
         let update_command = if self.update_plan.action == UpdateAction::BrewUpgrade
             && self.update_plan.needs_tap_refresh
         {
-            "brew update` then `brew upgrade --cask codex".to_string()
+            "brew update` then `brew upgrade codex".to_string()
         } else {
             self.update_plan.action.command_str()
         };

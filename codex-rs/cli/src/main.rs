@@ -278,7 +278,7 @@ fn format_exit_messages(exit_info: AppExitInfo, color_enabled: bool) -> Vec<Stri
 
 /// Handle the app exit and print the results. Optionally run the update action.
 fn handle_app_exit(exit_info: AppExitInfo) -> anyhow::Result<()> {
-    let update_plan = exit_info.update_plan;
+    let update_plan = exit_info.update_plan.clone();
     let color_enabled = supports_color::on(Stream::Stdout).is_some();
     for line in format_exit_messages(exit_info, color_enabled) {
         println!("{line}");
@@ -331,18 +331,17 @@ fn run_update_plan(plan: UpdatePlan) -> anyhow::Result<()> {
 fn run_brew_update(plan: UpdatePlan) -> anyhow::Result<()> {
     if plan.needs_tap_refresh {
         run_brew_command(&["update"], "brew update")?;
-        if let Ok(tap_version) = tap_cask_version() {
-            if tap_version.trim() != plan.target_version.trim() {
+        if let Ok(tap_version) = tap_cask_version()
+            && tap_version.trim() != plan.target_version.trim() {
                 anyhow::bail!(
                     "Homebrew tap did not update Codex to {} (tap has {}). Check your brew setup.",
                     plan.target_version,
                     tap_version
                 );
             }
-        }
     }
 
-    run_brew_command(&["upgrade", "--cask", "codex"], "brew upgrade --cask codex")?;
+    run_brew_command(&["upgrade", "codex"], "brew upgrade codex")?;
 
     let installed_version = codex_installed_version().unwrap_or_default();
     if installed_version.trim() != plan.target_version.trim() {
@@ -836,7 +835,7 @@ mod tests {
             conversation_id: conversation
                 .map(ConversationId::from_string)
                 .map(Result::unwrap),
-            update_action: None,
+            update_plan: None,
         }
     }
 
@@ -845,7 +844,7 @@ mod tests {
         let exit_info = AppExitInfo {
             token_usage: TokenUsage::default(),
             conversation_id: None,
-            update_action: None,
+            update_plan: None,
         };
         let lines = format_exit_messages(exit_info, false);
         assert!(lines.is_empty());

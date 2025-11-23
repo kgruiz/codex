@@ -308,7 +308,7 @@ impl HistoryCell for UpdateAvailableHistoryCell {
                     "Run ",
                     "brew update".cyan(),
                     ", then ",
-                    "brew upgrade --cask codex".cyan(),
+                    "brew upgrade codex".cyan(),
                     " to update."
                 ]
             } else {
