@@ -9,6 +9,13 @@ pub enum UpdateAction {
     BrewUpgrade,
 }
 
+#[derive(Debug, Clone)]
+pub struct UpdatePlan {
+    pub action: UpdateAction,
+    pub target_version: String,
+    pub needs_tap_refresh: bool,
+}
+
 impl UpdateAction {
     /// Returns the list of command-line arguments for invoking the update.
     pub fn command_args(self) -> (&'static str, &'static [&'static str]) {

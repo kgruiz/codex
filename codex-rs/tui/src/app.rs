@@ -15,7 +15,9 @@ use crate::render::renderable::Renderable;
 use crate::resume_picker::ResumeSelection;
 use crate::tui;
 use crate::tui::TuiEvent;
-use crate::update_action::UpdateAction;
+use crate::update_action::UpdatePlan;
+#[cfg(not(debug_assertions))]
+use crate::updates;
 use codex_ansi_escape::ansi_escape_line;
 use codex_common::model_presets::ModelUpgrade;
 use codex_common::model_presets::all_model_presets;
@@ -56,7 +58,7 @@ use crate::history_cell::UpdateAvailableHistoryCell;
 pub struct AppExitInfo {
     pub token_usage: TokenUsage,
     pub conversation_id: Option<ConversationId>,
-    pub update_action: Option<UpdateAction>,
+    pub update_plan: Option<UpdatePlan>,
 }
 
 fn session_summary(
@@ -152,7 +154,7 @@ async fn handle_model_migration_prompt_if_needed(
                 return Some(AppExitInfo {
                     token_usage: TokenUsage::default(),
                     conversation_id: None,
-                    update_action: None,
+                    update_plan: None,
                 });
             }
         }
@@ -189,7 +191,7 @@ pub(crate) struct App {
     pub(crate) backtrack: crate::app_backtrack::BacktrackState,
     pub(crate) feedback: codex_feedback::CodexFeedback,
     /// Set when the user confirms an update; propagated on exit.
-    pub(crate) pending_update_action: Option<UpdateAction>,
+    pub(crate) pending_update_action: Option<UpdatePlan>,
 
     // One-shot suppression of the next world-writable scan after user confirmation.
     skip_world_writable_scan_once: bool,
@@ -318,11 +320,13 @@ impl App {
 
         #[cfg(not(debug_assertions))]
         if let Some(latest_version) = upgrade_version {
+            let update_plan = crate::update_action::get_update_action()
+                .map(|action| updates::build_update_plan(latest_version.clone(), action));
             app.handle_event(
                 tui,
                 AppEvent::InsertHistoryCell(Box::new(UpdateAvailableHistoryCell::new(
                     latest_version,
-                    crate::update_action::get_update_action(),
+                    update_plan,
                 ))),
             )
             .await?;
@@ -345,7 +349,7 @@ impl App {
         Ok(AppExitInfo {
             token_usage: app.token_usage(),
             conversation_id: app.chat_widget.conversation_id(),
-            update_action: app.pending_update_action,
+            update_plan: app.pending_update_action,
         })
     }
 

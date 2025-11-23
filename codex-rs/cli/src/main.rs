@@ -22,6 +22,7 @@ use codex_responses_api_proxy::Args as ResponsesApiProxyArgs;
 use codex_tui::AppExitInfo;
 use codex_tui::Cli as TuiCli;
 use codex_tui::update_action::UpdateAction;
+use codex_tui::update_action::UpdatePlan;
 use owo_colors::OwoColorize;
 use std::path::PathBuf;
 use supports_color::Stream;
@@ -277,50 +278,163 @@ fn format_exit_messages(exit_info: AppExitInfo, color_enabled: bool) -> Vec<Stri
 
 /// Handle the app exit and print the results. Optionally run the update action.
 fn handle_app_exit(exit_info: AppExitInfo) -> anyhow::Result<()> {
-    let update_action = exit_info.update_action;
+    let update_plan = exit_info.update_plan;
     let color_enabled = supports_color::on(Stream::Stdout).is_some();
     for line in format_exit_messages(exit_info, color_enabled) {
         println!("{line}");
     }
-    if let Some(action) = update_action {
-        run_update_action(action)?;
+    if let Some(plan) = update_plan {
+        run_update_plan(plan)?;
     }
     Ok(())
 }
 
 /// Run the update action and print the result.
-fn run_update_action(action: UpdateAction) -> anyhow::Result<()> {
+fn run_update_plan(plan: UpdatePlan) -> anyhow::Result<()> {
     println!();
-    let cmd_str = action.command_str();
-    println!("Updating Codex via `{cmd_str}`...");
-
-    let status = {
-        #[cfg(windows)]
-        {
-            // On Windows, run via cmd.exe so .CMD/.BAT are correctly resolved (PATHEXT semantics).
-            std::process::Command::new("cmd")
-                .args(["/C", &cmd_str])
-                .status()?
+    let cmd_str = plan.action.command_str();
+    if plan.action == UpdateAction::BrewUpgrade {
+        println!("Updating Codex via Homebrew...");
+        run_brew_update(plan)?;
+    } else {
+        println!("Updating Codex via `{cmd_str}`...");
+        let status = {
+            #[cfg(windows)]
+            {
+                // On Windows, run via cmd.exe so .CMD/.BAT are correctly resolved (PATHEXT semantics).
+                std::process::Command::new("cmd")
+                    .args(["/C", &cmd_str])
+                    .status()?
+            }
+            #[cfg(not(windows))]
+            {
+                let (cmd, args) = plan.action.command_args();
+                let command_path = crate::wsl_paths::normalize_for_wsl(cmd);
+                let normalized_args: Vec<String> = args
+                    .iter()
+                    .map(crate::wsl_paths::normalize_for_wsl)
+                    .collect();
+                std::process::Command::new(&command_path)
+                    .args(&normalized_args)
+                    .status()?
+            }
+        };
+        if !status.success() {
+            anyhow::bail!("`{cmd_str}` failed with status {status}");
         }
-        #[cfg(not(windows))]
-        {
-            let (cmd, args) = action.command_args();
-            let command_path = crate::wsl_paths::normalize_for_wsl(cmd);
-            let normalized_args: Vec<String> = args
-                .iter()
-                .map(crate::wsl_paths::normalize_for_wsl)
-                .collect();
-            std::process::Command::new(&command_path)
-                .args(&normalized_args)
-                .status()?
-        }
-    };
-    if !status.success() {
-        anyhow::bail!("`{cmd_str}` failed with status {status}");
     }
     println!();
     println!("🎉 Update ran successfully! Please restart Codex.");
     Ok(())
+}
+
+fn run_brew_update(plan: UpdatePlan) -> anyhow::Result<()> {
+    if plan.needs_tap_refresh {
+        run_brew_command(&["update"], "brew update")?;
+        if let Ok(tap_version) = tap_cask_version() {
+            if tap_version.trim() != plan.target_version.trim() {
+                anyhow::bail!(
+                    "Homebrew tap did not update Codex to {} (tap has {}). Check your brew setup.",
+                    plan.target_version,
+                    tap_version
+                );
+            }
+        }
+    }
+
+    run_brew_command(&["upgrade", "--cask", "codex"], "brew upgrade --cask codex")?;
+
+    let installed_version = codex_installed_version().unwrap_or_default();
+    if installed_version.trim() != plan.target_version.trim() {
+        anyhow::bail!(
+            "Homebrew did not install the expected version (expected {}, got {}). See brew output for details.",
+            plan.target_version,
+            if installed_version.is_empty() {
+                "unknown".to_string()
+            } else {
+                installed_version
+            }
+        );
+    }
+
+    Ok(())
+}
+
+fn run_brew_command(args: &[&str], label: &str) -> anyhow::Result<()> {
+    let status = std::process::Command::new("brew")
+        .args(args)
+        .env("HOMEBREW_NO_INSTALL_FROM_API", "1")
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("{label} failed with status {status}");
+    }
+    Ok(())
+}
+
+fn tap_cask_version() -> anyhow::Result<String> {
+    let tap_root = brew_tap_root()?;
+    let cask_path = tap_root.join("Casks").join("c").join("codex.rb");
+    let contents = std::fs::read_to_string(&cask_path)?;
+    extract_version_from_cask(&contents)
+}
+
+fn brew_tap_root() -> anyhow::Result<PathBuf> {
+    let output = std::process::Command::new("brew")
+        .args(["--repository", "homebrew/cask"])
+        .output()?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "brew --repository homebrew/cask failed with status {}",
+            output.status
+        );
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let tap_root = stdout.trim();
+    if tap_root.is_empty() {
+        anyhow::bail!("brew --repository homebrew/cask returned empty path");
+    }
+    Ok(PathBuf::from(tap_root))
+}
+
+fn extract_version_from_cask(cask_contents: &str) -> anyhow::Result<String> {
+    cask_contents
+        .lines()
+        .find_map(|line| {
+            let line = line.trim();
+            line.strip_prefix("version \"")
+                .and_then(|rest| rest.strip_suffix('"'))
+                .map(ToString::to_string)
+        })
+        .ok_or_else(|| anyhow::anyhow!("Failed to find version in Homebrew cask file"))
+}
+
+fn codex_installed_version() -> anyhow::Result<String> {
+    let output = std::process::Command::new("codex")
+        .arg("--version")
+        .output()?;
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "codex --version failed with status {}",
+            output.status
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    parse_version_token(&stdout)
+        .ok_or_else(|| anyhow::anyhow!("Could not parse version from `codex --version` output"))
+}
+
+fn parse_version_token(text: &str) -> Option<String> {
+    text.split_whitespace()
+        .find(|token| parse_version_triplet(token).is_some())
+        .map(ToString::to_string)
+}
+
+fn parse_version_triplet(token: &str) -> Option<(i64, i64, i64)> {
+    let mut iter = token.trim().split('.');
+    let maj = iter.next()?.parse::<i64>().ok()?;
+    let min = iter.next()?.parse::<i64>().ok()?;
+    let pat = iter.next()?.parse::<i64>().ok()?;
+    Some((maj, min, pat))
 }
 
 #[derive(Debug, Default, Parser, Clone)]

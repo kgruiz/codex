@@ -367,12 +367,12 @@ async fn run_ratatui_app(
         if !skip_update_prompt {
             match update_prompt::run_update_prompt_if_needed(&mut tui, &initial_config).await? {
                 UpdatePromptOutcome::Continue => {}
-                UpdatePromptOutcome::RunUpdate(action) => {
+                UpdatePromptOutcome::RunUpdate(plan) => {
                     crate::tui::restore()?;
                     return Ok(AppExitInfo {
                         token_usage: codex_core::protocol::TokenUsage::default(),
                         conversation_id: None,
-                        update_action: Some(action),
+                        update_plan: Some(plan),
                     });
                 }
             }
@@ -411,7 +411,7 @@ async fn run_ratatui_app(
             return Ok(AppExitInfo {
                 token_usage: codex_core::protocol::TokenUsage::default(),
                 conversation_id: None,
-                update_action: None,
+                update_plan: None,
             });
         }
         // if the user acknowledged windows or made an explicit decision ato trust the directory, reload the config accordingly
@@ -446,7 +446,7 @@ async fn run_ratatui_app(
                 return Ok(AppExitInfo {
                     token_usage: codex_core::protocol::TokenUsage::default(),
                     conversation_id: None,
-                    update_action: None,
+                    update_plan: None,
                 });
             }
         }
@@ -483,7 +483,7 @@ async fn run_ratatui_app(
                 return Ok(AppExitInfo {
                     token_usage: codex_core::protocol::TokenUsage::default(),
                     conversation_id: None,
-                    update_action: None,
+                    update_plan: None,
                 });
             }
             other => other,

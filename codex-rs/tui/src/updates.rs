@@ -2,6 +2,7 @@
 
 use crate::update_action;
 use crate::update_action::UpdateAction;
+use crate::update_action::UpdatePlan;
 use chrono::DateTime;
 use chrono::Duration;
 use chrono::Utc;
@@ -11,6 +12,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
 
 use crate::version::CODEX_CLI_VERSION;
 
@@ -63,6 +65,54 @@ struct ReleaseInfo {
 
 fn version_filepath(config: &Config) -> PathBuf {
     config.codex_home.join(VERSION_FILENAME)
+}
+
+pub(crate) fn build_update_plan(latest_version: String, action: UpdateAction) -> UpdatePlan {
+    let needs_tap_refresh = if action == UpdateAction::BrewUpgrade {
+        needs_brew_tap_refresh(latest_version.as_str())
+    } else {
+        false
+    };
+
+    UpdatePlan {
+        action,
+        target_version: latest_version,
+        needs_tap_refresh,
+    }
+}
+
+fn needs_brew_tap_refresh(target_version: &str) -> bool {
+    match local_cask_version_from_tap() {
+        Ok(local_version) => local_version.trim() != target_version.trim(),
+        Err(_) => true,
+    }
+}
+
+fn local_cask_version_from_tap() -> anyhow::Result<String> {
+    let tap_root = brew_tap_root()?;
+    let cask_path = tap_root.join("Casks").join("c").join("codex.rb");
+    let contents = std::fs::read_to_string(&cask_path)?;
+    extract_version_from_cask(&contents)
+}
+
+fn brew_tap_root() -> anyhow::Result<PathBuf> {
+    let output = Command::new("brew")
+        .args(["--repository", "homebrew/cask"])
+        .output()?;
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "brew --repository homebrew/cask failed with status {}",
+            output.status
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let tap_root = stdout.trim();
+    if tap_root.is_empty() {
+        return Err(anyhow::anyhow!(
+            "brew --repository homebrew/cask returned empty path"
+        ));
+    }
+    Ok(PathBuf::from(tap_root))
 }
 
 fn read_version_info(version_file: &Path) -> anyhow::Result<VersionInfo> {

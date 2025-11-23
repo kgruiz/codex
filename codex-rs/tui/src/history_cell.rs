@@ -17,6 +17,7 @@ use crate::text_formatting::format_and_truncate_tool_result;
 use crate::text_formatting::truncate_text;
 use crate::ui_consts::LIVE_PREFIX_COLS;
 use crate::update_action::UpdateAction;
+use crate::update_action::UpdatePlan;
 use crate::version::CODEX_CLI_VERSION;
 use crate::wrapping::RtOptions;
 use crate::wrapping::word_wrap_line;
@@ -284,15 +285,15 @@ impl HistoryCell for PlainHistoryCell {
 #[derive(Debug)]
 pub(crate) struct UpdateAvailableHistoryCell {
     latest_version: String,
-    update_action: Option<UpdateAction>,
+    update_plan: Option<UpdatePlan>,
 }
 
 #[cfg_attr(debug_assertions, allow(dead_code))]
 impl UpdateAvailableHistoryCell {
-    pub(crate) fn new(latest_version: String, update_action: Option<UpdateAction>) -> Self {
+    pub(crate) fn new(latest_version: String, update_plan: Option<UpdatePlan>) -> Self {
         Self {
             latest_version,
-            update_action,
+            update_plan,
         }
     }
 }
@@ -301,8 +302,22 @@ impl HistoryCell for UpdateAvailableHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         use ratatui_macros::line;
         use ratatui_macros::text;
-        let update_instruction = if let Some(update_action) = self.update_action {
-            line!["Run ", update_action.command_str().cyan(), " to update."]
+        let update_instruction = if let Some(update_plan) = &self.update_plan {
+            if update_plan.action == UpdateAction::BrewUpgrade && update_plan.needs_tap_refresh {
+                line![
+                    "Run ",
+                    "brew update".cyan(),
+                    ", then ",
+                    "brew upgrade --cask codex".cyan(),
+                    " to update."
+                ]
+            } else {
+                line![
+                    "Run ",
+                    update_plan.action.command_str().cyan(),
+                    " to update."
+                ]
+            }
         } else {
             line![
                 "See ",

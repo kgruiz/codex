@@ -11,6 +11,7 @@ use crate::tui::FrameRequester;
 use crate::tui::Tui;
 use crate::tui::TuiEvent;
 use crate::update_action::UpdateAction;
+use crate::update_action::UpdatePlan;
 use crate::updates;
 use codex_core::config::Config;
 use color_eyre::Result;
@@ -29,7 +30,7 @@ use tokio_stream::StreamExt;
 
 pub(crate) enum UpdatePromptOutcome {
     Continue,
-    RunUpdate(UpdateAction),
+    RunUpdate(UpdatePlan),
 }
 
 pub(crate) async fn run_update_prompt_if_needed(
@@ -42,9 +43,13 @@ pub(crate) async fn run_update_prompt_if_needed(
     let Some(update_action) = crate::update_action::get_update_action() else {
         return Ok(UpdatePromptOutcome::Continue);
     };
+    let update_plan = updates::build_update_plan(latest_version.clone(), update_action);
 
-    let mut screen =
-        UpdatePromptScreen::new(tui.frame_requester(), latest_version.clone(), update_action);
+    let mut screen = UpdatePromptScreen::new(
+        tui.frame_requester(),
+        latest_version.clone(),
+        update_plan.clone(),
+    );
     tui.draw(u16::MAX, |frame| {
         frame.render_widget_ref(&screen, frame.area());
     })?;
@@ -71,7 +76,7 @@ pub(crate) async fn run_update_prompt_if_needed(
     match screen.selection() {
         Some(UpdateSelection::UpdateNow) => {
             tui.terminal.clear()?;
-            Ok(UpdatePromptOutcome::RunUpdate(update_action))
+            Ok(UpdatePromptOutcome::RunUpdate(update_plan))
         }
         Some(UpdateSelection::NotNow) | None => Ok(UpdatePromptOutcome::Continue),
         Some(UpdateSelection::DontRemind) => {
@@ -94,22 +99,18 @@ struct UpdatePromptScreen {
     request_frame: FrameRequester,
     latest_version: String,
     current_version: String,
-    update_action: UpdateAction,
+    update_plan: UpdatePlan,
     highlighted: UpdateSelection,
     selection: Option<UpdateSelection>,
 }
 
 impl UpdatePromptScreen {
-    fn new(
-        request_frame: FrameRequester,
-        latest_version: String,
-        update_action: UpdateAction,
-    ) -> Self {
+    fn new(request_frame: FrameRequester, latest_version: String, update_plan: UpdatePlan) -> Self {
         Self {
             request_frame,
             latest_version,
             current_version: env!("CARGO_PKG_VERSION").to_string(),
-            update_action,
+            update_plan,
             highlighted: UpdateSelection::UpdateNow,
             selection: None,
         }
@@ -186,7 +187,13 @@ impl WidgetRef for &UpdatePromptScreen {
         Clear.render(area, buf);
         let mut column = ColumnRenderable::new();
 
-        let update_command = self.update_action.command_str();
+        let update_command = if self.update_plan.action == UpdateAction::BrewUpgrade
+            && self.update_plan.needs_tap_refresh
+        {
+            "brew update` then `brew upgrade --cask codex".to_string()
+        } else {
+            self.update_plan.action.command_str()
+        };
 
         column.push("");
         column.push(Line::from(vec![
@@ -250,11 +257,12 @@ mod tests {
     use ratatui::Terminal;
 
     fn new_prompt() -> UpdatePromptScreen {
-        UpdatePromptScreen::new(
-            FrameRequester::test_dummy(),
-            "9.9.9".into(),
-            UpdateAction::NpmGlobalLatest,
-        )
+        let update_plan = UpdatePlan {
+            action: UpdateAction::NpmGlobalLatest,
+            target_version: "9.9.9".into(),
+            needs_tap_refresh: false,
+        };
+        UpdatePromptScreen::new(FrameRequester::test_dummy(), "9.9.9".into(), update_plan)
     }
 
     #[test]
