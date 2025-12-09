@@ -337,9 +337,15 @@ fn run_update_action(action: UpdateAction) -> anyhow::Result<()> {
                 .iter()
                 .map(crate::wsl_paths::normalize_for_wsl)
                 .collect();
-            std::process::Command::new(&command_path)
-                .args(&normalized_args)
-                .status()?
+            let mut command = std::process::Command::new(&command_path);
+            command.args(&normalized_args);
+
+            // Use tap metadata instead of API cache to avoid stale cask versions.
+            if matches!(action, UpdateAction::BrewUpgrade) {
+                command.env("HOMEBREW_NO_INSTALL_FROM_API", "1");
+            }
+
+            command.status()?
         }
     };
     if !status.success() {
