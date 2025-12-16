@@ -38,18 +38,20 @@ clippy:
     cargo clippy --all-features --tests "$@"
 
 # Clean Rust workspace in codex-rs/
-alias cl := clean
 clean:
     cargo clean
+
+alias cl := clean
 
 install:
     rustup show active-toolchain
     cargo fetch
 
 # Install dev `codex` into ~/.cargo/bin (overwrites prior dev install).
-alias id := install-dev
 install-dev:
     cargo install --path cli --bin codex --locked --force
+
+alias id := install-dev
 
 # Run `cargo nextest` since it's faster than `cargo test`, though including
 # --no-fail-fast is important to ensure all tests are run.
