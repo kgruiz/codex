@@ -11,3 +11,4 @@ Add new items below as you think of them.
 - [ ] Rename chats
 - [ ] Show tokens/sec (and other live stats like latency, cost, tool time)
 - [ ] Support handing off long prompts to external editor via `Ctrl+G`
+- [ ] Edit last message without branching
