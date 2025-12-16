@@ -12,3 +12,6 @@ Add new items below as you think of them.
 - [ ] Show tokens/sec (and other live stats like latency, cost, tool time)
 - [ ] Support handing off long prompts to external editor via `Ctrl+G`
 - [ ] Edit last message without branching
+- [ ] Paste images from clipboard via `Cmd+V` when clipboard contains an image (toggleable)
+- [ ] Use `Shift+Enter` for newline instead of `Option+Enter` (toggleable)
+- [ ] Configure any shortcuts (keymap/config file)
