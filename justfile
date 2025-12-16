@@ -41,6 +41,10 @@ install:
     rustup show active-toolchain
     cargo fetch
 
+# Install dev `codex` into ~/.cargo/bin (overwrites prior dev install).
+install-dev:
+    cargo install --path cli --bin codex --locked --force
+
 # Run `cargo nextest` since it's faster than `cargo test`, though including
 # --no-fail-fast is important to ensure all tests are run.
 #
