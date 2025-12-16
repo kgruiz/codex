@@ -601,7 +601,8 @@ impl ChatWidget {
         self.request_redraw();
 
         // If there is a queued user message, send exactly one now to begin the next turn.
-        self.queued_auto_send_pending = !self.queued_user_messages.is_empty();
+        self.queued_auto_send_pending =
+            !self.queued_user_messages.is_empty() && self.bottom_pane.composer_is_empty();
         self.maybe_send_next_queued_input();
         // Emit a notification when the turn completes (suppressed if focused).
         self.notify(Notification::AgentTurnComplete {
@@ -734,6 +735,9 @@ impl ChatWidget {
         self.suppressed_exec_calls.clear();
         self.last_unified_wait = None;
         self.stream_controller = None;
+        // Any deferred events belong to the aborted turn; discard them so the UI doesn't wedge.
+        self.interrupts = InterruptManager::new();
+        self.queued_auto_send_pending = false;
         self.maybe_show_pending_rate_limit_prompt();
     }
     pub(crate) fn get_model_family(&self) -> ModelFamily {
@@ -746,7 +750,8 @@ impl ChatWidget {
         self.request_redraw();
 
         // After an error ends the turn, try sending the next queued input.
-        self.queued_auto_send_pending = !self.queued_user_messages.is_empty();
+        self.queued_auto_send_pending =
+            !self.queued_user_messages.is_empty() && self.bottom_pane.composer_is_empty();
         self.maybe_send_next_queued_input();
     }
 
@@ -819,7 +824,8 @@ impl ChatWidget {
 
         self.mcp_startup_status = None;
         self.bottom_pane.set_task_running(false);
-        self.queued_auto_send_pending = !self.queued_user_messages.is_empty();
+        self.queued_auto_send_pending =
+            !self.queued_user_messages.is_empty() && self.bottom_pane.composer_is_empty();
         self.maybe_send_next_queued_input();
         self.request_redraw();
     }
@@ -1530,6 +1536,20 @@ impl ChatWidget {
                 && self.queued_edit_state.is_none() =>
             {
                 self.open_queue_popup();
+                return;
+            }
+            KeyEvent {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::ALT,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view()
+                && !self.bottom_pane.composer_popup_active()
+                && !self.bottom_pane.is_task_running()
+                && !self.queued_user_messages.is_empty()
+                && self.queued_edit_state.is_none() =>
+            {
+                self.send_next_queued_user_message();
                 return;
             }
             KeyEvent {
@@ -2940,6 +2960,27 @@ impl ChatWidget {
         }
         self.queued_auto_send_pending = false;
         // Update the list to reflect the remaining queued messages (if any).
+        self.refresh_queued_user_messages();
+    }
+
+    fn send_next_queued_user_message(&mut self) {
+        if self.stream_paused {
+            return;
+        }
+        if self.bottom_pane.is_task_running() {
+            return;
+        }
+        if self.queued_edit_state.is_some() {
+            return;
+        }
+        if self.bottom_pane.has_active_view() || self.bottom_pane.composer_popup_active() {
+            return;
+        }
+
+        if let Some(queued) = self.queued_user_messages.pop_front() {
+            self.submit_queued_user_message(queued);
+        }
+
         self.refresh_queued_user_messages();
     }
 

@@ -6,7 +6,7 @@ Buffer {
     area: Rect { x: 0, y: 0, width: 40, height: 2 },
     content: [
         "  ↳ Hello, world!                       ",
-        "    ⌥ + ↑ edit · ctrl + o queue · /queue",
+        "    ⌥ + ↑ edit · ⌥ + enter next · /queue",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,

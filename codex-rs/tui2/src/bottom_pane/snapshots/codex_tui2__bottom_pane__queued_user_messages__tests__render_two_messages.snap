@@ -7,7 +7,7 @@ Buffer {
     content: [
         "  ↳ Hello, world!                       ",
         "  ↳ This is another message             ",
-        "    ⌥ + ↑ edit · ctrl + o queue · /queue",
+        "    ⌥ + ↑ edit · ⌥ + enter next · /queue",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,

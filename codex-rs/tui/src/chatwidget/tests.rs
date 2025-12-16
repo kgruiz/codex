@@ -1039,6 +1039,93 @@ fn alt_up_edits_most_recent_queued_message() {
     assert_eq!(chat.queued_edit_state.as_ref().unwrap().selected_id, 2);
 }
 
+#[test]
+fn alt_enter_sends_next_queued_message_when_idle() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(None);
+
+    chat.queued_user_messages.push_back(QueuedUserMessage {
+        id: 1,
+        text: "first queued".to_string(),
+        attachments: Vec::new(),
+        model_override: None,
+        effort_override: None,
+    });
+    chat.queued_user_messages.push_back(QueuedUserMessage {
+        id: 2,
+        text: "second queued".to_string(),
+        attachments: Vec::new(),
+        model_override: None,
+        effort_override: None,
+    });
+    chat.refresh_queued_user_messages();
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT));
+
+    assert_matches!(op_rx.try_recv(), Ok(Op::UserInput { .. }));
+    assert_eq!(chat.queued_user_messages.len(), 1);
+    assert_eq!(
+        chat.queued_user_messages.front().unwrap().text,
+        "second queued"
+    );
+
+    let _ = drain_insert_history(&mut rx);
+}
+
+#[test]
+fn task_complete_auto_sends_queued_message_when_composer_empty() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(None);
+
+    chat.queued_user_messages.push_back(QueuedUserMessage {
+        id: 1,
+        text: "queued submission".to_string(),
+        attachments: Vec::new(),
+        model_override: None,
+        effort_override: None,
+    });
+    chat.refresh_queued_user_messages();
+
+    chat.handle_codex_event(Event {
+        id: "t1".into(),
+        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: None,
+        }),
+    });
+
+    assert_matches!(op_rx.try_recv(), Ok(Op::UserInput { .. }));
+    assert!(chat.queued_user_messages.is_empty());
+
+    let _ = drain_insert_history(&mut rx);
+}
+
+#[test]
+fn task_complete_does_not_auto_send_queued_message_when_composer_has_text() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(None);
+
+    chat.bottom_pane
+        .set_composer_text("current draft".to_string());
+
+    chat.queued_user_messages.push_back(QueuedUserMessage {
+        id: 1,
+        text: "queued submission".to_string(),
+        attachments: Vec::new(),
+        model_override: None,
+        effort_override: None,
+    });
+    chat.refresh_queued_user_messages();
+
+    chat.handle_codex_event(Event {
+        id: "t1".into(),
+        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: None,
+        }),
+    });
+
+    assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
+    assert_eq!(chat.queued_user_messages.len(), 1);
+
+    let _ = drain_insert_history(&mut rx);
+}
+
 /// Pressing Up to recall the most recent history entry and immediately queuing
 /// it while a task is running should always enqueue the same text, even when it
 /// is queued repeatedly.
