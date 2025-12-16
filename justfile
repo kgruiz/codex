@@ -38,6 +38,7 @@ clippy:
     cargo clippy --all-features --tests "$@"
 
 # Clean Rust workspace in codex-rs/
+alias cl := clean
 clean:
     cargo clean
 
@@ -46,6 +47,7 @@ install:
     cargo fetch
 
 # Install dev `codex` into ~/.cargo/bin (overwrites prior dev install).
+alias id := install-dev
 install-dev:
     cargo install --path cli --bin codex --locked --force
 
