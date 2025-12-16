@@ -37,6 +37,9 @@ fix *args:
 clippy:
     cargo clippy --all-features --tests "$@"
 
+clean:
+    cargo clean
+
 install:
     rustup show active-toolchain
     cargo fetch
