@@ -3295,6 +3295,7 @@ impl ChatWidget {
                 model: model_for_action.clone(),
                 effort: effort_for_action,
             });
+            tx.send(AppEvent::DismissActiveBottomPaneView);
             tracing::info!(
                 "Selected model: {}, Selected effort: {}",
                 model_for_action,
@@ -3474,6 +3475,11 @@ impl ChatWidget {
                 .map(|e| e.to_string())
                 .unwrap_or_else(|| "default".to_string())
         );
+    }
+
+    pub(crate) fn dismiss_active_bottom_pane_view(&mut self) {
+        self.bottom_pane.dismiss_active_view();
+        self.request_redraw();
     }
 
     /// Open a popup to choose the approvals mode (ask for approval policy + sandbox policy).

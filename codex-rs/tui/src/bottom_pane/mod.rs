@@ -427,6 +427,14 @@ impl BottomPane {
         self.push_view(Box::new(view));
     }
 
+    pub(crate) fn dismiss_active_view(&mut self) {
+        if self.view_stack.pop().is_some() && self.view_stack.is_empty() {
+            self.on_active_view_complete();
+        }
+
+        self.request_redraw();
+    }
+
     /// Update the queued messages preview shown above the composer.
     pub(crate) fn set_queued_user_messages(&mut self, queued: Vec<String>) {
         self.queued_user_messages.messages = queued;
