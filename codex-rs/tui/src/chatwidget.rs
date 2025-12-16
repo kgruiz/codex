@@ -1539,6 +1539,32 @@ impl ChatWidget {
                 return;
             }
             KeyEvent {
+                code: KeyCode::Char('m' | 'M'),
+                modifiers: KeyModifiers::ALT,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view()
+                && !self.bottom_pane.composer_popup_active()
+                && !self.bottom_pane.is_task_running()
+                && self.queued_edit_state.is_none() =>
+            {
+                self.open_model_popup();
+                return;
+            }
+            KeyEvent {
+                code: KeyCode::Char('t' | 'T'),
+                modifiers: KeyModifiers::ALT,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view()
+                && !self.bottom_pane.composer_popup_active()
+                && !self.bottom_pane.is_task_running()
+                && self.queued_edit_state.is_none() =>
+            {
+                self.open_thinking_popup();
+                return;
+            }
+            KeyEvent {
                 code: KeyCode::Enter,
                 modifiers: KeyModifiers::ALT,
                 kind: KeyEventKind::Press,
@@ -3269,6 +3295,75 @@ impl ChatWidget {
             subtitle: Some("Pick a quick auto mode or browse all models.".to_string()),
             footer_hint: Some(standard_popup_hint_line()),
             items,
+            ..Default::default()
+        });
+    }
+
+    fn open_thinking_popup(&mut self) {
+        let model_slug = self.model_family.get_model_slug().to_string();
+        let current_effort = self.config.model_reasoning_effort;
+        let presets = match self.models_manager.try_list_models() {
+            Ok(presets) => presets,
+            Err(_) => {
+                self.add_info_message(
+                    "Models are being updated; please try again in a moment.".to_string(),
+                    None,
+                );
+                return;
+            }
+        };
+
+        let Some(preset) = presets
+            .into_iter()
+            .find(|preset| preset.model == model_slug)
+        else {
+            self.add_info_message(
+                format!("Model '{model_slug}' is not available right now."),
+                None,
+            );
+            return;
+        };
+
+        let preset_display_name = preset.display_name.clone();
+        let default_effort = preset.default_reasoning_effort;
+        let mut items: Vec<SelectionItem> = Vec::new();
+
+        items.push(SelectionItem {
+            name: format!("Default ({})", Self::reasoning_effort_label(default_effort)),
+            description: Some("Use the model's default reasoning level.".to_string()),
+            is_current: current_effort.is_none(),
+            actions: Self::model_selection_actions(model_slug.clone(), None),
+            dismiss_on_select: true,
+            ..Default::default()
+        });
+
+        for option in preset.supported_reasoning_efforts {
+            let effort = option.effort;
+            let mut label = Self::reasoning_effort_label(effort).to_string();
+            if effort == default_effort {
+                label.push_str(" (default)");
+            }
+
+            let description = (!option.description.is_empty()).then_some(option.description);
+            let actions = Self::model_selection_actions(model_slug.clone(), Some(effort));
+            items.push(SelectionItem {
+                name: label,
+                description,
+                is_current: current_effort == Some(effort),
+                actions,
+                dismiss_on_select: true,
+                ..Default::default()
+            });
+        }
+
+        let initial_selected_idx = items.iter().position(|item| item.is_current).or(Some(0));
+
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some("Select Thinking".to_string()),
+            subtitle: Some(format!("Model: {preset_display_name}")),
+            footer_hint: Some(standard_popup_hint_line()),
+            items,
+            initial_selected_idx,
             ..Default::default()
         });
     }

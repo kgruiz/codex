@@ -3,10 +3,10 @@
 Add new items below as you think of them.
 
 1. [x] Queued message editing + queue popup + per-item model/thinking + pause behavior (see `plan.md`)
-2. [ ] Add a keybind (e.g. `Tab`) to change thinking level quickly (https://github.com/openai/codex/issues/2920)
+2. [x] Add a keybind (e.g. `Tab`) to change thinking level quickly (https://github.com/openai/codex/issues/2920)
     - Allow changing thinking level after typing a prompt without cutting/pasting or leaving the editor.
     - Consider direct shortcuts like `Cmd+1/2/3…` for tiers (or a picker like `Cmd+M`).
-3. [ ] Add a keybind (e.g. `Tab`) to change model quickly (https://github.com/openai/codex/issues/2920)
+3. [x] Add a keybind (e.g. `Tab`) to change model quickly (https://github.com/openai/codex/issues/2920)
     - Make model switching possible mid-edit, even after writing a long prompt.
     - Keep the UX comparable to ChatGPT (change any time) rather than requiring slash commands.
 4. [ ] Export chats as Markdown
