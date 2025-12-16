@@ -37,6 +37,7 @@ fix *args:
 clippy:
     cargo clippy --all-features --tests "$@"
 
+# Clean Rust workspace in codex-rs/
 clean:
     cargo clean
 
