@@ -79,9 +79,6 @@ pub(crate) enum AppEvent {
         models: Vec<ModelPreset>,
     },
 
-    /// Dismiss the currently active bottom pane view, if any.
-    DismissActiveBottomPaneView,
-
     /// Open the confirmation prompt before enabling full access mode.
     OpenFullAccessConfirmation {
         preset: ApprovalPreset,

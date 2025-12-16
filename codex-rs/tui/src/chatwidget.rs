@@ -95,6 +95,7 @@ use crate::bottom_pane::QueuePopupItem;
 use crate::bottom_pane::SelectionAction;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
+use crate::bottom_pane::ViewCompletionBehavior;
 use crate::bottom_pane::custom_prompt_view::CustomPromptView;
 use crate::bottom_pane::popup_consts::standard_popup_hint_line;
 use crate::clipboard_paste::paste_image_to_temp_png;
@@ -1919,6 +1920,7 @@ impl ChatWidget {
             title: Some("Select Model for Queued Message".to_string()),
             subtitle: Some("Applies only when this message is sent.".to_string()),
             footer_hint: Some(standard_popup_hint_line()),
+            completion_behavior: ViewCompletionBehavior::Pop,
             items,
             ..Default::default()
         });
@@ -2031,6 +2033,7 @@ impl ChatWidget {
             title: Some("Select Thinking for Queued Message".to_string()),
             subtitle: Some(format!("Model: {model_slug}")),
             footer_hint: Some(standard_popup_hint_line()),
+            completion_behavior: ViewCompletionBehavior::Pop,
             items,
             ..Default::default()
         });
@@ -3295,7 +3298,6 @@ impl ChatWidget {
                 model: model_for_action.clone(),
                 effort: effort_for_action,
             });
-            tx.send(AppEvent::DismissActiveBottomPaneView);
             tracing::info!(
                 "Selected model: {}, Selected effort: {}",
                 model_for_action,
@@ -3475,11 +3477,6 @@ impl ChatWidget {
                 .map(|e| e.to_string())
                 .unwrap_or_else(|| "default".to_string())
         );
-    }
-
-    pub(crate) fn dismiss_active_bottom_pane_view(&mut self) {
-        self.bottom_pane.dismiss_active_view();
-        self.request_redraw();
     }
 
     /// Open a popup to choose the approvals mode (ask for approval policy + sandbox policy).

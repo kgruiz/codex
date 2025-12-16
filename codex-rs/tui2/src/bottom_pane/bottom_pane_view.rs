@@ -4,11 +4,22 @@ use crossterm::event::KeyEvent;
 
 use super::CancellationEvent;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ViewCompletionBehavior {
+    Pop,
+    #[default]
+    ClearStack,
+}
+
 /// Trait implemented by every view that can be shown in the bottom pane.
 pub(crate) trait BottomPaneView: Renderable {
     /// Handle a key event while the view is active. A redraw is always
     /// scheduled after this call.
     fn handle_key_event(&mut self, _key_event: KeyEvent) {}
+
+    fn completion_behavior(&self) -> ViewCompletionBehavior {
+        ViewCompletionBehavior::default()
+    }
 
     /// Return `true` if the view has finished and should be removed.
     fn is_complete(&self) -> bool {

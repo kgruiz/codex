@@ -768,9 +768,6 @@ impl App {
             AppEvent::OpenAllModelsPopup { models } => {
                 self.chat_widget.open_all_models_popup(models);
             }
-            AppEvent::DismissActiveBottomPaneView => {
-                self.chat_widget.dismiss_active_bottom_pane_view();
-            }
             AppEvent::OpenFullAccessConfirmation { preset } => {
                 self.chat_widget.open_full_access_confirmation(preset);
             }

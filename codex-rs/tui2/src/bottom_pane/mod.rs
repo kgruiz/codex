@@ -8,6 +8,7 @@ use crate::render::renderable::Renderable;
 use crate::render::renderable::RenderableItem;
 use crate::tui::FrameRequester;
 use bottom_pane_view::BottomPaneView;
+pub(crate) use bottom_pane_view::ViewCompletionBehavior;
 use codex_core::features::Features;
 use codex_core::skills::model::SkillMetadata;
 use codex_file_search::FileMatch;
@@ -167,26 +168,41 @@ impl BottomPane {
         self.request_redraw();
     }
 
+    fn dismiss_completed_view(&mut self, behavior: ViewCompletionBehavior) {
+        match behavior {
+            ViewCompletionBehavior::Pop => {
+                self.view_stack.pop();
+            }
+            ViewCompletionBehavior::ClearStack => {
+                self.view_stack.clear();
+            }
+        }
+
+        if self.view_stack.is_empty() {
+            self.on_active_view_complete();
+        }
+    }
+
     /// Forward a key event to the active view or the composer.
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> InputResult {
         // If a modal/view is active, handle it here; otherwise forward to composer.
         if let Some(view) = self.view_stack.last_mut() {
+            let mut completion_behavior: Option<ViewCompletionBehavior> = None;
+
             if key_event.code == KeyCode::Esc
                 && matches!(view.on_ctrl_c(), CancellationEvent::Handled)
                 && view.is_complete()
             {
-                self.view_stack.pop();
-                if self.view_stack.is_empty() {
-                    self.on_active_view_complete();
-                }
+                completion_behavior = Some(ViewCompletionBehavior::Pop);
             } else {
                 view.handle_key_event(key_event);
                 if view.is_complete() {
-                    self.view_stack.pop();
-                    if self.view_stack.is_empty() {
-                        self.on_active_view_complete();
-                    }
+                    completion_behavior = Some(view.completion_behavior());
                 }
+            }
+
+            if let Some(behavior) = completion_behavior {
+                self.dismiss_completed_view(behavior);
             }
             self.request_redraw();
             InputResult::None
@@ -241,13 +257,11 @@ impl BottomPane {
     pub fn handle_paste(&mut self, pasted: String) {
         if let Some(view) = self.view_stack.last_mut() {
             let needs_redraw = view.handle_paste(pasted);
-            if view.is_complete() {
-                self.view_stack.pop();
-                if self.view_stack.is_empty() {
-                    self.on_active_view_complete();
-                }
+            let completion_behavior = view.is_complete().then(|| view.completion_behavior());
+            if let Some(behavior) = completion_behavior {
+                self.dismiss_completed_view(behavior);
             }
-            if needs_redraw {
+            if needs_redraw || completion_behavior.is_some() {
                 self.request_redraw();
             }
         } else {
@@ -436,14 +450,6 @@ impl BottomPane {
     pub(crate) fn show_selection_view(&mut self, params: list_selection_view::SelectionViewParams) {
         let view = list_selection_view::ListSelectionView::new(params, self.app_event_tx.clone());
         self.push_view(Box::new(view));
-    }
-
-    pub(crate) fn dismiss_active_view(&mut self) {
-        if self.view_stack.pop().is_some() && self.view_stack.is_empty() {
-            self.on_active_view_complete();
-        }
-
-        self.request_redraw();
     }
 
     /// Update the queued messages preview shown above the composer.

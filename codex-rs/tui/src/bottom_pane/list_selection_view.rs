@@ -23,6 +23,7 @@ use crate::style::user_message_style;
 
 use super::CancellationEvent;
 use super::bottom_pane_view::BottomPaneView;
+use super::bottom_pane_view::ViewCompletionBehavior;
 use super::popup_consts::MAX_POPUP_ROWS;
 use super::scroll_state::ScrollState;
 use super::selection_popup_common::GenericDisplayRow;
@@ -55,6 +56,7 @@ pub(crate) struct SelectionViewParams {
     pub search_placeholder: Option<String>,
     pub header: Box<dyn Renderable>,
     pub initial_selected_idx: Option<usize>,
+    pub completion_behavior: ViewCompletionBehavior,
 }
 
 impl Default for SelectionViewParams {
@@ -68,6 +70,7 @@ impl Default for SelectionViewParams {
             search_placeholder: None,
             header: Box::new(()),
             initial_selected_idx: None,
+            completion_behavior: ViewCompletionBehavior::default(),
         }
     }
 }
@@ -85,6 +88,7 @@ pub(crate) struct ListSelectionView {
     last_selected_actual_idx: Option<usize>,
     header: Box<dyn Renderable>,
     initial_selected_idx: Option<usize>,
+    completion_behavior: ViewCompletionBehavior,
 }
 
 impl ListSelectionView {
@@ -116,6 +120,7 @@ impl ListSelectionView {
             last_selected_actual_idx: None,
             header,
             initial_selected_idx: params.initial_selected_idx,
+            completion_behavior: params.completion_behavior,
         };
         s.apply_filter();
         s
@@ -270,6 +275,10 @@ impl ListSelectionView {
 }
 
 impl BottomPaneView for ListSelectionView {
+    fn completion_behavior(&self) -> ViewCompletionBehavior {
+        self.completion_behavior
+    }
+
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event {
             // Some terminals (or configurations) send Control key chords as

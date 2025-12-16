@@ -2031,7 +2031,7 @@ fn reasoning_popup_escape_returns_to_model_popup() {
 
 #[test]
 fn reasoning_selection_dismisses_model_popup() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1"));
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1"));
     chat.open_model_popup();
 
     let preset = get_available_model(&chat, "gpt-5.1-codex");
@@ -2039,15 +2039,6 @@ fn reasoning_selection_dismisses_model_popup() {
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-    let mut saw_dismiss = false;
-    while let Ok(ev) = rx.try_recv() {
-        if matches!(ev, AppEvent::DismissActiveBottomPaneView) {
-            saw_dismiss = true;
-            chat.dismiss_active_bottom_pane_view();
-        }
-    }
-
-    assert!(saw_dismiss, "expected dismissal event to be sent");
     assert!(
         !chat.bottom_pane.has_active_view(),
         "expected model popup to be dismissed after selecting reasoning level"
