@@ -6,9 +6,10 @@ help:
     just -l
 
 # `codex`
-alias c := codex
 codex *args:
     cargo run --bin codex -- "$@"
+
+alias c := codex
 
 # `codex exec`
 exec *args:
@@ -31,9 +32,11 @@ app-server-test-client *args:
 fmt:
     cargo fmt -- --config imports_granularity=Item
 
+# Fix lint issues with clippy (writes changes).
 fix *args:
     cargo clippy --fix --all-features --tests --allow-dirty "$@"
 
+# Run clippy (all features + tests).
 clippy:
     cargo clippy --all-features --tests "$@"
 
@@ -43,6 +46,7 @@ clean:
 
 alias cl := clean
 
+# Fetch deps and show active toolchain.
 install:
     rustup show active-toolchain
     cargo fetch
