@@ -2653,6 +2653,19 @@ impl ChatWidget {
             .map(|_| self.config.model_reasoning_effort);
 
         if apply_model.is_some() || apply_effort.is_some() {
+            let session_model = self.model_family.get_model_slug();
+            let effective_model = apply_model.as_deref().unwrap_or(session_model);
+            let effective_effort = apply_effort.unwrap_or(self.config.model_reasoning_effort);
+
+            if effective_model != session_model
+                || effective_effort != self.config.model_reasoning_effort
+            {
+                self.add_info_message(
+                    self.queued_override_info_message(effective_model, effective_effort),
+                    None,
+                );
+            }
+
             self.submit_op(Op::OverrideTurnContext {
                 cwd: None,
                 approval_policy: None,
@@ -3609,6 +3622,32 @@ impl ChatWidget {
             ReasoningEffortConfig::High => "High",
             ReasoningEffortConfig::XHigh => "Extra high",
         }
+    }
+
+    fn queued_override_info_message(
+        &self,
+        model: &str,
+        reasoning_effort: Option<ReasoningEffortConfig>,
+    ) -> String {
+        let mut message = format!("Model changed to {model}");
+
+        if !model.starts_with("codex-auto-") {
+            let label = match reasoning_effort {
+                Some(ReasoningEffortConfig::Minimal) => "minimal",
+                Some(ReasoningEffortConfig::Low) => "low",
+                Some(ReasoningEffortConfig::Medium) => "medium",
+                Some(ReasoningEffortConfig::High) => "high",
+                Some(ReasoningEffortConfig::XHigh) => "xhigh",
+                None | Some(ReasoningEffortConfig::None) => "default",
+            };
+
+            message.push(' ');
+            message.push_str(label);
+        }
+
+        message.push_str(" (queued message)");
+
+        message
     }
 
     fn apply_model_and_effort(&self, model: String, effort: Option<ReasoningEffortConfig>) {
