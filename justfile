@@ -49,11 +49,19 @@ install:
     rustup show active-toolchain
     cargo fetch
 
-# Install dev `codex` into ~/.cargo/bin (overwrites prior dev install).
+# Install dev `codex` into ~/.cargo/bin (overwrites prior dev install) and
+# clean the Rust workspace afterwards to keep `target/` from growing.
 install-dev:
     cargo install --path cli --bin codex --locked --force
+    cargo clean
 
 alias id := install-dev
+
+# Install dev `codex` into ~/.cargo/bin without cleaning.
+install-dev-no-clean:
+    cargo install --path cli --bin codex --locked --force
+
+alias idnc := install-dev-no-clean
 
 # Run `cargo nextest` since it's faster than `cargo test`, though including
 # --no-fail-fast is important to ensure all tests are run.
