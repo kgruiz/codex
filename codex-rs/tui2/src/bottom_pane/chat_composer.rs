@@ -395,6 +395,7 @@ impl ChatComposer {
             .push(AttachedImage { placeholder, path });
     }
 
+    #[cfg(test)]
     pub fn take_recent_submission_images(&mut self) -> Vec<PathBuf> {
         let images = std::mem::take(&mut self.attached_images);
         images.into_iter().map(|img| img.path).collect()
@@ -1275,7 +1276,7 @@ impl ChatComposer {
                 if !text.is_empty() {
                     self.history.record_local_submission(&text);
                 }
-                // Do not clear attached_images here; ChatWidget drains them via take_recent_submission_images().
+                // Do not clear attached_images here; ChatWidget drains them via take_recent_submission_attachments().
                 (InputResult::Submitted(text), true)
             }
             input => self.handle_input_basic(input),
