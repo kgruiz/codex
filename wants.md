@@ -6,6 +6,8 @@ Add new items below as you think of them.
 - [ ] Add a keybind (e.g. `Tab`) to change thinking level quickly
 - [ ] Add a keybind (e.g. `Tab`) to change model quickly
 - [ ] Export chats as Markdown
+- [ ] Add current model name to the status line
 - [ ] Syntax highlighting (code blocks)
 - [ ] Rename chats
 - [ ] Show tokens/sec (and other live stats like latency, cost, tool time)
+- [ ] Support handing off long prompts to external editor via `Ctrl+G`
