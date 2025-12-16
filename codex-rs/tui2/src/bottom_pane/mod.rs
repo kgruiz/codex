@@ -49,6 +49,7 @@ pub(crate) enum CancellationEvent {
 }
 
 pub(crate) use chat_composer::ChatComposer;
+pub(crate) use chat_composer::ComposerAttachment;
 pub(crate) use chat_composer::InputResult;
 use codex_protocol::custom_prompts::CustomPrompt;
 
@@ -253,6 +254,16 @@ impl BottomPane {
     /// Replace the composer text with `text`.
     pub(crate) fn set_composer_text(&mut self, text: String) {
         self.composer.set_text_content(text);
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_composer_text_with_attachments(
+        &mut self,
+        text: String,
+        attachments: Vec<ComposerAttachment>,
+    ) {
+        self.composer
+            .set_text_content_with_attachments(text, attachments);
         self.request_redraw();
     }
 
@@ -524,6 +535,10 @@ impl BottomPane {
 
     pub(crate) fn take_recent_submission_images(&mut self) -> Vec<PathBuf> {
         self.composer.take_recent_submission_images()
+    }
+
+    pub(crate) fn take_recent_submission_attachments(&mut self) -> Vec<ComposerAttachment> {
+        self.composer.take_recent_submission_attachments()
     }
 
     fn as_renderable(&'_ self) -> RenderableItem<'_> {

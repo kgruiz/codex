@@ -436,6 +436,7 @@ fn make_chatwidget_manual(
         frame_requester: FrameRequester::test_dummy(),
         show_welcome_banner: true,
         queued_user_messages: VecDeque::new(),
+        next_queued_user_message_id: 1,
         suppress_session_configured_redraw: false,
         pending_notification: None,
         is_review_mode: false,
@@ -994,10 +995,20 @@ fn alt_up_edits_most_recent_queued_message() {
     chat.bottom_pane.set_task_running(true);
 
     // Seed two queued messages.
-    chat.queued_user_messages
-        .push_back(UserMessage::from("first queued".to_string()));
-    chat.queued_user_messages
-        .push_back(UserMessage::from("second queued".to_string()));
+    chat.queued_user_messages.push_back(QueuedUserMessage {
+        id: 1,
+        text: "first queued".to_string(),
+        attachments: Vec::new(),
+        model_override: None,
+        effort_override: None,
+    });
+    chat.queued_user_messages.push_back(QueuedUserMessage {
+        id: 2,
+        text: "second queued".to_string(),
+        attachments: Vec::new(),
+        model_override: None,
+        effort_override: None,
+    });
     chat.refresh_queued_user_messages();
 
     // Press Alt+Up to edit the most recent (last) queued message.
@@ -2216,17 +2227,27 @@ fn approval_modal_patch_snapshot() {
 }
 
 #[test]
-fn interrupt_restores_queued_messages_into_composer() {
+fn interrupt_keeps_queued_messages_in_queue() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(None);
 
     // Simulate a running task to enable queuing of user inputs.
     chat.bottom_pane.set_task_running(true);
 
     // Queue two user messages while the task is running.
-    chat.queued_user_messages
-        .push_back(UserMessage::from("first queued".to_string()));
-    chat.queued_user_messages
-        .push_back(UserMessage::from("second queued".to_string()));
+    chat.queued_user_messages.push_back(QueuedUserMessage {
+        id: 1,
+        text: "first queued".to_string(),
+        attachments: Vec::new(),
+        model_override: None,
+        effort_override: None,
+    });
+    chat.queued_user_messages.push_back(QueuedUserMessage {
+        id: 2,
+        text: "second queued".to_string(),
+        attachments: Vec::new(),
+        model_override: None,
+        effort_override: None,
+    });
     chat.refresh_queued_user_messages();
 
     // Deliver a TurnAborted event with Interrupted reason (as if Esc was pressed).
@@ -2237,14 +2258,9 @@ fn interrupt_restores_queued_messages_into_composer() {
         }),
     });
 
-    // Composer should now contain the queued messages joined by newlines, in order.
-    assert_eq!(
-        chat.bottom_pane.composer_text(),
-        "first queued\nsecond queued"
-    );
-
-    // Queue should be cleared and no new user input should have been auto-submitted.
-    assert!(chat.queued_user_messages.is_empty());
+    // Composer should be unchanged; queued messages remain queued for later.
+    assert!(chat.bottom_pane.composer_text().is_empty());
+    assert_eq!(chat.queued_user_messages.len(), 2);
     assert!(
         op_rx.try_recv().is_err(),
         "unexpected outbound op after interrupt"
@@ -2255,17 +2271,27 @@ fn interrupt_restores_queued_messages_into_composer() {
 }
 
 #[test]
-fn interrupt_prepends_queued_messages_before_existing_composer_text() {
+fn interrupt_does_not_modify_existing_composer_text() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(None);
 
     chat.bottom_pane.set_task_running(true);
     chat.bottom_pane
         .set_composer_text("current draft".to_string());
 
-    chat.queued_user_messages
-        .push_back(UserMessage::from("first queued".to_string()));
-    chat.queued_user_messages
-        .push_back(UserMessage::from("second queued".to_string()));
+    chat.queued_user_messages.push_back(QueuedUserMessage {
+        id: 1,
+        text: "first queued".to_string(),
+        attachments: Vec::new(),
+        model_override: None,
+        effort_override: None,
+    });
+    chat.queued_user_messages.push_back(QueuedUserMessage {
+        id: 2,
+        text: "second queued".to_string(),
+        attachments: Vec::new(),
+        model_override: None,
+        effort_override: None,
+    });
     chat.refresh_queued_user_messages();
 
     chat.handle_codex_event(Event {
@@ -2275,11 +2301,8 @@ fn interrupt_prepends_queued_messages_before_existing_composer_text() {
         }),
     });
 
-    assert_eq!(
-        chat.bottom_pane.composer_text(),
-        "first queued\nsecond queued\ncurrent draft"
-    );
-    assert!(chat.queued_user_messages.is_empty());
+    assert_eq!(chat.bottom_pane.composer_text(), "current draft");
+    assert_eq!(chat.queued_user_messages.len(), 2);
     assert!(
         op_rx.try_recv().is_err(),
         "unexpected outbound op after interrupt"
@@ -3336,7 +3359,7 @@ fn chatwidget_tall() {
         }),
     });
     for i in 0..30 {
-        chat.queue_user_message(format!("Hello, world! {i}").into());
+        chat.queue_user_message(format!("Hello, world! {i}").into(), Vec::new());
     }
     let width: u16 = 80;
     let height: u16 = 24;

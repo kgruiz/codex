@@ -82,6 +82,30 @@ struct AttachedImage {
     path: PathBuf,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ComposerAttachment {
+    pub(crate) placeholder: String,
+    pub(crate) path: PathBuf,
+}
+
+impl From<AttachedImage> for ComposerAttachment {
+    fn from(value: AttachedImage) -> Self {
+        Self {
+            placeholder: value.placeholder,
+            path: value.path,
+        }
+    }
+}
+
+impl From<ComposerAttachment> for AttachedImage {
+    fn from(value: ComposerAttachment) -> Self {
+        Self {
+            placeholder: value.placeholder,
+            path: value.path,
+        }
+    }
+}
+
 enum PromptSelectionMode {
     Completion,
     Submit,
@@ -299,6 +323,25 @@ impl ChatComposer {
         self.sync_popups();
     }
 
+    pub(crate) fn set_text_content_with_attachments(
+        &mut self,
+        text: String,
+        attachments: Vec<ComposerAttachment>,
+    ) {
+        self.set_text_content(text.clone());
+
+        let mut filtered = Vec::new();
+        for attachment in attachments {
+            if text.contains(&attachment.placeholder) {
+                filtered.push(attachment);
+            }
+        }
+
+        self.attached_images = filtered.into_iter().map(Into::into).collect();
+        self.textarea.set_cursor(text.len());
+        self.sync_popups();
+    }
+
     pub(crate) fn clear_for_ctrl_c(&mut self) -> Option<String> {
         if self.is_empty() {
             return None;
@@ -332,6 +375,11 @@ impl ChatComposer {
     pub fn take_recent_submission_images(&mut self) -> Vec<PathBuf> {
         let images = std::mem::take(&mut self.attached_images);
         images.into_iter().map(|img| img.path).collect()
+    }
+
+    pub fn take_recent_submission_attachments(&mut self) -> Vec<ComposerAttachment> {
+        let images = std::mem::take(&mut self.attached_images);
+        images.into_iter().map(Into::into).collect()
     }
 
     pub(crate) fn flush_paste_burst_if_due(&mut self) -> bool {

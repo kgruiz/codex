@@ -88,6 +88,7 @@ use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
 use crate::bottom_pane::CancellationEvent;
+use crate::bottom_pane::ComposerAttachment;
 use crate::bottom_pane::InputResult;
 use crate::bottom_pane::SelectionAction;
 use crate::bottom_pane::SelectionItem;
@@ -319,7 +320,8 @@ pub(crate) struct ChatWidget {
     // immediate redraw on SessionConfigured to prevent a gratuitous UI flicker.
     suppress_session_configured_redraw: bool,
     // User messages queued while a turn is in progress
-    queued_user_messages: VecDeque<UserMessage>,
+    queued_user_messages: VecDeque<QueuedUserMessage>,
+    next_queued_user_message_id: u64,
     // Pending notification to show when unfocused on next Draw
     pending_notification: Option<Notification>,
     // Simple review mode flag; used to adjust layout and banners.
@@ -339,6 +341,14 @@ pub(crate) struct ChatWidget {
 struct UserMessage {
     text: String,
     image_paths: Vec<PathBuf>,
+}
+
+struct QueuedUserMessage {
+    id: u64,
+    text: String,
+    attachments: Vec<ComposerAttachment>,
+    model_override: Option<String>,
+    effort_override: Option<Option<ReasoningEffortConfig>>,
 }
 
 impl From<String> for UserMessage {
@@ -759,8 +769,7 @@ impl ChatWidget {
     }
 
     /// Handle a turn aborted due to user interrupt (Esc).
-    /// When there are queued user messages, restore them into the composer
-    /// separated by newlines rather than auto‑submitting the next one.
+    /// Keep any queued messages in the queue for later.
     fn on_interrupted_turn(&mut self, reason: TurnAbortReason) {
         // Finalize, log a gentle prompt, and clear running state.
         self.finalize_turn();
@@ -769,28 +778,6 @@ impl ChatWidget {
             self.add_to_history(history_cell::new_error_event(
                 "Conversation interrupted - tell the model what to do differently. Something went wrong? Hit `/feedback` to report the issue.".to_owned(),
             ));
-        }
-
-        // If any messages were queued during the task, restore them into the composer.
-        if !self.queued_user_messages.is_empty() {
-            let queued_text = self
-                .queued_user_messages
-                .iter()
-                .map(|m| m.text.clone())
-                .collect::<Vec<_>>()
-                .join("\n");
-            let existing_text = self.bottom_pane.composer_text();
-            let combined = if existing_text.is_empty() {
-                queued_text
-            } else if queued_text.is_empty() {
-                existing_text
-            } else {
-                format!("{queued_text}\n{existing_text}")
-            };
-            self.bottom_pane.set_composer_text(combined);
-            // Clear the queue and update the status indicator list.
-            self.queued_user_messages.clear();
-            self.refresh_queued_user_messages();
         }
 
         self.request_redraw();
@@ -1327,6 +1314,7 @@ impl ChatWidget {
             retry_status_header: None,
             conversation_id: None,
             queued_user_messages: VecDeque::new(),
+            next_queued_user_message_id: 1,
             show_welcome_banner: is_first_run,
             suppress_session_configured_redraw: false,
             pending_notification: None,
@@ -1412,6 +1400,7 @@ impl ChatWidget {
             retry_status_header: None,
             conversation_id: None,
             queued_user_messages: VecDeque::new(),
+            next_queued_user_message_id: 1,
             show_welcome_banner: false,
             suppress_session_configured_redraw: true,
             pending_notification: None,
@@ -1480,27 +1469,24 @@ impl ChatWidget {
             } if !self.queued_user_messages.is_empty() => {
                 // Prefer the most recently queued item.
                 if let Some(user_message) = self.queued_user_messages.pop_back() {
-                    self.bottom_pane.set_composer_text(user_message.text);
+                    self.bottom_pane.set_composer_text_with_attachments(
+                        user_message.text,
+                        user_message.attachments,
+                    );
                     self.refresh_queued_user_messages();
                     self.request_redraw();
                 }
             }
-            _ => {
-                match self.bottom_pane.handle_key_event(key_event) {
-                    InputResult::Submitted(text) => {
-                        // If a task is running, queue the user input to be sent after the turn completes.
-                        let user_message = UserMessage {
-                            text,
-                            image_paths: self.bottom_pane.take_recent_submission_images(),
-                        };
-                        self.queue_user_message(user_message);
-                    }
-                    InputResult::Command(cmd) => {
-                        self.dispatch_command(cmd);
-                    }
-                    InputResult::None => {}
+            _ => match self.bottom_pane.handle_key_event(key_event) {
+                InputResult::Submitted(text) => {
+                    let attachments = self.bottom_pane.take_recent_submission_attachments();
+                    self.queue_user_message(text, attachments);
                 }
-            }
+                InputResult::Command(cmd) => {
+                    self.dispatch_command(cmd);
+                }
+                InputResult::None => {}
+            },
         }
     }
 
@@ -1705,13 +1691,38 @@ impl ChatWidget {
         self.app_event_tx.send(AppEvent::InsertHistoryCell(cell));
     }
 
-    fn queue_user_message(&mut self, user_message: UserMessage) {
+    fn queue_user_message(&mut self, text: String, attachments: Vec<ComposerAttachment>) {
         if self.bottom_pane.is_task_running() {
-            self.queued_user_messages.push_back(user_message);
+            let id = self.next_queued_user_message_id;
+            self.next_queued_user_message_id = self.next_queued_user_message_id.saturating_add(1);
+
+            self.queued_user_messages.push_back(QueuedUserMessage {
+                id,
+                text,
+                attachments,
+                model_override: None,
+                effort_override: None,
+            });
             self.refresh_queued_user_messages();
         } else {
-            self.submit_user_message(user_message);
+            let image_paths = attachments
+                .into_iter()
+                .map(|attachment| attachment.path)
+                .collect();
+            self.submit_user_message(UserMessage { text, image_paths });
         }
+    }
+
+    fn submit_queued_user_message(&mut self, queued: QueuedUserMessage) {
+        let image_paths = queued
+            .attachments
+            .into_iter()
+            .map(|attachment| attachment.path)
+            .collect();
+        self.submit_user_message(UserMessage {
+            text: queued.text,
+            image_paths,
+        });
     }
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
@@ -2019,8 +2030,8 @@ impl ChatWidget {
         if self.bottom_pane.is_task_running() {
             return;
         }
-        if let Some(user_message) = self.queued_user_messages.pop_front() {
-            self.submit_user_message(user_message);
+        if let Some(queued) = self.queued_user_messages.pop_front() {
+            self.submit_queued_user_message(queued);
         }
         // Update the list to reflect the remaining queued messages (if any).
         self.refresh_queued_user_messages();
