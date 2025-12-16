@@ -1126,6 +1126,60 @@ fn task_complete_does_not_auto_send_queued_message_when_composer_has_text() {
     let _ = drain_insert_history(&mut rx);
 }
 
+#[test]
+fn queue_popup_shows_effective_model_and_thinking() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None);
+    chat.config.model_reasoning_effort = Some(ReasoningEffortConfig::High);
+
+    chat.queued_user_messages.push_back(QueuedUserMessage {
+        id: 1,
+        text: "first queued".to_string(),
+        attachments: Vec::new(),
+        model_override: None,
+        effort_override: None,
+    });
+    chat.queued_user_messages.push_back(QueuedUserMessage {
+        id: 2,
+        text: "second queued".to_string(),
+        attachments: Vec::new(),
+        model_override: Some("gpt-5.1-codex-max".to_string()),
+        effort_override: Some(Some(ReasoningEffortConfig::Low)),
+    });
+    chat.refresh_queued_user_messages();
+    chat.open_queue_popup();
+
+    let width: u16 = 120;
+    let height: u16 = 30;
+    let mut terminal =
+        ratatui::Terminal::new(VT100Backend::new(width, height)).expect("create terminal");
+    terminal.set_viewport_area(Rect::new(0, 0, width, height));
+    terminal
+        .draw(|f| chat.render(f.area(), f.buffer_mut()))
+        .expect("draw queue popup");
+    let screen = terminal.backend().vt100().screen().contents();
+
+    assert!(
+        screen.contains("model:"),
+        "queue popup missing model meta: {screen}"
+    );
+    assert!(
+        screen.contains("thinking:"),
+        "queue popup missing thinking meta: {screen}"
+    );
+    assert!(
+        screen.contains("model: gpt-5.1-codex-max"),
+        "queue popup missing model override meta: {screen}"
+    );
+    assert!(
+        screen.contains("thinking: low"),
+        "queue popup missing thinking override meta: {screen}"
+    );
+    assert!(
+        screen.contains("thinking: high"),
+        "queue popup missing default thinking meta: {screen}"
+    );
+}
+
 /// Pressing Up to recall the most recent history entry and immediately queuing
 /// it while a task is running should always enqueue the same text, even when it
 /// is queued repeatedly.

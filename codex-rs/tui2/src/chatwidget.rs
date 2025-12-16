@@ -1711,6 +1711,8 @@ impl ChatWidget {
             return;
         }
 
+        let model_presets = self.models_manager.try_list_models().ok();
+
         let items: Vec<QueuePopupItem> = self
             .queued_user_messages
             .iter()
@@ -1726,19 +1728,32 @@ impl ChatWidget {
                     preview = "[image]".to_string();
                 }
 
+                let effective_model = message
+                    .model_override
+                    .as_deref()
+                    .unwrap_or_else(|| self.model_family.get_model_slug());
+                let default_effort = model_presets.as_ref().and_then(|presets| {
+                    presets
+                        .iter()
+                        .find(|preset| preset.model == effective_model)
+                        .map(|preset| preset.default_reasoning_effort)
+                });
+                let effective_effort = match message.effort_override {
+                    Some(effort) => effort.or(default_effort),
+                    None => self.config.model_reasoning_effort.or(default_effort),
+                };
+
                 let mut meta_parts: Vec<String> = Vec::new();
                 if !message.attachments.is_empty() {
                     meta_parts.push("img".to_string());
                 }
-                if let Some(model) = message.model_override.as_ref() {
-                    meta_parts.push(format!("model: {model}"));
-                }
-                if let Some(effort) = message.effort_override.as_ref() {
-                    match effort {
-                        Some(effort) => meta_parts.push(format!("thinking: {effort}")),
-                        None => meta_parts.push("thinking: default".to_string()),
-                    }
-                }
+                meta_parts.push(format!("model: {effective_model}"));
+                meta_parts.push(format!(
+                    "thinking: {}",
+                    effective_effort
+                        .map(|effort| effort.to_string())
+                        .unwrap_or_else(|| "default".to_string())
+                ));
 
                 QueuePopupItem {
                     id: message.id,
