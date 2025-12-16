@@ -175,6 +175,53 @@ pub(crate) enum AppEvent {
     OpenFeedbackConsent {
         category: FeedbackCategory,
     },
+
+    /// Begin inline edit mode for a queued user message.
+    QueueStartEdit {
+        id: u64,
+    },
+
+    /// Delete a queued user message.
+    QueueDelete {
+        id: u64,
+    },
+
+    /// Move a queued user message earlier in the queue.
+    QueueMoveUp {
+        id: u64,
+    },
+
+    /// Move a queued user message later in the queue.
+    QueueMoveDown {
+        id: u64,
+    },
+
+    /// Move a queued user message to the front (next to send).
+    QueueMoveToFront {
+        id: u64,
+    },
+
+    /// Open the per-item model override picker for a queued message.
+    QueueOpenModelPicker {
+        id: u64,
+    },
+
+    /// Open the per-item thinking override picker for a queued message.
+    QueueOpenThinkingPicker {
+        id: u64,
+    },
+
+    /// Set (or clear) the per-item model override for a queued message.
+    QueueSetModelOverride {
+        id: u64,
+        model: Option<String>,
+    },
+
+    /// Set (or clear) the per-item thinking override for a queued message.
+    QueueSetThinkingOverride {
+        id: u64,
+        effort: Option<Option<ReasoningEffort>>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

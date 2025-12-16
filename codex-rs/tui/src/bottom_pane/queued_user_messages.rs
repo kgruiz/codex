@@ -49,7 +49,9 @@ impl QueuedUserMessages {
             Line::from(vec![
                 "    ".into(),
                 key_hint::alt(KeyCode::Up).into(),
-                " edit".into(),
+                " edit · ".into(),
+                key_hint::alt(KeyCode::Char('q')).into(),
+                " queue".into(),
             ])
             .dim(),
         );

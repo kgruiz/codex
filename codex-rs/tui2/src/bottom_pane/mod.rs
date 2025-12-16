@@ -36,6 +36,7 @@ pub(crate) use feedback_view::feedback_selection_params;
 pub(crate) use feedback_view::feedback_upload_consent_params;
 mod paste_burst;
 pub mod popup_consts;
+mod queue_popup;
 mod queued_user_messages;
 mod scroll_state;
 mod selection_popup_common;
@@ -52,6 +53,8 @@ pub(crate) use chat_composer::ChatComposer;
 pub(crate) use chat_composer::ComposerAttachment;
 pub(crate) use chat_composer::InputResult;
 use codex_protocol::custom_prompts::CustomPrompt;
+pub(crate) use queue_popup::QueuePopup;
+pub(crate) use queue_popup::QueuePopupItem;
 
 use crate::status_indicator_widget::StatusIndicatorWidget;
 pub(crate) use list_selection_view::SelectionAction;
@@ -173,12 +176,16 @@ impl BottomPane {
                 && view.is_complete()
             {
                 self.view_stack.pop();
-                self.on_active_view_complete();
+                if self.view_stack.is_empty() {
+                    self.on_active_view_complete();
+                }
             } else {
                 view.handle_key_event(key_event);
                 if view.is_complete() {
-                    self.view_stack.clear();
-                    self.on_active_view_complete();
+                    self.view_stack.pop();
+                    if self.view_stack.is_empty() {
+                        self.on_active_view_complete();
+                    }
                 }
             }
             self.request_redraw();
@@ -214,7 +221,9 @@ impl BottomPane {
             if matches!(event, CancellationEvent::Handled) {
                 if view.is_complete() {
                     self.view_stack.pop();
-                    self.on_active_view_complete();
+                    if self.view_stack.is_empty() {
+                        self.on_active_view_complete();
+                    }
                 }
                 self.show_ctrl_c_quit_hint();
             }
@@ -233,7 +242,10 @@ impl BottomPane {
         if let Some(view) = self.view_stack.last_mut() {
             let needs_redraw = view.handle_paste(pasted);
             if view.is_complete() {
-                self.on_active_view_complete();
+                self.view_stack.pop();
+                if self.view_stack.is_empty() {
+                    self.on_active_view_complete();
+                }
             }
             if needs_redraw {
                 self.request_redraw();
@@ -264,6 +276,23 @@ impl BottomPane {
     ) {
         self.composer
             .set_text_content_with_attachments(text, attachments);
+        self.request_redraw();
+    }
+
+    pub(crate) fn composer_attachments(&self) -> Vec<ComposerAttachment> {
+        self.composer.current_attachments()
+    }
+
+    pub(crate) fn set_composer_commands_enabled(&mut self, enabled: bool) {
+        self.composer.set_commands_enabled(enabled);
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_composer_footer_hint_override(
+        &mut self,
+        items: Option<Vec<(String, String)>>,
+    ) {
+        self.composer.set_footer_hint_override(items);
         self.request_redraw();
     }
 
@@ -427,6 +456,14 @@ impl BottomPane {
 
     pub(crate) fn is_task_running(&self) -> bool {
         self.is_task_running
+    }
+
+    pub(crate) fn has_active_view(&self) -> bool {
+        !self.view_stack.is_empty()
+    }
+
+    pub(crate) fn composer_popup_active(&self) -> bool {
+        self.composer.popup_active()
     }
 
     /// Return true when the pane is in the regular composer state without any

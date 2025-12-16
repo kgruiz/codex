@@ -90,6 +90,8 @@ use crate::bottom_pane::BottomPaneParams;
 use crate::bottom_pane::CancellationEvent;
 use crate::bottom_pane::ComposerAttachment;
 use crate::bottom_pane::InputResult;
+use crate::bottom_pane::QueuePopup;
+use crate::bottom_pane::QueuePopupItem;
 use crate::bottom_pane::SelectionAction;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
@@ -297,6 +299,11 @@ pub(crate) struct ChatWidget {
     rate_limit_poller: Option<JoinHandle<()>>,
     // Stream lifecycle controller
     stream_controller: Option<StreamController>,
+    stream_paused: bool,
+    paused_status_header: Option<String>,
+    paused_agent_deltas: String,
+    paused_reasoning_blocks: Vec<String>,
+    paused_pending_answer_flush: bool,
     running_commands: HashMap<String, RunningCommand>,
     suppressed_exec_calls: HashSet<String>,
     last_unified_wait: Option<UnifiedExecWaitState>,
@@ -322,6 +329,8 @@ pub(crate) struct ChatWidget {
     // User messages queued while a turn is in progress
     queued_user_messages: VecDeque<QueuedUserMessage>,
     next_queued_user_message_id: u64,
+    queued_edit_state: Option<QueuedEditState>,
+    queued_auto_send_pending: bool,
     // Pending notification to show when unfocused on next Draw
     pending_notification: Option<Notification>,
     // Simple review mode flag; used to adjust layout and banners.
@@ -349,6 +358,26 @@ struct QueuedUserMessage {
     attachments: Vec<ComposerAttachment>,
     model_override: Option<String>,
     effort_override: Option<Option<ReasoningEffortConfig>>,
+}
+
+#[derive(Clone)]
+struct QueuedComposerSnapshot {
+    text: String,
+    attachments: Vec<ComposerAttachment>,
+}
+
+#[derive(Clone)]
+struct QueuedUserMessageDraft {
+    text: String,
+    attachments: Vec<ComposerAttachment>,
+    model_override: Option<String>,
+    effort_override: Option<Option<ReasoningEffortConfig>>,
+}
+
+struct QueuedEditState {
+    selected_id: u64,
+    composer_before_edit: QueuedComposerSnapshot,
+    drafts: HashMap<u64, QueuedUserMessageDraft>,
 }
 
 impl From<String> for UserMessage {
@@ -379,6 +408,13 @@ fn create_initial_user_message(text: String, image_paths: Vec<PathBuf>) -> Optio
 
 impl ChatWidget {
     fn flush_answer_stream_with_separator(&mut self) {
+        if self.stream_paused {
+            if self.stream_controller.is_some() || !self.paused_agent_deltas.is_empty() {
+                self.paused_pending_answer_flush = true;
+            }
+            return;
+        }
+
         if let Some(mut controller) = self.stream_controller.take()
             && let Some(cell) = controller.finalize()
         {
@@ -492,6 +528,10 @@ impl ChatWidget {
         // (between **/**) as the chunk header. Show this header as status.
         self.reasoning_buffer.push_str(&delta);
 
+        if self.stream_paused {
+            return;
+        }
+
         if let Some(header) = extract_first_bold(&self.reasoning_buffer) {
             // Update the shimmer header to the extracted reasoning chunk header.
             self.set_status_header(header);
@@ -505,6 +545,15 @@ impl ChatWidget {
         let reasoning_summary_format = self.get_model_family().reasoning_summary_format;
         // At the end of a reasoning block, record transcript-only content.
         self.full_reasoning_buffer.push_str(&self.reasoning_buffer);
+        if self.stream_paused {
+            if !self.full_reasoning_buffer.is_empty() {
+                self.paused_reasoning_blocks
+                    .push(self.full_reasoning_buffer.clone());
+            }
+            self.reasoning_buffer.clear();
+            self.full_reasoning_buffer.clear();
+            return;
+        }
         if !self.full_reasoning_buffer.is_empty() {
             let cell = history_cell::new_reasoning_summary_block(
                 self.full_reasoning_buffer.clone(),
@@ -532,6 +581,9 @@ impl ChatWidget {
         self.retry_status_header = None;
         self.bottom_pane.set_interrupt_hint_visible(true);
         self.set_status_header(String::from("Working"));
+        if self.stream_paused {
+            self.set_status_header(String::from("Paused"));
+        }
         self.full_reasoning_buffer.clear();
         self.reasoning_buffer.clear();
         self.request_redraw();
@@ -548,6 +600,7 @@ impl ChatWidget {
         self.request_redraw();
 
         // If there is a queued user message, send exactly one now to begin the next turn.
+        self.queued_auto_send_pending = !self.queued_user_messages.is_empty();
         self.maybe_send_next_queued_input();
         // Emit a notification when the turn completes (suppressed if focused).
         self.notify(Notification::AgentTurnComplete {
@@ -692,6 +745,7 @@ impl ChatWidget {
         self.request_redraw();
 
         // After an error ends the turn, try sending the next queued input.
+        self.queued_auto_send_pending = !self.queued_user_messages.is_empty();
         self.maybe_send_next_queued_input();
     }
 
@@ -764,6 +818,7 @@ impl ChatWidget {
 
         self.mcp_startup_status = None;
         self.bottom_pane.set_task_running(false);
+        self.queued_auto_send_pending = !self.queued_user_messages.is_empty();
         self.maybe_send_next_queued_input();
         self.request_redraw();
     }
@@ -951,6 +1006,10 @@ impl ChatWidget {
     /// Periodic tick to commit at most one queued line to history with a small delay,
     /// animating the output.
     pub(crate) fn on_commit_tick(&mut self) {
+        if self.stream_paused {
+            return;
+        }
+
         if let Some(controller) = self.stream_controller.as_mut() {
             let (cell, is_idle) = controller.on_commit_tick();
             if let Some(cell) = cell {
@@ -978,7 +1037,8 @@ impl ChatWidget {
         // Preserve deterministic FIFO across queued interrupts: once anything
         // is queued due to an active write cycle, continue queueing until the
         // queue is flushed to avoid reordering (e.g., ExecEnd before ExecBegin).
-        if self.stream_controller.is_some() || !self.interrupts.is_empty() {
+        if (self.stream_controller.is_some() && !self.stream_paused) || !self.interrupts.is_empty()
+        {
             push(&mut self.interrupts);
         } else {
             handle(self);
@@ -996,6 +1056,11 @@ impl ChatWidget {
 
     #[inline]
     fn handle_streaming_delta(&mut self, delta: String) {
+        if self.stream_paused {
+            self.paused_agent_deltas.push_str(&delta);
+            return;
+        }
+
         // Before streaming agent content, flush any active exec cell group.
         self.flush_active_cell();
 
@@ -1302,6 +1367,11 @@ impl ChatWidget {
             rate_limit_switch_prompt: RateLimitSwitchPromptState::default(),
             rate_limit_poller: None,
             stream_controller: None,
+            stream_paused: false,
+            paused_status_header: None,
+            paused_agent_deltas: String::new(),
+            paused_reasoning_blocks: Vec::new(),
+            paused_pending_answer_flush: false,
             running_commands: HashMap::new(),
             suppressed_exec_calls: HashSet::new(),
             last_unified_wait: None,
@@ -1315,6 +1385,8 @@ impl ChatWidget {
             conversation_id: None,
             queued_user_messages: VecDeque::new(),
             next_queued_user_message_id: 1,
+            queued_edit_state: None,
+            queued_auto_send_pending: false,
             show_welcome_banner: is_first_run,
             suppress_session_configured_redraw: false,
             pending_notification: None,
@@ -1388,6 +1460,11 @@ impl ChatWidget {
             rate_limit_switch_prompt: RateLimitSwitchPromptState::default(),
             rate_limit_poller: None,
             stream_controller: None,
+            stream_paused: false,
+            paused_status_header: None,
+            paused_agent_deltas: String::new(),
+            paused_reasoning_blocks: Vec::new(),
+            paused_pending_answer_flush: false,
             running_commands: HashMap::new(),
             suppressed_exec_calls: HashSet::new(),
             last_unified_wait: None,
@@ -1401,6 +1478,8 @@ impl ChatWidget {
             conversation_id: None,
             queued_user_messages: VecDeque::new(),
             next_queued_user_message_id: 1,
+            queued_edit_state: None,
+            queued_auto_send_pending: false,
             show_welcome_banner: false,
             suppress_session_configured_redraw: true,
             pending_notification: None,
@@ -1419,6 +1498,21 @@ impl ChatWidget {
 
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event {
+            KeyEvent {
+                code: KeyCode::Char('p'),
+                modifiers: KeyModifiers::CONTROL,
+                kind: KeyEventKind::Press,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('\u{0010}'),
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view() => {
+                self.toggle_stream_pause();
+                return;
+            }
             KeyEvent {
                 code: KeyCode::Char(c),
                 modifiers,
@@ -1460,22 +1554,29 @@ impl ChatWidget {
             _ => {}
         }
 
+        if self.queued_edit_state.is_some()
+            && !self.bottom_pane.has_active_view()
+            && self.handle_queue_edit_key_event(key_event)
+        {
+            return;
+        }
+
         match key_event {
+            KeyEvent {
+                code: KeyCode::Char('q' | 'Q'),
+                modifiers: KeyModifiers::ALT,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.queued_user_messages.is_empty() && self.queued_edit_state.is_none() => {
+                self.open_queue_popup();
+            }
             KeyEvent {
                 code: KeyCode::Up,
                 modifiers: KeyModifiers::ALT,
                 kind: KeyEventKind::Press,
                 ..
             } if !self.queued_user_messages.is_empty() => {
-                // Prefer the most recently queued item.
-                if let Some(user_message) = self.queued_user_messages.pop_back() {
-                    self.bottom_pane.set_composer_text_with_attachments(
-                        user_message.text,
-                        user_message.attachments,
-                    );
-                    self.refresh_queued_user_messages();
-                    self.request_redraw();
-                }
+                self.begin_queue_edit_most_recent();
             }
             _ => match self.bottom_pane.handle_key_event(key_event) {
                 InputResult::Submitted(text) => {
@@ -1488,6 +1589,736 @@ impl ChatWidget {
                 InputResult::None => {}
             },
         }
+
+        self.maybe_send_next_queued_input();
+    }
+
+    fn handle_queue_edit_key_event(&mut self, key_event: KeyEvent) -> bool {
+        match key_event {
+            KeyEvent {
+                code: KeyCode::Esc,
+                kind: KeyEventKind::Press,
+                ..
+            } => {
+                self.exit_queue_edit(false);
+                true
+            }
+            KeyEvent {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                ..
+            } => {
+                self.exit_queue_edit(true);
+                true
+            }
+            KeyEvent {
+                code: KeyCode::Up,
+                modifiers: KeyModifiers::ALT,
+                kind: KeyEventKind::Press,
+                ..
+            } => {
+                self.switch_queue_edit(-1);
+                true
+            }
+            KeyEvent {
+                code: KeyCode::Down,
+                modifiers: KeyModifiers::ALT,
+                kind: KeyEventKind::Press,
+                ..
+            } => {
+                self.switch_queue_edit(1);
+                true
+            }
+            KeyEvent {
+                code: KeyCode::Char('m' | 'M'),
+                modifiers: KeyModifiers::ALT,
+                kind: KeyEventKind::Press,
+                ..
+            } => {
+                if let Some(id) = self
+                    .queued_edit_state
+                    .as_ref()
+                    .map(|state| state.selected_id)
+                {
+                    self.open_queue_model_picker(id);
+                }
+                true
+            }
+            KeyEvent {
+                code: KeyCode::Char('t' | 'T'),
+                modifiers: KeyModifiers::ALT,
+                kind: KeyEventKind::Press,
+                ..
+            } => {
+                if let Some(id) = self
+                    .queued_edit_state
+                    .as_ref()
+                    .map(|state| state.selected_id)
+                {
+                    self.open_queue_thinking_picker(id);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn open_queue_popup(&mut self) {
+        if self.bottom_pane.has_active_view()
+            || self.queued_user_messages.is_empty()
+            || self.queued_edit_state.is_some()
+        {
+            return;
+        }
+
+        let items: Vec<QueuePopupItem> = self
+            .queued_user_messages
+            .iter()
+            .map(|message| {
+                let mut preview = message
+                    .text
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                if preview.is_empty() && !message.attachments.is_empty() {
+                    preview = "[image]".to_string();
+                }
+
+                let mut meta_parts: Vec<String> = Vec::new();
+                if !message.attachments.is_empty() {
+                    meta_parts.push("img".to_string());
+                }
+                if let Some(model) = message.model_override.as_ref() {
+                    meta_parts.push(format!("model: {model}"));
+                }
+                if let Some(effort) = message.effort_override.as_ref() {
+                    match effort {
+                        Some(effort) => meta_parts.push(format!("thinking: {effort}")),
+                        None => meta_parts.push("thinking: default".to_string()),
+                    }
+                }
+
+                QueuePopupItem {
+                    id: message.id,
+                    preview,
+                    meta: (!meta_parts.is_empty()).then(|| meta_parts.join(" · ")),
+                }
+            })
+            .collect();
+
+        self.bottom_pane
+            .show_view(Box::new(QueuePopup::new(items, self.app_event_tx.clone())));
+        self.request_redraw();
+    }
+
+    fn begin_queue_edit_most_recent(&mut self) {
+        let Some(selected_id) = self.queued_user_messages.back().map(|message| message.id) else {
+            return;
+        };
+
+        self.start_queue_edit(selected_id);
+    }
+
+    pub(crate) fn start_queue_edit(&mut self, id: u64) {
+        if self.queued_edit_state.is_some()
+            || self.queued_user_messages.is_empty()
+            || self.bottom_pane.has_active_view()
+            || self.bottom_pane.composer_popup_active()
+        {
+            return;
+        }
+
+        if !self
+            .queued_user_messages
+            .iter()
+            .any(|message| message.id == id)
+        {
+            return;
+        }
+
+        let composer_before_edit = QueuedComposerSnapshot {
+            text: self.bottom_pane.composer_text(),
+            attachments: self.bottom_pane.composer_attachments(),
+        };
+
+        self.queued_edit_state = Some(QueuedEditState {
+            selected_id: id,
+            composer_before_edit,
+            drafts: HashMap::new(),
+        });
+
+        self.bottom_pane.set_composer_commands_enabled(false);
+        self.load_queue_edit_draft(id);
+        self.update_queue_edit_footer_hint();
+        self.refresh_queued_user_messages();
+        self.request_redraw();
+    }
+
+    pub(crate) fn delete_queued_user_message(&mut self, id: u64) {
+        let Some(idx) = self
+            .queued_user_messages
+            .iter()
+            .position(|message| message.id == id)
+        else {
+            return;
+        };
+
+        self.queued_user_messages.remove(idx);
+        if self.queued_user_messages.is_empty() {
+            self.queued_auto_send_pending = false;
+        }
+
+        self.refresh_queued_user_messages();
+        self.request_redraw();
+    }
+
+    pub(crate) fn move_queued_user_message_up(&mut self, id: u64) {
+        let Some(idx) = self
+            .queued_user_messages
+            .iter()
+            .position(|message| message.id == id)
+        else {
+            return;
+        };
+
+        if idx == 0 {
+            return;
+        }
+
+        self.queued_user_messages.swap(idx, idx - 1);
+        self.refresh_queued_user_messages();
+        self.request_redraw();
+    }
+
+    pub(crate) fn move_queued_user_message_down(&mut self, id: u64) {
+        let len = self.queued_user_messages.len();
+        let Some(idx) = self
+            .queued_user_messages
+            .iter()
+            .position(|message| message.id == id)
+        else {
+            return;
+        };
+
+        if idx + 1 >= len {
+            return;
+        }
+
+        self.queued_user_messages.swap(idx, idx + 1);
+        self.refresh_queued_user_messages();
+        self.request_redraw();
+    }
+
+    pub(crate) fn move_queued_user_message_to_front(&mut self, id: u64) {
+        let Some(idx) = self
+            .queued_user_messages
+            .iter()
+            .position(|message| message.id == id)
+        else {
+            return;
+        };
+
+        if idx == 0 {
+            return;
+        }
+
+        let Some(message) = self.queued_user_messages.remove(idx) else {
+            return;
+        };
+
+        self.queued_user_messages.push_front(message);
+        self.refresh_queued_user_messages();
+        self.request_redraw();
+    }
+
+    pub(crate) fn open_queue_model_picker(&mut self, id: u64) {
+        let current_override = self
+            .queued_edit_state
+            .as_ref()
+            .and_then(|state| state.drafts.get(&id))
+            .map(|draft| draft.model_override.clone())
+            .unwrap_or_else(|| {
+                self.queued_user_messages
+                    .iter()
+                    .find(|message| message.id == id)
+                    .map(|message| message.model_override.clone())
+                    .unwrap_or_default()
+            });
+
+        let session_model = self.model_family.get_model_slug().to_string();
+        let mut items: Vec<SelectionItem> = Vec::new();
+
+        let clear_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+            tx.send(AppEvent::QueueSetModelOverride { id, model: None });
+        })];
+        items.push(SelectionItem {
+            name: "Use session model".to_string(),
+            description: Some(format!("Current session model: {session_model}")),
+            is_current: current_override.is_none(),
+            actions: clear_actions,
+            dismiss_on_select: true,
+            ..Default::default()
+        });
+
+        let mut presets = match self.models_manager.try_list_models() {
+            Ok(presets) => presets,
+            Err(_) => {
+                self.add_info_message(
+                    "Models are being updated; please try again in a moment.".to_string(),
+                    None,
+                );
+                return;
+            }
+        };
+        presets.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+
+        for preset in presets {
+            let model_slug = preset.model.clone();
+            let is_current = current_override.as_deref() == Some(model_slug.as_str());
+            let description = (!preset.description.is_empty()).then_some(preset.description);
+            let model_for_action = model_slug.clone();
+            let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+                tx.send(AppEvent::QueueSetModelOverride {
+                    id,
+                    model: Some(model_for_action.clone()),
+                });
+            })];
+
+            items.push(SelectionItem {
+                name: preset.display_name,
+                description,
+                is_current,
+                actions,
+                dismiss_on_select: true,
+                ..Default::default()
+            });
+        }
+
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some("Select Model for Queued Message".to_string()),
+            subtitle: Some("Applies only when this message is sent.".to_string()),
+            footer_hint: Some(standard_popup_hint_line()),
+            items,
+            ..Default::default()
+        });
+    }
+
+    pub(crate) fn open_queue_thinking_picker(&mut self, id: u64) {
+        let model_override = self
+            .queued_edit_state
+            .as_ref()
+            .and_then(|state| state.drafts.get(&id))
+            .map(|draft| draft.model_override.clone())
+            .unwrap_or_else(|| {
+                self.queued_user_messages
+                    .iter()
+                    .find(|message| message.id == id)
+                    .map(|message| message.model_override.clone())
+                    .unwrap_or_default()
+            });
+
+        let model_slug =
+            model_override.unwrap_or_else(|| self.model_family.get_model_slug().to_string());
+        let current_override = self
+            .queued_edit_state
+            .as_ref()
+            .and_then(|state| state.drafts.get(&id))
+            .map(|draft| draft.effort_override)
+            .unwrap_or_else(|| {
+                self.queued_user_messages
+                    .iter()
+                    .find(|message| message.id == id)
+                    .map(|message| message.effort_override)
+                    .unwrap_or_default()
+            });
+
+        let presets = match self.models_manager.try_list_models() {
+            Ok(presets) => presets,
+            Err(_) => {
+                self.add_info_message(
+                    "Models are being updated; please try again in a moment.".to_string(),
+                    None,
+                );
+                return;
+            }
+        };
+        let Some(preset) = presets
+            .into_iter()
+            .find(|preset| preset.model == model_slug)
+        else {
+            self.add_info_message(
+                format!("Model '{model_slug}' is not available right now."),
+                None,
+            );
+            return;
+        };
+
+        let mut items: Vec<SelectionItem> = Vec::new();
+        let clear_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+            tx.send(AppEvent::QueueSetThinkingOverride { id, effort: None });
+        })];
+        items.push(SelectionItem {
+            name: "Use session thinking".to_string(),
+            description: Some("Inherit the current session reasoning level.".to_string()),
+            is_current: current_override.is_none(),
+            actions: clear_actions,
+            dismiss_on_select: true,
+            ..Default::default()
+        });
+
+        let default_effort = preset.default_reasoning_effort;
+        let default_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+            tx.send(AppEvent::QueueSetThinkingOverride {
+                id,
+                effort: Some(None),
+            });
+        })];
+        items.push(SelectionItem {
+            name: format!("Default ({})", Self::reasoning_effort_label(default_effort)),
+            description: Some("Use the model's default reasoning level.".to_string()),
+            is_current: matches!(current_override, Some(None)),
+            actions: default_actions,
+            dismiss_on_select: true,
+            ..Default::default()
+        });
+
+        for option in preset.supported_reasoning_efforts {
+            let effort = option.effort;
+            let mut label = Self::reasoning_effort_label(effort).to_string();
+            if effort == default_effort {
+                label.push_str(" (default)");
+            }
+            let description = (!option.description.is_empty()).then_some(option.description);
+            let is_current = current_override == Some(Some(effort));
+            let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+                tx.send(AppEvent::QueueSetThinkingOverride {
+                    id,
+                    effort: Some(Some(effort)),
+                });
+            })];
+            items.push(SelectionItem {
+                name: label,
+                description,
+                is_current,
+                actions,
+                dismiss_on_select: true,
+                ..Default::default()
+            });
+        }
+
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some("Select Thinking for Queued Message".to_string()),
+            subtitle: Some(format!("Model: {model_slug}")),
+            footer_hint: Some(standard_popup_hint_line()),
+            items,
+            ..Default::default()
+        });
+    }
+
+    pub(crate) fn set_queued_user_message_model_override(
+        &mut self,
+        id: u64,
+        model: Option<String>,
+    ) {
+        if self.queued_edit_state.is_some() {
+            let selected_id = self
+                .queued_edit_state
+                .as_ref()
+                .map(|state| state.selected_id);
+            let base = self
+                .queued_edit_state
+                .as_ref()
+                .and_then(|state| state.drafts.get(&id).cloned())
+                .or_else(|| {
+                    if selected_id == Some(id) {
+                        self.capture_queue_edit_draft(id)
+                    } else {
+                        self.queued_user_message_draft(id)
+                    }
+                });
+            if let Some(mut draft) = base {
+                draft.model_override = model;
+                if let Some(state) = self.queued_edit_state.as_mut() {
+                    state.drafts.insert(id, draft);
+                }
+            }
+            return;
+        }
+
+        let Some(message) = self
+            .queued_user_messages
+            .iter_mut()
+            .find(|message| message.id == id)
+        else {
+            return;
+        };
+
+        message.model_override = model;
+        self.refresh_queued_user_messages();
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_queued_user_message_thinking_override(
+        &mut self,
+        id: u64,
+        effort: Option<Option<ReasoningEffortConfig>>,
+    ) {
+        if self.queued_edit_state.is_some() {
+            let selected_id = self
+                .queued_edit_state
+                .as_ref()
+                .map(|state| state.selected_id);
+            let base = self
+                .queued_edit_state
+                .as_ref()
+                .and_then(|state| state.drafts.get(&id).cloned())
+                .or_else(|| {
+                    if selected_id == Some(id) {
+                        self.capture_queue_edit_draft(id)
+                    } else {
+                        self.queued_user_message_draft(id)
+                    }
+                });
+            if let Some(mut draft) = base {
+                draft.effort_override = effort;
+                if let Some(state) = self.queued_edit_state.as_mut() {
+                    state.drafts.insert(id, draft);
+                }
+            }
+            return;
+        }
+
+        let Some(message) = self
+            .queued_user_messages
+            .iter_mut()
+            .find(|message| message.id == id)
+        else {
+            return;
+        };
+
+        message.effort_override = effort;
+        self.refresh_queued_user_messages();
+        self.request_redraw();
+    }
+
+    fn exit_queue_edit(&mut self, save: bool) {
+        let Some(mut state) = self.queued_edit_state.take() else {
+            return;
+        };
+
+        if save {
+            if let Some(draft) = self.capture_queue_edit_draft(state.selected_id) {
+                state.drafts.insert(state.selected_id, draft);
+            }
+
+            for message in self.queued_user_messages.iter_mut() {
+                if let Some(draft) = state.drafts.get(&message.id) {
+                    message.text = draft.text.clone();
+                    message.attachments = draft.attachments.clone();
+                    message.model_override = draft.model_override.clone();
+                    message.effort_override = draft.effort_override;
+                }
+            }
+        }
+
+        self.bottom_pane.set_composer_commands_enabled(true);
+        self.bottom_pane.set_composer_footer_hint_override(None);
+        self.bottom_pane.set_composer_text_with_attachments(
+            state.composer_before_edit.text,
+            state.composer_before_edit.attachments,
+        );
+
+        self.refresh_queued_user_messages();
+        self.request_redraw();
+        self.maybe_send_next_queued_input();
+    }
+
+    fn switch_queue_edit(&mut self, direction: isize) {
+        let Some(selected_id) = self
+            .queued_edit_state
+            .as_ref()
+            .map(|state| state.selected_id)
+        else {
+            return;
+        };
+
+        if let Some(draft) = self.capture_queue_edit_draft(selected_id)
+            && let Some(state) = self.queued_edit_state.as_mut()
+        {
+            state.drafts.insert(selected_id, draft);
+        }
+
+        let Some(current_idx) = self
+            .queued_user_messages
+            .iter()
+            .position(|message| message.id == selected_id)
+        else {
+            self.exit_queue_edit(false);
+            return;
+        };
+
+        let len = self.queued_user_messages.len();
+        if len == 0 {
+            self.exit_queue_edit(false);
+            return;
+        }
+
+        let next_idx = ((current_idx as isize + direction).rem_euclid(len as isize)) as usize;
+        let Some(next_id) = self
+            .queued_user_messages
+            .get(next_idx)
+            .map(|message| message.id)
+        else {
+            return;
+        };
+
+        let draft = self
+            .queued_edit_state
+            .as_ref()
+            .and_then(|state| state.drafts.get(&next_id).cloned())
+            .or_else(|| self.queued_user_message_draft(next_id));
+        let Some(draft) = draft else {
+            return;
+        };
+
+        if let Some(state) = self.queued_edit_state.as_mut() {
+            state.selected_id = next_id;
+        }
+
+        self.bottom_pane
+            .set_composer_text_with_attachments(draft.text, draft.attachments);
+        self.update_queue_edit_footer_hint();
+        self.refresh_queued_user_messages();
+        self.request_redraw();
+    }
+
+    fn capture_queue_edit_draft(&self, id: u64) -> Option<QueuedUserMessageDraft> {
+        let message = self
+            .queued_user_messages
+            .iter()
+            .find(|message| message.id == id)?;
+
+        let (model_override, effort_override) = self
+            .queued_edit_state
+            .as_ref()
+            .and_then(|state| state.drafts.get(&id))
+            .map(|draft| (draft.model_override.clone(), draft.effort_override))
+            .unwrap_or_else(|| (message.model_override.clone(), message.effort_override));
+
+        Some(QueuedUserMessageDraft {
+            text: self.bottom_pane.composer_text(),
+            attachments: self.bottom_pane.composer_attachments(),
+            model_override,
+            effort_override,
+        })
+    }
+
+    fn queued_user_message_draft(&self, id: u64) -> Option<QueuedUserMessageDraft> {
+        let message = self
+            .queued_user_messages
+            .iter()
+            .find(|message| message.id == id)?;
+
+        Some(QueuedUserMessageDraft {
+            text: message.text.clone(),
+            attachments: message.attachments.clone(),
+            model_override: message.model_override.clone(),
+            effort_override: message.effort_override,
+        })
+    }
+
+    fn load_queue_edit_draft(&mut self, id: u64) {
+        let draft = self
+            .queued_edit_state
+            .as_ref()
+            .and_then(|state| state.drafts.get(&id).cloned())
+            .or_else(|| self.queued_user_message_draft(id));
+
+        let Some(draft) = draft else {
+            return;
+        };
+
+        self.bottom_pane
+            .set_composer_text_with_attachments(draft.text, draft.attachments);
+    }
+
+    fn update_queue_edit_footer_hint(&mut self) {
+        let Some(state) = self.queued_edit_state.as_ref() else {
+            return;
+        };
+
+        let total = self.queued_user_messages.len();
+        let position = self
+            .queued_user_messages
+            .iter()
+            .position(|message| message.id == state.selected_id)
+            .map(|idx| idx + 1)
+            .unwrap_or_default();
+
+        let hints = vec![
+            ("Editing".to_string(), format!("{position}/{total}")),
+            ("Enter".to_string(), "save".to_string()),
+            ("Esc".to_string(), "cancel".to_string()),
+            ("Alt+↑/↓".to_string(), "switch".to_string()),
+            ("Alt+M".to_string(), "model".to_string()),
+            ("Alt+T".to_string(), "thinking".to_string()),
+        ];
+
+        self.bottom_pane
+            .set_composer_footer_hint_override(Some(hints));
+    }
+
+    fn toggle_stream_pause(&mut self) {
+        if self.stream_paused {
+            self.stream_paused = false;
+
+            if let Some(header) = self.paused_status_header.take() {
+                self.set_status_header(header);
+            }
+
+            let buffered = std::mem::take(&mut self.paused_agent_deltas);
+            if !buffered.is_empty() {
+                self.handle_streaming_delta(buffered);
+            }
+
+            if !self.paused_reasoning_blocks.is_empty() {
+                let reasoning_summary_format = self.get_model_family().reasoning_summary_format;
+                for block in std::mem::take(&mut self.paused_reasoning_blocks) {
+                    let cell = history_cell::new_reasoning_summary_block(
+                        block,
+                        reasoning_summary_format.clone(),
+                    );
+                    self.add_boxed_history(cell);
+                }
+            }
+
+            if self.paused_pending_answer_flush {
+                self.paused_pending_answer_flush = false;
+                self.flush_answer_stream_with_separator();
+                self.handle_stream_finished();
+            }
+
+            if self.stream_controller.is_some() {
+                self.app_event_tx.send(AppEvent::StartCommitAnimation);
+            }
+
+            self.request_redraw();
+            self.maybe_send_next_queued_input();
+            return;
+        }
+
+        if !self.bottom_pane.is_task_running() {
+            return;
+        }
+
+        self.paused_status_header = Some(self.current_status_header.clone());
+        self.stream_paused = true;
+        self.set_status_header("Paused".to_string());
+        self.app_event_tx.send(AppEvent::StopCommitAnimation);
+        self.request_redraw();
     }
 
     pub(crate) fn attach_image(
@@ -1705,6 +2536,7 @@ impl ChatWidget {
             });
             self.refresh_queued_user_messages();
         } else {
+            self.queued_auto_send_pending = false;
             let image_paths = attachments
                 .into_iter()
                 .map(|attachment| attachment.path)
@@ -1714,6 +2546,27 @@ impl ChatWidget {
     }
 
     fn submit_queued_user_message(&mut self, queued: QueuedUserMessage) {
+        let apply_model = queued.model_override.clone();
+        let apply_effort = queued.effort_override;
+
+        let restore_model = apply_model
+            .as_ref()
+            .map(|_| self.model_family.get_model_slug().to_string());
+        let restore_effort = apply_effort
+            .as_ref()
+            .map(|_| self.config.model_reasoning_effort);
+
+        if apply_model.is_some() || apply_effort.is_some() {
+            self.submit_op(Op::OverrideTurnContext {
+                cwd: None,
+                approval_policy: None,
+                sandbox_policy: None,
+                model: apply_model,
+                effort: apply_effort,
+                summary: None,
+            });
+        }
+
         let image_paths = queued
             .attachments
             .into_iter()
@@ -1723,6 +2576,17 @@ impl ChatWidget {
             text: queued.text,
             image_paths,
         });
+
+        if restore_model.is_some() || restore_effort.is_some() {
+            self.submit_op(Op::OverrideTurnContext {
+                cwd: None,
+                approval_policy: None,
+                sandbox_policy: None,
+                model: restore_model,
+                effort: restore_effort,
+                summary: None,
+            });
+        }
     }
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
@@ -2027,22 +2891,46 @@ impl ChatWidget {
 
     // If idle and there are queued inputs, submit exactly one to start the next turn.
     fn maybe_send_next_queued_input(&mut self) {
+        if !self.queued_auto_send_pending {
+            return;
+        }
+        if self.stream_paused {
+            return;
+        }
         if self.bottom_pane.is_task_running() {
             return;
         }
+        if self.queued_edit_state.is_some() {
+            return;
+        }
+        if self.bottom_pane.has_active_view() || self.bottom_pane.composer_popup_active() {
+            return;
+        }
+
         if let Some(queued) = self.queued_user_messages.pop_front() {
             self.submit_queued_user_message(queued);
         }
+        self.queued_auto_send_pending = false;
         // Update the list to reflect the remaining queued messages (if any).
         self.refresh_queued_user_messages();
     }
 
     /// Rebuild and update the queued user messages from the current queue.
     fn refresh_queued_user_messages(&mut self) {
+        let editing_id = self
+            .queued_edit_state
+            .as_ref()
+            .map(|state| state.selected_id);
         let messages: Vec<String> = self
             .queued_user_messages
             .iter()
-            .map(|m| m.text.clone())
+            .map(|message| {
+                if Some(message.id) == editing_id {
+                    format!("✎ {}", message.text)
+                } else {
+                    message.text.clone()
+                }
+            })
             .collect();
         self.bottom_pane.set_queued_user_messages(messages);
     }

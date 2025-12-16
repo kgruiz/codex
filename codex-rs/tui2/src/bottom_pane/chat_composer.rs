@@ -130,6 +130,7 @@ pub(crate) struct ChatComposer {
     pending_pastes: Vec<(String, String)>,
     large_paste_counters: HashMap<usize, usize>,
     has_focus: bool,
+    commands_enabled: bool,
     attached_images: Vec<AttachedImage>,
     placeholder_text: String,
     is_task_running: bool,
@@ -183,6 +184,7 @@ impl ChatComposer {
             pending_pastes: Vec::new(),
             large_paste_counters: HashMap::new(),
             has_focus: has_input_focus,
+            commands_enabled: true,
             attached_images: Vec::new(),
             placeholder_text,
             is_task_running: false,
@@ -312,6 +314,11 @@ impl ChatComposer {
         }
     }
 
+    pub(crate) fn set_commands_enabled(&mut self, enabled: bool) {
+        self.commands_enabled = enabled;
+        self.sync_popups();
+    }
+
     /// Override the footer hint items displayed beneath the composer. Passing
     /// `None` restores the default shortcut footer.
     pub(crate) fn set_footer_hint_override(&mut self, items: Option<Vec<(String, String)>>) {
@@ -362,6 +369,16 @@ impl ChatComposer {
     /// Get the current composer text.
     pub(crate) fn current_text(&self) -> String {
         self.textarea.text().to_string()
+    }
+
+    pub(crate) fn current_attachments(&self) -> Vec<ComposerAttachment> {
+        let text = self.textarea.text();
+        self.attached_images
+            .iter()
+            .filter(|img| text.contains(&img.placeholder))
+            .cloned()
+            .map(Into::into)
+            .collect()
     }
 
     /// Attempt to start a burst by retro-capturing recent chars before the cursor.
@@ -1137,7 +1154,8 @@ impl ChatComposer {
                 // but Enter should still dispatch the command rather than submit
                 // literal text.
                 let first_line = self.textarea.text().lines().next().unwrap_or("");
-                if let Some((name, rest)) = parse_slash_name(first_line)
+                if self.commands_enabled
+                    && let Some((name, rest)) = parse_slash_name(first_line)
                     && rest.is_empty()
                     && let Some((_n, cmd)) = built_in_slash_commands()
                         .into_iter()
@@ -1149,14 +1167,15 @@ impl ChatComposer {
                 // If we're in a paste-like burst capture, treat Enter as part of the burst
                 // and accumulate it rather than submitting or inserting immediately.
                 // Do not treat Enter as paste inside a slash-command context.
-                let in_slash_context = matches!(self.active_popup, ActivePopup::Command(_))
-                    || self
-                        .textarea
-                        .text()
-                        .lines()
-                        .next()
-                        .unwrap_or("")
-                        .starts_with('/');
+                let in_slash_context = self.commands_enabled
+                    && (matches!(self.active_popup, ActivePopup::Command(_))
+                        || self
+                            .textarea
+                            .text()
+                            .lines()
+                            .next()
+                            .unwrap_or("")
+                            .starts_with('/'));
                 if self.paste_burst.is_active() && !in_slash_context {
                     let now = Instant::now();
                     if self.paste_burst.append_newline_if_active(now) {
@@ -1203,7 +1222,9 @@ impl ChatComposer {
                 // If there is neither text nor attachments, suppress submission entirely.
                 let has_attachments = !self.attached_images.is_empty();
                 text = text.trim().to_string();
-                if let Some((name, _rest)) = parse_slash_name(&text) {
+                if self.commands_enabled
+                    && let Some((name, _rest)) = parse_slash_name(&text)
+                {
                     let treat_as_plain_text = input_starts_with_space || name.contains('/');
                     if !treat_as_plain_text {
                         let is_builtin = built_in_slash_commands()
@@ -1232,19 +1253,21 @@ impl ChatComposer {
                     }
                 }
 
-                let expanded_prompt = match expand_custom_prompt(&text, &self.custom_prompts) {
-                    Ok(expanded) => expanded,
-                    Err(err) => {
-                        self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                            history_cell::new_error_event(err.user_message()),
-                        )));
-                        self.textarea.set_text(&original_input);
-                        self.textarea.set_cursor(original_input.len());
-                        return (InputResult::None, true);
+                if self.commands_enabled {
+                    let expanded_prompt = match expand_custom_prompt(&text, &self.custom_prompts) {
+                        Ok(expanded) => expanded,
+                        Err(err) => {
+                            self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
+                                history_cell::new_error_event(err.user_message()),
+                            )));
+                            self.textarea.set_text(&original_input);
+                            self.textarea.set_cursor(original_input.len());
+                            return (InputResult::None, true);
+                        }
+                    };
+                    if let Some(expanded) = expanded_prompt {
+                        text = expanded;
                     }
-                };
-                if let Some(expanded) = expanded_prompt {
-                    text = expanded;
                 }
                 if text.is_empty() && !has_attachments {
                     return (InputResult::None, true);
@@ -1629,7 +1652,8 @@ impl ChatComposer {
         let file_token = Self::current_at_token(&self.textarea);
         let skill_token = self.current_skill_token();
 
-        let allow_command_popup = file_token.is_none() && skill_token.is_none();
+        let allow_command_popup =
+            self.commands_enabled && file_token.is_none() && skill_token.is_none();
         self.sync_command_popup(allow_command_popup);
 
         if matches!(self.active_popup, ActivePopup::Command(_)) {

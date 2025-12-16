@@ -422,6 +422,11 @@ fn make_chatwidget_manual(
         rate_limit_switch_prompt: RateLimitSwitchPromptState::default(),
         rate_limit_poller: None,
         stream_controller: None,
+        stream_paused: false,
+        paused_status_header: None,
+        paused_agent_deltas: String::new(),
+        paused_reasoning_blocks: Vec::new(),
+        paused_pending_answer_flush: false,
         running_commands: HashMap::new(),
         suppressed_exec_calls: HashSet::new(),
         last_unified_wait: None,
@@ -437,6 +442,8 @@ fn make_chatwidget_manual(
         show_welcome_banner: true,
         queued_user_messages: VecDeque::new(),
         next_queued_user_message_id: 1,
+        queued_edit_state: None,
+        queued_auto_send_pending: false,
         suppress_session_configured_redraw: false,
         pending_notification: None,
         is_review_mode: false,
@@ -1019,12 +1026,17 @@ fn alt_up_edits_most_recent_queued_message() {
         chat.bottom_pane.composer_text(),
         "second queued".to_string()
     );
-    // And the queue should now contain only the remaining (older) item.
-    assert_eq!(chat.queued_user_messages.len(), 1);
+    // And the queue should still contain both items (editing is in-place).
+    assert_eq!(chat.queued_user_messages.len(), 2);
     assert_eq!(
         chat.queued_user_messages.front().unwrap().text,
         "first queued"
     );
+    assert_eq!(
+        chat.queued_user_messages.back().unwrap().text,
+        "second queued"
+    );
+    assert_eq!(chat.queued_edit_state.as_ref().unwrap().selected_id, 2);
 }
 
 /// Pressing Up to recall the most recent history entry and immediately queuing
@@ -3359,7 +3371,7 @@ fn chatwidget_tall() {
         }),
     });
     for i in 0..30 {
-        chat.queue_user_message(format!("Hello, world! {i}").into(), Vec::new());
+        chat.queue_user_message(format!("Hello, world! {i}"), Vec::new());
     }
     let width: u16 = 80;
     let height: u16 = 24;
