@@ -136,6 +136,25 @@ impl BottomPane {
         }
     }
 
+    fn refresh_queued_user_message_hints(&mut self) -> bool {
+        let queue_edit_active = self
+            .queued_user_messages
+            .messages
+            .iter()
+            .any(|message| message.starts_with("✎ "));
+        let show_send_next_hint = !self.is_task_running
+            && !self.composer.popup_active()
+            && !queue_edit_active
+            && !self.queued_user_messages.messages.is_empty();
+
+        if self.queued_user_messages.show_send_next_hint != show_send_next_hint {
+            self.queued_user_messages.show_send_next_hint = show_send_next_hint;
+            return true;
+        }
+
+        false
+    }
+
     pub fn set_skills(&mut self, skills: Option<Vec<SkillMetadata>>) {
         self.composer.set_skill_mentions(skills);
         self.request_redraw();
@@ -219,7 +238,8 @@ impl BottomPane {
                 return InputResult::None;
             }
             let (input_result, needs_redraw) = self.composer.handle_key_event(key_event);
-            if needs_redraw {
+            let hints_changed = self.refresh_queued_user_message_hints();
+            if needs_redraw || hints_changed {
                 self.request_redraw();
             }
             if self.composer.is_in_paste_burst() {
@@ -376,6 +396,7 @@ impl BottomPane {
         let was_running = self.is_task_running;
         self.is_task_running = running;
         self.composer.set_task_running(running);
+        let hints_changed = self.refresh_queued_user_message_hints();
 
         if running {
             if !was_running {
@@ -390,10 +411,15 @@ impl BottomPane {
                     status.set_interrupt_hint_visible(true);
                 }
                 self.request_redraw();
+            } else if hints_changed {
+                self.request_redraw();
             }
         } else {
             // Hide the status indicator when a task completes, but keep other modal views.
             self.hide_status_indicator();
+            if hints_changed {
+                self.request_redraw();
+            }
         }
     }
 
@@ -455,6 +481,7 @@ impl BottomPane {
     /// Update the queued messages preview shown above the composer.
     pub(crate) fn set_queued_user_messages(&mut self, queued: Vec<String>) {
         self.queued_user_messages.messages = queued;
+        self.refresh_queued_user_message_hints();
         self.request_redraw();
     }
 
