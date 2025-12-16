@@ -15,6 +15,14 @@ use std::path::PathBuf;
 use crate::version::CODEX_CLI_VERSION;
 
 pub fn get_upgrade_version(config: &Config) -> Option<String> {
+    if update_action::get_update_action().is_none() {
+        return None;
+    }
+
+    if CODEX_CLI_VERSION == "0.0.0" {
+        return None;
+    }
+
     if !config.check_for_update_on_startup {
         return None;
     }
