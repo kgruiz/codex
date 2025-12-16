@@ -3958,6 +3958,7 @@ impl ChatWidget {
     /// Handle Ctrl-C key press.
     fn on_ctrl_c(&mut self) {
         if self.bottom_pane.on_ctrl_c() == CancellationEvent::Handled {
+            self.maybe_send_next_queued_input();
             return;
         }
 
