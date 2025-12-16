@@ -5,13 +5,11 @@ set positional-arguments
 help:
     just -l
 
-# `codex`
 codex *args:
     cargo run --bin codex -- "$@"
 
 alias c := codex
 
-# `codex exec`
 exec *args:
     cargo run --bin codex -- exec "$@"
 
