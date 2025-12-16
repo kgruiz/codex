@@ -46,3 +46,5 @@ just test
 # Otherwise, fall back to:
 cargo test --all-features
 ```
+
+Tip: If you want your locally modified build to be the `codex` your shell runs (while keeping the Homebrew install), run `just install-dev` from the repository root. This installs the dev `codex` binary into `~/.cargo/bin`.
