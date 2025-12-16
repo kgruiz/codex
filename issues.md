@@ -1,0 +1,14 @@
+- https://github.com/openai/codex/issues/6123
+- https://github.com/openai/codex/issues/6500
+- https://github.com/openai/codex/issues/6100
+- https://github.com/openai/codex/issues/6089
+- https://github.com/openai/codex/issues/5716
+- https://github.com/openai/codex/issues/5325
+- https://github.com/openai/codex/issues/5018
+- https://github.com/openai/codex/issues/4914
+- https://github.com/openai/codex/issues/3793
+- https://github.com/openai/codex/issues/3049
+- https://github.com/openai/codex/issues/2926
+- https://github.com/openai/codex/issues/2920
+- https://github.com/openai/codex/issues/2711
+- https://github.com/openai/codex/issues/2622
