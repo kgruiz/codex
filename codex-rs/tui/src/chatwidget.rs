@@ -1729,18 +1729,10 @@ impl ChatWidget {
         }
     }
 
-    fn open_queue_popup(&mut self) {
-        if self.bottom_pane.has_active_view()
-            || self.queued_user_messages.is_empty()
-            || self.queued_edit_state.is_some()
-        {
-            return;
-        }
-
+    fn queue_popup_items(&self) -> Vec<QueuePopupItem> {
         let model_presets = self.models_manager.try_list_models().ok();
 
-        let items: Vec<QueuePopupItem> = self
-            .queued_user_messages
+        self.queued_user_messages
             .iter()
             .map(|message| {
                 let mut preview = message
@@ -1787,7 +1779,18 @@ impl ChatWidget {
                     meta: (!meta_parts.is_empty()).then(|| meta_parts.join(" · ")),
                 }
             })
-            .collect();
+            .collect()
+    }
+
+    fn open_queue_popup(&mut self) {
+        if self.bottom_pane.has_active_view()
+            || self.queued_user_messages.is_empty()
+            || self.queued_edit_state.is_some()
+        {
+            return;
+        }
+
+        let items = self.queue_popup_items();
 
         self.bottom_pane
             .show_view(Box::new(QueuePopup::new(items, self.app_event_tx.clone())));
@@ -2140,6 +2143,8 @@ impl ChatWidget {
 
         message.model_override = model;
         self.refresh_queued_user_messages();
+        self.bottom_pane
+            .update_queue_popup_items(self.queue_popup_items());
         self.request_redraw();
     }
 
@@ -2183,6 +2188,8 @@ impl ChatWidget {
 
         message.effort_override = effort;
         self.refresh_queued_user_messages();
+        self.bottom_pane
+            .update_queue_popup_items(self.queue_popup_items());
         self.request_redraw();
     }
 

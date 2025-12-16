@@ -53,6 +53,20 @@ impl QueuePopup {
         }
     }
 
+    pub(crate) fn set_items(&mut self, items: Vec<QueuePopupItem>) {
+        let selected_id = self.selected_item().map(|item| item.id);
+
+        self.items = items;
+        self.delete_confirm_id = None;
+
+        self.state.selected_idx = selected_id
+            .and_then(|id| self.items.iter().position(|item| item.id == id))
+            .or_else(|| (!self.items.is_empty()).then_some(0));
+
+        let len = self.items.len();
+        self.state.ensure_visible(len, Self::max_visible_rows(len));
+    }
+
     fn selected_item(&self) -> Option<&QueuePopupItem> {
         self.state.selected_idx.and_then(|idx| self.items.get(idx))
     }

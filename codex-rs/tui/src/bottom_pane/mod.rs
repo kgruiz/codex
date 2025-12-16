@@ -1,4 +1,5 @@
 //! Bottom pane: shows the ChatComposer or a BottomPaneView, if one is active.
+use std::any::Any;
 use std::path::PathBuf;
 
 use crate::app_event_sender::AppEventSender;
@@ -472,6 +473,16 @@ impl BottomPane {
         self.queued_user_messages.messages = queued;
         self.refresh_queued_user_message_hints();
         self.request_redraw();
+    }
+
+    pub(crate) fn update_queue_popup_items(&mut self, items: Vec<QueuePopupItem>) {
+        for view in self.view_stack.iter_mut().rev() {
+            if let Some(popup) = (view.as_mut() as &mut dyn Any).downcast_mut::<QueuePopup>() {
+                popup.set_items(items);
+                self.request_redraw();
+                return;
+            }
+        }
     }
 
     /// Update custom prompts available for the slash popup.
