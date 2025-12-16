@@ -183,7 +183,7 @@ impl QueuePopup {
         if self.delete_confirm_id.is_some() {
             "Press D again to delete · Esc cancel".into()
         } else {
-            "Enter edit · M model · T thinking · D delete · Alt+↑/↓ reorder · S send next · Esc close"
+            "Enter edit · M model · T thinking · D delete · J/K reorder · S send next · Esc close"
                 .into()
         }
     }
@@ -203,22 +203,26 @@ impl BottomPaneView for QueuePopup {
                 code: KeyCode::Up,
                 modifiers: KeyModifiers::ALT,
                 ..
-            }
-            | KeyEvent {
-                code: KeyCode::Char('K'),
-                modifiers: KeyModifiers::NONE,
-                ..
             } => self.reorder_selected(-1),
+            KeyEvent {
+                code: KeyCode::Char('K'),
+                modifiers,
+                ..
+            } if modifiers == KeyModifiers::NONE || modifiers == KeyModifiers::SHIFT => {
+                self.reorder_selected(-1);
+            }
             KeyEvent {
                 code: KeyCode::Down,
                 modifiers: KeyModifiers::ALT,
                 ..
-            }
-            | KeyEvent {
-                code: KeyCode::Char('J'),
-                modifiers: KeyModifiers::NONE,
-                ..
             } => self.reorder_selected(1),
+            KeyEvent {
+                code: KeyCode::Char('J'),
+                modifiers,
+                ..
+            } if modifiers == KeyModifiers::NONE || modifiers == KeyModifiers::SHIFT => {
+                self.reorder_selected(1);
+            }
             KeyEvent { code: KeyCode::Up, .. }
             | KeyEvent {
                 code: KeyCode::Char('k'),

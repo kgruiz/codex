@@ -1514,6 +1514,24 @@ impl ChatWidget {
                 return;
             }
             KeyEvent {
+                code: KeyCode::Char('o' | 'O'),
+                modifiers: KeyModifiers::CONTROL,
+                kind: KeyEventKind::Press,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('\u{000f}'),
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view()
+                && !self.queued_user_messages.is_empty()
+                && self.queued_edit_state.is_none() =>
+            {
+                self.open_queue_popup();
+                return;
+            }
+            KeyEvent {
                 code: KeyCode::Char(c),
                 modifiers,
                 kind: KeyEventKind::Press,
@@ -2425,6 +2443,13 @@ impl ChatWidget {
             }
             SlashCommand::Status => {
                 self.add_status_output();
+            }
+            SlashCommand::Queue => {
+                if self.queued_user_messages.is_empty() {
+                    self.add_info_message("Queue is empty.".to_string(), None);
+                } else {
+                    self.open_queue_popup();
+                }
             }
             SlashCommand::Mcp => {
                 self.add_mcp_output();

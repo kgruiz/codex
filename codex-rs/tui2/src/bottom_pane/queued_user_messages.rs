@@ -50,8 +50,8 @@ impl QueuedUserMessages {
                 "    ".into(),
                 key_hint::alt(KeyCode::Up).into(),
                 " edit · ".into(),
-                key_hint::alt(KeyCode::Char('q')).into(),
-                " queue".into(),
+                key_hint::ctrl(KeyCode::Char('o')).into(),
+                " queue · /queue".into(),
             ])
             .dim(),
         );
