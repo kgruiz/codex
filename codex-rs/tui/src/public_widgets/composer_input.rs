@@ -7,6 +7,7 @@
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::app_event::AppEvent;
@@ -37,7 +38,16 @@ impl ComposerInput {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let sender = AppEventSender::new(tx.clone());
         // `enhanced_keys_supported=true` enables Shift+Enter newline hint/behavior.
-        let inner = ChatComposer::new(true, sender, true, "Compose new task".to_string(), false);
+        let keybindings =
+            crate::keybindings::Keybindings::from_config(&HashMap::new(), true, false);
+        let inner = ChatComposer::new(
+            true,
+            sender,
+            true,
+            "Compose new task".to_string(),
+            false,
+            keybindings,
+        );
         Self { inner, _tx: tx, rx }
     }
 

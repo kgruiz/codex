@@ -393,6 +393,13 @@ fn make_chatwidget_manual(
     if let Some(model) = model_override {
         cfg.model = Some(model.to_string());
     }
+
+    #[cfg(target_os = "linux")]
+    let is_wsl = crate::clipboard_paste::is_probably_wsl();
+    #[cfg(not(target_os = "linux"))]
+    let is_wsl = false;
+
+    let keybindings = Keybindings::from_config(&cfg.keybindings, false, is_wsl);
     let bottom = BottomPane::new(BottomPaneParams {
         app_event_tx: app_event_tx.clone(),
         frame_requester: FrameRequester::test_dummy(),
@@ -402,6 +409,7 @@ fn make_chatwidget_manual(
         disable_paste_burst: false,
         animations_enabled: cfg.animations,
         skills: None,
+        keybindings: keybindings.clone(),
     });
     let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("test"));
     let widget = ChatWidget {
@@ -410,6 +418,7 @@ fn make_chatwidget_manual(
         bottom_pane: bottom,
         active_cell: None,
         config: cfg.clone(),
+        keybindings,
         model_family: ModelsManager::construct_model_family_offline(&resolved_model, &cfg),
         auth_manager: auth_manager.clone(),
         models_manager: Arc::new(ModelsManager::new(auth_manager)),

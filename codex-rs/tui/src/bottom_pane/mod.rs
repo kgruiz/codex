@@ -98,6 +98,7 @@ pub(crate) struct BottomPaneParams {
     pub(crate) disable_paste_burst: bool,
     pub(crate) animations_enabled: bool,
     pub(crate) skills: Option<Vec<SkillMetadata>>,
+    pub(crate) keybindings: crate::keybindings::Keybindings,
 }
 
 impl BottomPane {
@@ -111,6 +112,7 @@ impl BottomPane {
             disable_paste_burst,
             animations_enabled,
             skills,
+            keybindings,
         } = params;
         let mut composer = ChatComposer::new(
             has_input_focus,
@@ -118,6 +120,7 @@ impl BottomPane {
             enhanced_keys_supported,
             placeholder_text,
             disable_paste_burst,
+            keybindings,
         );
         composer.set_skill_mentions(skills);
 
@@ -672,7 +675,16 @@ mod tests {
     use insta::assert_snapshot;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
+    use std::collections::HashMap;
     use tokio::sync::mpsc::unbounded_channel;
+
+    fn default_keybindings(enhanced_keys_supported: bool) -> crate::keybindings::Keybindings {
+        crate::keybindings::Keybindings::from_config(
+            &HashMap::new(),
+            enhanced_keys_supported,
+            false,
+        )
+    }
 
     fn snapshot_buffer(buf: &Buffer) -> String {
         let mut lines = Vec::new();
@@ -715,6 +727,7 @@ mod tests {
             disable_paste_burst: false,
             animations_enabled: true,
             skills: Some(Vec::new()),
+            keybindings: default_keybindings(false),
         });
         pane.push_approval_request(exec_request(), &features);
         assert_eq!(CancellationEvent::Handled, pane.on_ctrl_c());
@@ -738,6 +751,7 @@ mod tests {
             disable_paste_burst: false,
             animations_enabled: true,
             skills: Some(Vec::new()),
+            keybindings: default_keybindings(false),
         });
 
         // Create an approval modal (active view).
@@ -772,6 +786,7 @@ mod tests {
             disable_paste_burst: false,
             animations_enabled: true,
             skills: Some(Vec::new()),
+            keybindings: default_keybindings(false),
         });
 
         // Start a running task so the status indicator is active above the composer.
@@ -839,6 +854,7 @@ mod tests {
             disable_paste_burst: false,
             animations_enabled: true,
             skills: Some(Vec::new()),
+            keybindings: default_keybindings(false),
         });
 
         // Begin a task: show initial status.
@@ -866,6 +882,7 @@ mod tests {
             disable_paste_burst: false,
             animations_enabled: true,
             skills: Some(Vec::new()),
+            keybindings: default_keybindings(false),
         });
 
         // Activate spinner (status view replaces composer) with no live ring.
@@ -897,6 +914,7 @@ mod tests {
             disable_paste_burst: false,
             animations_enabled: true,
             skills: Some(Vec::new()),
+            keybindings: default_keybindings(false),
         });
 
         pane.set_task_running(true);
@@ -925,6 +943,7 @@ mod tests {
             disable_paste_burst: false,
             animations_enabled: true,
             skills: Some(Vec::new()),
+            keybindings: default_keybindings(false),
         });
 
         pane.set_task_running(true);

@@ -1,7 +1,5 @@
-#[cfg(target_os = "linux")]
-use crate::clipboard_paste::is_probably_wsl;
 use crate::key_hint;
-use crate::key_hint::KeyBinding;
+use crate::keybindings::Keybindings;
 use crate::render::line_utils::prefix_lines;
 use crate::status::format_tokens_compact;
 use crate::ui_consts::FOOTER_INDENT_COLS;
@@ -19,12 +17,12 @@ use ratatui::widgets::Widget;
 pub(crate) struct FooterProps<'a> {
     pub(crate) mode: FooterMode,
     pub(crate) esc_backtrack_hint: bool,
-    pub(crate) use_shift_enter_hint: bool,
     pub(crate) is_task_running: bool,
     pub(crate) context_window_percent: Option<i64>,
     pub(crate) context_window_used_tokens: Option<i64>,
     pub(crate) model: &'a str,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
+    pub(crate) keybindings: &'a Keybindings,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -105,19 +103,10 @@ fn footer_lines(props: FooterProps<'_>) -> Vec<Line<'static>> {
             ]);
             vec![line]
         }
-        FooterMode::ShortcutOverlay => {
-            #[cfg(target_os = "linux")]
-            let is_wsl = is_probably_wsl();
-            #[cfg(not(target_os = "linux"))]
-            let is_wsl = false;
-
-            let state = ShortcutsState {
-                use_shift_enter_hint: props.use_shift_enter_hint,
-                esc_backtrack_hint: props.esc_backtrack_hint,
-                is_wsl,
-            };
-            shortcut_overlay_lines(state)
-        }
+        FooterMode::ShortcutOverlay => shortcut_overlay_lines(ShortcutsState {
+            esc_backtrack_hint: props.esc_backtrack_hint,
+            keybindings: props.keybindings,
+        }),
         FooterMode::EscHint => vec![esc_hint_line(props.esc_backtrack_hint)],
         FooterMode::ContextOnly => {
             let mut line = status_line_prefix(props.model, props.reasoning_effort);
@@ -141,10 +130,9 @@ struct CtrlCReminderState {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct ShortcutsState {
-    use_shift_enter_hint: bool,
+struct ShortcutsState<'a> {
     esc_backtrack_hint: bool,
-    is_wsl: bool,
+    keybindings: &'a Keybindings,
 }
 
 fn ctrl_c_reminder_line(state: CtrlCReminderState) -> Line<'static> {
@@ -175,42 +163,83 @@ fn esc_hint_line(esc_backtrack_hint: bool) -> Line<'static> {
     }
 }
 
-fn shortcut_overlay_lines(state: ShortcutsState) -> Vec<Line<'static>> {
-    let mut commands = Line::from("");
-    let mut model = Line::from("");
-    let mut thinking = Line::from("");
-    let mut newline = Line::from("");
-    let mut file_paths = Line::from("");
-    let mut paste_image = Line::from("");
-    let mut edit_previous = Line::from("");
-    let mut quit = Line::from("");
-    let mut show_transcript = Line::from("");
+fn shortcut_overlay_lines(state: ShortcutsState<'_>) -> Vec<Line<'static>> {
+    let newline = state
+        .keybindings
+        .newline
+        .first()
+        .copied()
+        .unwrap_or_else(|| key_hint::shift(KeyCode::Enter));
 
-    for descriptor in SHORTCUTS {
-        if let Some(text) = descriptor.overlay_entry(state) {
-            match descriptor.id {
-                ShortcutId::Commands => commands = text,
-                ShortcutId::Model => model = text,
-                ShortcutId::Thinking => thinking = text,
-                ShortcutId::InsertNewline => newline = text,
-                ShortcutId::FilePaths => file_paths = text,
-                ShortcutId::PasteImage => paste_image = text,
-                ShortcutId::EditPrevious => edit_previous = text,
-                ShortcutId::Quit => quit = text,
-                ShortcutId::ShowTranscript => show_transcript = text,
-            }
-        }
-    }
+    let paste = state
+        .keybindings
+        .paste
+        .first()
+        .copied()
+        .unwrap_or_else(|| key_hint::ctrl(KeyCode::Char('v')));
+
+    let copy_prompt = state
+        .keybindings
+        .copy_prompt
+        .first()
+        .copied()
+        .unwrap_or_else(|| key_hint::alt(KeyCode::Char('c')));
+
+    let commands = Line::from(vec![
+        key_hint::plain(KeyCode::Char('/')).into(),
+        " for commands".into(),
+    ]);
+
+    let model = Line::from(vec![
+        key_hint::alt(KeyCode::Char('m')).into(),
+        " to change model".into(),
+    ]);
+
+    let thinking = Line::from(vec![
+        key_hint::alt(KeyCode::Char('t')).into(),
+        " to change thinking".into(),
+    ]);
+
+    let file_paths = Line::from(vec![
+        key_hint::plain(KeyCode::Char('@')).into(),
+        " for file paths".into(),
+    ]);
+
+    let edit_previous = if state.esc_backtrack_hint {
+        Line::from(vec![
+            key_hint::plain(KeyCode::Esc).into(),
+            " again to edit previous message".into(),
+        ])
+    } else {
+        Line::from(vec![
+            key_hint::plain(KeyCode::Esc).into(),
+            " ".into(),
+            key_hint::plain(KeyCode::Esc).into(),
+            " to edit previous message".into(),
+        ])
+    };
+
+    let quit = Line::from(vec![
+        key_hint::ctrl(KeyCode::Char('c')).into(),
+        " to exit".into(),
+    ]);
+
+    let show_transcript = Line::from(vec![
+        key_hint::ctrl(KeyCode::Char('t')).into(),
+        " to view transcript".into(),
+    ]);
 
     let ordered = vec![
         commands,
-        newline,
+        Line::from(vec![newline.into(), " for newline".into()]),
         model,
         thinking,
         file_paths,
-        paste_image,
+        Line::from(vec![paste.into(), " to paste from clipboard".into()]),
+        Line::from(vec![copy_prompt.into(), " to copy prompt".into()]),
         edit_previous,
         quit,
+        Line::from(""),
         Line::from(""),
         show_transcript,
     ];
@@ -313,187 +342,13 @@ fn thinking_label(effort: ReasoningEffort) -> &'static str {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ShortcutId {
-    Commands,
-    Model,
-    Thinking,
-    InsertNewline,
-    FilePaths,
-    PasteImage,
-    EditPrevious,
-    Quit,
-    ShowTranscript,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ShortcutBinding {
-    key: KeyBinding,
-    condition: DisplayCondition,
-}
-
-impl ShortcutBinding {
-    fn matches(&self, state: ShortcutsState) -> bool {
-        self.condition.matches(state)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum DisplayCondition {
-    Always,
-    WhenShiftEnterHint,
-    WhenNotShiftEnterHint,
-    WhenUnderWSL,
-}
-
-impl DisplayCondition {
-    fn matches(self, state: ShortcutsState) -> bool {
-        match self {
-            DisplayCondition::Always => true,
-            DisplayCondition::WhenShiftEnterHint => state.use_shift_enter_hint,
-            DisplayCondition::WhenNotShiftEnterHint => !state.use_shift_enter_hint,
-            DisplayCondition::WhenUnderWSL => state.is_wsl,
-        }
-    }
-}
-
-struct ShortcutDescriptor {
-    id: ShortcutId,
-    bindings: &'static [ShortcutBinding],
-    prefix: &'static str,
-    label: &'static str,
-}
-
-impl ShortcutDescriptor {
-    fn binding_for(&self, state: ShortcutsState) -> Option<&'static ShortcutBinding> {
-        self.bindings.iter().find(|binding| binding.matches(state))
-    }
-
-    fn overlay_entry(&self, state: ShortcutsState) -> Option<Line<'static>> {
-        let binding = self.binding_for(state)?;
-        let mut line = Line::from(vec![self.prefix.into(), binding.key.into()]);
-        match self.id {
-            ShortcutId::EditPrevious => {
-                if state.esc_backtrack_hint {
-                    line.push_span(" again to edit previous message");
-                } else {
-                    line.extend(vec![
-                        " ".into(),
-                        key_hint::plain(KeyCode::Esc).into(),
-                        " to edit previous message".into(),
-                    ]);
-                }
-            }
-            _ => line.push_span(self.label),
-        };
-        Some(line)
-    }
-}
-
-const SHORTCUTS: &[ShortcutDescriptor] = &[
-    ShortcutDescriptor {
-        id: ShortcutId::Commands,
-        bindings: &[ShortcutBinding {
-            key: key_hint::plain(KeyCode::Char('/')),
-            condition: DisplayCondition::Always,
-        }],
-        prefix: "",
-        label: " for commands",
-    },
-    ShortcutDescriptor {
-        id: ShortcutId::Model,
-        bindings: &[ShortcutBinding {
-            key: key_hint::alt(KeyCode::Char('m')),
-            condition: DisplayCondition::Always,
-        }],
-        prefix: "",
-        label: " to change model",
-    },
-    ShortcutDescriptor {
-        id: ShortcutId::Thinking,
-        bindings: &[ShortcutBinding {
-            key: key_hint::alt(KeyCode::Char('t')),
-            condition: DisplayCondition::Always,
-        }],
-        prefix: "",
-        label: " to change thinking",
-    },
-    ShortcutDescriptor {
-        id: ShortcutId::InsertNewline,
-        bindings: &[
-            ShortcutBinding {
-                key: key_hint::shift(KeyCode::Enter),
-                condition: DisplayCondition::WhenShiftEnterHint,
-            },
-            ShortcutBinding {
-                key: key_hint::ctrl(KeyCode::Char('j')),
-                condition: DisplayCondition::WhenNotShiftEnterHint,
-            },
-        ],
-        prefix: "",
-        label: " for newline",
-    },
-    ShortcutDescriptor {
-        id: ShortcutId::FilePaths,
-        bindings: &[ShortcutBinding {
-            key: key_hint::plain(KeyCode::Char('@')),
-            condition: DisplayCondition::Always,
-        }],
-        prefix: "",
-        label: " for file paths",
-    },
-    ShortcutDescriptor {
-        id: ShortcutId::PasteImage,
-        // Show Ctrl+Alt+V when running under WSL (terminals often intercept plain
-        // Ctrl+V); otherwise fall back to Ctrl+V.
-        bindings: &[
-            ShortcutBinding {
-                key: key_hint::ctrl_alt(KeyCode::Char('v')),
-                condition: DisplayCondition::WhenUnderWSL,
-            },
-            ShortcutBinding {
-                key: key_hint::ctrl(KeyCode::Char('v')),
-                condition: DisplayCondition::Always,
-            },
-        ],
-        prefix: "",
-        label: " to paste images",
-    },
-    ShortcutDescriptor {
-        id: ShortcutId::EditPrevious,
-        bindings: &[ShortcutBinding {
-            key: key_hint::plain(KeyCode::Esc),
-            condition: DisplayCondition::Always,
-        }],
-        prefix: "",
-        label: "",
-    },
-    ShortcutDescriptor {
-        id: ShortcutId::Quit,
-        bindings: &[ShortcutBinding {
-            key: key_hint::ctrl(KeyCode::Char('c')),
-            condition: DisplayCondition::Always,
-        }],
-        prefix: "",
-        label: " to exit",
-    },
-    ShortcutDescriptor {
-        id: ShortcutId::ShowTranscript,
-        bindings: &[ShortcutBinding {
-            key: key_hint::ctrl(KeyCode::Char('t')),
-            condition: DisplayCondition::Always,
-        }],
-        prefix: "",
-        label: " to view transcript",
-    },
-];
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use insta::assert_snapshot;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use std::collections::HashMap;
 
     fn snapshot_footer(name: &str, props: FooterProps<'_>) {
         let height = footer_height(props).max(1);
@@ -509,17 +364,21 @@ mod tests {
 
     #[test]
     fn footer_snapshots() {
+        let empty: HashMap<String, Vec<String>> = HashMap::new();
+        let keybindings_default = Keybindings::from_config(&empty, false, false);
+        let keybindings_shift = Keybindings::from_config(&empty, true, false);
+
         snapshot_footer(
             "footer_shortcuts_default",
             FooterProps {
                 mode: FooterMode::ShortcutSummary,
                 esc_backtrack_hint: false,
-                use_shift_enter_hint: false,
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
                 model: "",
                 reasoning_effort: None,
+                keybindings: &keybindings_default,
             },
         );
 
@@ -528,12 +387,12 @@ mod tests {
             FooterProps {
                 mode: FooterMode::ShortcutOverlay,
                 esc_backtrack_hint: true,
-                use_shift_enter_hint: true,
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
                 model: "",
                 reasoning_effort: None,
+                keybindings: &keybindings_shift,
             },
         );
 
@@ -542,12 +401,12 @@ mod tests {
             FooterProps {
                 mode: FooterMode::CtrlCReminder,
                 esc_backtrack_hint: false,
-                use_shift_enter_hint: false,
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
                 model: "",
                 reasoning_effort: None,
+                keybindings: &keybindings_default,
             },
         );
 
@@ -556,12 +415,12 @@ mod tests {
             FooterProps {
                 mode: FooterMode::CtrlCReminder,
                 esc_backtrack_hint: false,
-                use_shift_enter_hint: false,
                 is_task_running: true,
                 context_window_percent: None,
                 context_window_used_tokens: None,
                 model: "",
                 reasoning_effort: None,
+                keybindings: &keybindings_default,
             },
         );
 
@@ -570,12 +429,12 @@ mod tests {
             FooterProps {
                 mode: FooterMode::EscHint,
                 esc_backtrack_hint: false,
-                use_shift_enter_hint: false,
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
                 model: "",
                 reasoning_effort: None,
+                keybindings: &keybindings_default,
             },
         );
 
@@ -584,12 +443,12 @@ mod tests {
             FooterProps {
                 mode: FooterMode::EscHint,
                 esc_backtrack_hint: true,
-                use_shift_enter_hint: false,
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
                 model: "",
                 reasoning_effort: None,
+                keybindings: &keybindings_default,
             },
         );
 
@@ -598,12 +457,12 @@ mod tests {
             FooterProps {
                 mode: FooterMode::ShortcutSummary,
                 esc_backtrack_hint: false,
-                use_shift_enter_hint: false,
                 is_task_running: true,
                 context_window_percent: Some(72),
                 context_window_used_tokens: None,
                 model: "",
                 reasoning_effort: None,
+                keybindings: &keybindings_default,
             },
         );
 
@@ -612,12 +471,12 @@ mod tests {
             FooterProps {
                 mode: FooterMode::ShortcutSummary,
                 esc_backtrack_hint: false,
-                use_shift_enter_hint: false,
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: Some(123_456),
                 model: "",
                 reasoning_effort: None,
+                keybindings: &keybindings_default,
             },
         );
 
@@ -626,12 +485,12 @@ mod tests {
             FooterProps {
                 mode: FooterMode::ShortcutSummary,
                 esc_backtrack_hint: false,
-                use_shift_enter_hint: false,
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
                 model: "gpt-5.1-codex",
                 reasoning_effort: Some(ReasoningEffort::Medium),
+                keybindings: &keybindings_default,
             },
         );
     }

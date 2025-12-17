@@ -280,6 +280,12 @@ impl TextArea {
                 modifiers: KeyModifiers::ALT,
                 ..
             }  => self.delete_forward_word(),
+            // Readline-style Meta-d (Alt+d): delete word forward.
+            KeyEvent {
+                code: KeyCode::Char('d'),
+                modifiers: KeyModifiers::ALT,
+                ..
+            } => self.delete_forward_word(),
             KeyEvent {
                 code: KeyCode::Delete,
                 ..
@@ -559,6 +565,14 @@ impl TextArea {
     pub fn move_cursor_right(&mut self) {
         self.cursor_pos = self.next_atomic_boundary(self.cursor_pos);
         self.preferred_col = None;
+    }
+
+    pub fn move_cursor_word_left(&mut self) {
+        self.set_cursor(self.beginning_of_previous_word());
+    }
+
+    pub fn move_cursor_word_right(&mut self) {
+        self.set_cursor(self.end_of_next_word());
     }
 
     pub fn move_cursor_up(&mut self) {
@@ -1450,6 +1464,12 @@ mod tests {
         let mut t = ta_with("hello world");
         t.set_cursor(0);
         t.input(KeyEvent::new(KeyCode::Delete, KeyModifiers::ALT));
+        assert_eq!(t.text(), " world");
+        assert_eq!(t.cursor(), 0);
+
+        let mut t = ta_with("hello world");
+        t.set_cursor(0);
+        t.input(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::ALT));
         assert_eq!(t.text(), " world");
         assert_eq!(t.cursor(), 0);
 

@@ -55,6 +55,7 @@ use crate::bottom_pane::textarea::TextAreaState;
 use crate::clipboard_paste::normalize_pasted_path;
 use crate::clipboard_paste::pasted_image_format;
 use crate::history_cell;
+use crate::keybindings::Keybindings;
 use crate::ui_consts::LIVE_PREFIX_COLS;
 use codex_core::skills::model::SkillMetadata;
 use codex_file_search::FileMatch;
@@ -125,7 +126,6 @@ pub(crate) struct ChatComposer {
     history: ChatComposerHistory,
     ctrl_c_quit_hint: bool,
     esc_backtrack_hint: bool,
-    use_shift_enter_hint: bool,
     dismissed_file_popup_token: Option<String>,
     current_file_query: Option<String>,
     pending_pastes: Vec<(String, String)>,
@@ -148,6 +148,7 @@ pub(crate) struct ChatComposer {
     session_reasoning_effort: Option<ReasoningEffort>,
     skills: Option<Vec<SkillMetadata>>,
     dismissed_skill_popup_token: Option<String>,
+    keybindings: Keybindings,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -164,12 +165,11 @@ impl ChatComposer {
     pub fn new(
         has_input_focus: bool,
         app_event_tx: AppEventSender,
-        enhanced_keys_supported: bool,
+        _enhanced_keys_supported: bool,
         placeholder_text: String,
         disable_paste_burst: bool,
+        keybindings: Keybindings,
     ) -> Self {
-        let use_shift_enter_hint = enhanced_keys_supported;
-
         let mut this = Self {
             textarea: TextArea::new(),
             textarea_state: RefCell::new(TextAreaState::default()),
@@ -178,7 +178,6 @@ impl ChatComposer {
             history: ChatComposerHistory::new(),
             ctrl_c_quit_hint: false,
             esc_backtrack_hint: false,
-            use_shift_enter_hint,
             dismissed_file_popup_token: None,
             current_file_query: None,
             pending_pastes: Vec::new(),
@@ -199,6 +198,7 @@ impl ChatComposer {
             session_reasoning_effort: None,
             skills: None,
             dismissed_skill_popup_token: None,
+            keybindings,
         };
         // Apply configuration via the setter to keep side-effects centralized.
         this.set_disable_paste_burst(disable_paste_burst);
@@ -1141,146 +1141,160 @@ impl ChatComposer {
                 }
                 self.handle_input_basic(key_event)
             }
-            KeyEvent {
-                code: KeyCode::Enter,
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
-                // If the first line is a bare built-in slash command (no args),
-                // dispatch it even when the slash popup isn't visible. This preserves
-                // the workflow: type a prefix ("/di"), press Tab to complete to
-                // "/diff ", then press Enter to run it. Tab moves the cursor beyond
-                // the '/name' token and our caret-based heuristic hides the popup,
-                // but Enter should still dispatch the command rather than submit
-                // literal text.
-                if self.commands_enabled {
-                    let first_line = self.textarea.text().lines().next().unwrap_or("");
-                    if let Some((name, rest)) = parse_slash_name(first_line)
-                        && rest.is_empty()
-                        && let Some((_n, cmd)) = built_in_slash_commands()
-                            .into_iter()
-                            .find(|(n, _)| *n == name)
-                    {
-                        self.textarea.set_text("");
-                        return (InputResult::Command(cmd), true);
-                    }
-                }
-                // If we're in a paste-like burst capture, treat Enter as part of the burst
-                // and accumulate it rather than submitting or inserting immediately.
-                // Do not treat Enter as paste inside a slash-command context.
-                let in_slash_context = self.commands_enabled
-                    && (matches!(self.active_popup, ActivePopup::Command(_))
-                        || self
-                            .textarea
-                            .text()
-                            .lines()
-                            .next()
-                            .unwrap_or("")
-                            .starts_with('/'));
-                if self.paste_burst.is_active() && !in_slash_context {
-                    let now = Instant::now();
-                    if self.paste_burst.append_newline_if_active(now) {
-                        return (InputResult::None, true);
-                    }
-                }
-                // If we have pending placeholder pastes, replace them in the textarea text
-                // and continue to the normal submission flow to handle slash commands.
-                if !self.pending_pastes.is_empty() {
-                    let mut text = self.textarea.text().to_string();
-                    for (placeholder, actual) in &self.pending_pastes {
-                        if text.contains(placeholder) {
-                            text = text.replace(placeholder, actual);
-                        }
-                    }
-                    self.textarea.set_text(&text);
-                    self.pending_pastes.clear();
-                }
-
-                // During a paste-like burst, treat Enter as a newline instead of submit.
-                let now = Instant::now();
-                if self
-                    .paste_burst
-                    .newline_should_insert_instead_of_submit(now)
-                    && !in_slash_context
-                {
-                    self.textarea.insert_str("\n");
-                    self.paste_burst.extend_window(now);
-                    return (InputResult::None, true);
-                }
-                let mut text = self.textarea.text().to_string();
-                let original_input = text.clone();
-                let input_starts_with_space = original_input.starts_with(' ');
-                self.textarea.set_text("");
-
-                // Replace all pending pastes in the text
-                for (placeholder, actual) in &self.pending_pastes {
-                    if text.contains(placeholder) {
-                        text = text.replace(placeholder, actual);
-                    }
-                }
-                self.pending_pastes.clear();
-
-                // If there is neither text nor attachments, suppress submission entirely.
-                let has_attachments = !self.attached_images.is_empty();
-                text = text.trim().to_string();
-                if self.commands_enabled
-                    && let Some((name, _rest)) = parse_slash_name(&text)
-                {
-                    let treat_as_plain_text = input_starts_with_space || name.contains('/');
-                    if !treat_as_plain_text {
-                        let is_builtin = built_in_slash_commands()
-                            .into_iter()
-                            .any(|(command_name, _)| command_name == name);
-                        let prompt_prefix = format!("{PROMPTS_CMD_PREFIX}:");
-                        let is_known_prompt = name
-                            .strip_prefix(&prompt_prefix)
-                            .map(|prompt_name| {
-                                self.custom_prompts
-                                    .iter()
-                                    .any(|prompt| prompt.name == prompt_name)
-                            })
-                            .unwrap_or(false);
-                        if !is_builtin && !is_known_prompt {
-                            let message = format!(
-                                r#"Unrecognized command '/{name}'. Type "/" for a list of supported commands."#
-                            );
-                            self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                                history_cell::new_info_event(message, None),
-                            )));
-                            self.textarea.set_text(&original_input);
-                            self.textarea.set_cursor(original_input.len());
-                            return (InputResult::None, true);
-                        }
-                    }
-                }
-
-                if self.commands_enabled {
-                    let expanded_prompt = match expand_custom_prompt(&text, &self.custom_prompts) {
-                        Ok(expanded) => expanded,
-                        Err(err) => {
-                            self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                                history_cell::new_error_event(err.user_message()),
-                            )));
-                            self.textarea.set_text(&original_input);
-                            self.textarea.set_cursor(original_input.len());
-                            return (InputResult::None, true);
-                        }
-                    };
-                    if let Some(expanded) = expanded_prompt {
-                        text = expanded;
-                    }
-                }
-                if text.is_empty() && !has_attachments {
-                    return (InputResult::None, true);
-                }
-                if !text.is_empty() {
-                    self.history.record_local_submission(&text);
-                }
-                // Do not clear attached_images here; ChatWidget drains them via take_recent_submission_attachments().
-                (InputResult::Submitted(text), true)
+            key_event if self.is_submit_key_event(&key_event) => {
+                self.handle_submit_key_event(key_event)
             }
             input => self.handle_input_basic(input),
         }
+    }
+
+    fn is_submit_key_event(&self, key_event: &KeyEvent) -> bool {
+        self.keybindings
+            .submit
+            .iter()
+            .any(|binding| binding.matches(key_event))
+    }
+
+    fn handle_submit_key_event(&mut self, key_event: KeyEvent) -> (InputResult, bool) {
+        // If the first line is a bare built-in slash command (no args),
+        // dispatch it even when the slash popup isn't visible. This preserves
+        // the workflow: type a prefix ("/di"), press Tab to complete to
+        // "/diff ", then press Enter to run it. Tab moves the cursor beyond
+        // the '/name' token and our caret-based heuristic hides the popup,
+        // but Enter should still dispatch the command rather than submit
+        // literal text.
+        if self.commands_enabled {
+            let first_line = self.textarea.text().lines().next().unwrap_or("");
+            if let Some((name, rest)) = parse_slash_name(first_line)
+                && rest.is_empty()
+                && let Some((_n, cmd)) = built_in_slash_commands()
+                    .into_iter()
+                    .find(|(n, _)| *n == name)
+            {
+                self.textarea.set_text("");
+                return (InputResult::Command(cmd), true);
+            }
+        }
+
+        // If we're in a paste-like burst capture, treat plain Enter as part of the burst and
+        // accumulate it rather than submitting or inserting immediately.
+        // Do not treat Enter as paste inside a slash-command context.
+        let in_slash_context = self.commands_enabled
+            && (matches!(self.active_popup, ActivePopup::Command(_))
+                || self
+                    .textarea
+                    .text()
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .starts_with('/'));
+
+        let is_plain_enter =
+            matches!(key_event.code, KeyCode::Enter) && key_event.modifiers.is_empty();
+        if is_plain_enter && self.paste_burst.is_active() && !in_slash_context {
+            let now = Instant::now();
+            if self.paste_burst.append_newline_if_active(now) {
+                return (InputResult::None, true);
+            }
+        }
+
+        // If we have pending placeholder pastes, replace them in the textarea text
+        // and continue to the normal submission flow to handle slash commands.
+        if !self.pending_pastes.is_empty() {
+            let mut text = self.textarea.text().to_string();
+            for (placeholder, actual) in &self.pending_pastes {
+                if text.contains(placeholder) {
+                    text = text.replace(placeholder, actual);
+                }
+            }
+            self.textarea.set_text(&text);
+            self.pending_pastes.clear();
+        }
+
+        // During a paste-like burst, treat plain Enter as a newline instead of submit.
+        let now = Instant::now();
+        if is_plain_enter
+            && self
+                .paste_burst
+                .newline_should_insert_instead_of_submit(now)
+            && !in_slash_context
+        {
+            self.textarea.insert_str("\n");
+            self.paste_burst.extend_window(now);
+            return (InputResult::None, true);
+        }
+
+        let mut text = self.textarea.text().to_string();
+        let original_input = text.clone();
+        let input_starts_with_space = original_input.starts_with(' ');
+        self.textarea.set_text("");
+
+        // Replace all pending pastes in the text
+        for (placeholder, actual) in &self.pending_pastes {
+            if text.contains(placeholder) {
+                text = text.replace(placeholder, actual);
+            }
+        }
+        self.pending_pastes.clear();
+
+        // If there is neither text nor attachments, suppress submission entirely.
+        let has_attachments = !self.attached_images.is_empty();
+        text = text.trim().to_string();
+        if self.commands_enabled
+            && let Some((name, _rest)) = parse_slash_name(&text)
+        {
+            let treat_as_plain_text = input_starts_with_space || name.contains('/');
+            if !treat_as_plain_text {
+                let is_builtin = built_in_slash_commands()
+                    .into_iter()
+                    .any(|(command_name, _)| command_name == name);
+                let prompt_prefix = format!("{PROMPTS_CMD_PREFIX}:");
+                let is_known_prompt = name
+                    .strip_prefix(&prompt_prefix)
+                    .map(|prompt_name| {
+                        self.custom_prompts
+                            .iter()
+                            .any(|prompt| prompt.name == prompt_name)
+                    })
+                    .unwrap_or(false);
+                if !is_builtin && !is_known_prompt {
+                    let message = format!(
+                        r#"Unrecognized command '/{name}'. Type "/" for a list of supported commands."#
+                    );
+                    self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
+                        history_cell::new_info_event(message, None),
+                    )));
+                    self.textarea.set_text(&original_input);
+                    self.textarea.set_cursor(original_input.len());
+                    return (InputResult::None, true);
+                }
+            }
+        }
+
+        if self.commands_enabled {
+            let expanded_prompt = match expand_custom_prompt(&text, &self.custom_prompts) {
+                Ok(expanded) => expanded,
+                Err(err) => {
+                    self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
+                        history_cell::new_error_event(err.user_message()),
+                    )));
+                    self.textarea.set_text(&original_input);
+                    self.textarea.set_cursor(original_input.len());
+                    return (InputResult::None, true);
+                }
+            };
+            if let Some(expanded) = expanded_prompt {
+                text = expanded;
+            }
+        }
+        if text.is_empty() && !has_attachments {
+            return (InputResult::None, true);
+        }
+        if !text.is_empty() {
+            self.history.record_local_submission(&text);
+        }
+        // Do not clear attached_images here; ChatWidget drains them via take_recent_submission_attachments().
+        (InputResult::Submitted(text), true)
     }
 
     fn handle_paste_burst_flush(&mut self, now: Instant) -> bool {
@@ -1316,6 +1330,21 @@ impl ChatComposer {
             && self.paste_burst.is_active()
             && self.paste_burst.append_newline_if_active(now)
         {
+            return (InputResult::None, true);
+        }
+
+        if self.keybindings.newline.iter().any(|b| b.matches(&input)) {
+            self.textarea.insert_str("\n");
+            self.paste_burst.clear_window_after_non_char();
+            self.sync_popups();
+            self.sync_placeholders_after_text_mutation();
+            return (InputResult::None, true);
+        }
+
+        if self.handle_custom_editor_keybindings(&input) {
+            self.paste_burst.clear_window_after_non_char();
+            self.sync_popups();
+            self.sync_placeholders_after_text_mutation();
             return (InputResult::None, true);
         }
 
@@ -1388,7 +1417,6 @@ impl ChatComposer {
 
         // Normal input handling
         self.textarea.input(input);
-        let text_after = self.textarea.text();
 
         // Update paste-burst heuristic for plain Char (no Ctrl/Alt) events.
         let crossterm::event::KeyEvent {
@@ -1410,34 +1438,98 @@ impl ChatComposer {
             }
         }
 
-        // Check if any placeholders were removed and remove their corresponding pending pastes
+        self.sync_placeholders_after_text_mutation();
+
+        (InputResult::None, true)
+    }
+
+    fn sync_placeholders_after_text_mutation(&mut self) {
+        let text_after = self.textarea.text();
+
         self.pending_pastes
             .retain(|(placeholder, _)| text_after.contains(placeholder));
 
-        // Keep attached images in proportion to how many matching placeholders exist in the text.
-        // This handles duplicate placeholders that share the same visible label.
-        if !self.attached_images.is_empty() {
-            let mut needed: HashMap<String, usize> = HashMap::new();
-            for img in &self.attached_images {
-                needed
-                    .entry(img.placeholder.clone())
-                    .or_insert_with(|| text_after.matches(&img.placeholder).count());
-            }
-
-            let mut used: HashMap<String, usize> = HashMap::new();
-            let mut kept: Vec<AttachedImage> = Vec::with_capacity(self.attached_images.len());
-            for img in self.attached_images.drain(..) {
-                let total_needed = *needed.get(&img.placeholder).unwrap_or(&0);
-                let used_count = used.entry(img.placeholder.clone()).or_insert(0);
-                if *used_count < total_needed {
-                    kept.push(img);
-                    *used_count += 1;
-                }
-            }
-            self.attached_images = kept;
+        if self.attached_images.is_empty() {
+            return;
         }
 
-        (InputResult::None, true)
+        // Keep attached images in proportion to how many matching placeholders exist in the text.
+        // This handles duplicate placeholders that share the same visible label.
+        let mut needed: HashMap<String, usize> = HashMap::new();
+        for img in &self.attached_images {
+            needed
+                .entry(img.placeholder.clone())
+                .or_insert_with(|| text_after.matches(&img.placeholder).count());
+        }
+
+        let mut used: HashMap<String, usize> = HashMap::new();
+        let mut kept: Vec<AttachedImage> = Vec::with_capacity(self.attached_images.len());
+        for img in self.attached_images.drain(..) {
+            let total_needed = *needed.get(&img.placeholder).unwrap_or(&0);
+            let used_count = used.entry(img.placeholder.clone()).or_insert(0);
+            if *used_count < total_needed {
+                kept.push(img);
+                *used_count += 1;
+            }
+        }
+        self.attached_images = kept;
+    }
+
+    fn handle_custom_editor_keybindings(&mut self, input: &KeyEvent) -> bool {
+        let editor = &self.keybindings.editor;
+        if editor.move_left.iter().any(|b| b.matches(input)) {
+            self.textarea.move_cursor_left();
+            return true;
+        }
+        if editor.move_right.iter().any(|b| b.matches(input)) {
+            self.textarea.move_cursor_right();
+            return true;
+        }
+        if editor.move_up.iter().any(|b| b.matches(input)) {
+            self.textarea.move_cursor_up();
+            return true;
+        }
+        if editor.move_down.iter().any(|b| b.matches(input)) {
+            self.textarea.move_cursor_down();
+            return true;
+        }
+        if editor.move_word_left.iter().any(|b| b.matches(input)) {
+            self.textarea.move_cursor_word_left();
+            return true;
+        }
+        if editor.move_word_right.iter().any(|b| b.matches(input)) {
+            self.textarea.move_cursor_word_right();
+            return true;
+        }
+        if editor.home.iter().any(|b| b.matches(input)) {
+            self.textarea.move_cursor_to_beginning_of_line(false);
+            return true;
+        }
+        if editor.end.iter().any(|b| b.matches(input)) {
+            self.textarea.move_cursor_to_end_of_line(false);
+            return true;
+        }
+        if editor.delete_word_backward.iter().any(|b| b.matches(input)) {
+            self.textarea.delete_backward_word();
+            return true;
+        }
+        if editor.delete_word_forward.iter().any(|b| b.matches(input)) {
+            self.textarea.delete_forward_word();
+            return true;
+        }
+        if editor.delete_backward.iter().any(|b| b.matches(input)) {
+            if self.try_remove_any_placeholder_at_cursor() {
+                return true;
+            }
+            self.textarea.delete_backward(1);
+            return true;
+        }
+        if editor.delete_forward.iter().any(|b| b.matches(input)) {
+            self.textarea.delete_forward(1);
+            return true;
+        }
+
+        false
     }
 
     /// Attempts to remove an image or paste placeholder if the cursor is at the end of one.
@@ -1606,12 +1698,12 @@ impl ChatComposer {
         FooterProps {
             mode: self.footer_mode(),
             esc_backtrack_hint: self.esc_backtrack_hint,
-            use_shift_enter_hint: self.use_shift_enter_hint,
             is_task_running: self.is_task_running,
             context_window_percent: self.context_window_percent,
             context_window_used_tokens: self.context_window_used_tokens,
             model: &self.session_model,
             reasoning_effort: self.session_reasoning_effort,
+            keybindings: &self.keybindings,
         }
     }
 
@@ -2031,6 +2123,7 @@ mod tests {
     use image::ImageBuffer;
     use image::Rgba;
     use pretty_assertions::assert_eq;
+    use std::collections::HashMap;
     use std::path::PathBuf;
     use tempfile::tempdir;
 
@@ -2044,6 +2137,14 @@ mod tests {
     use crate::bottom_pane::textarea::TextArea;
     use tokio::sync::mpsc::unbounded_channel;
 
+    fn default_keybindings(enhanced_keys_supported: bool) -> crate::keybindings::Keybindings {
+        crate::keybindings::Keybindings::from_config(
+            &HashMap::new(),
+            enhanced_keys_supported,
+            false,
+        )
+    }
+
     #[test]
     fn footer_hint_row_is_separated_from_composer() {
         let (tx, _rx) = unbounded_channel::<AppEvent>();
@@ -2054,6 +2155,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         let area = Rect::new(0, 0, 40, 6);
@@ -2114,6 +2216,7 @@ mod tests {
             enhanced_keys_supported,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(enhanced_keys_supported),
         );
         setup(&mut composer);
         let footer_props = composer.footer_props();
@@ -2193,6 +2296,7 @@ mod tests {
             true,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(true),
         );
 
         type_chars_humanlike(&mut composer, &['d']);
@@ -2218,6 +2322,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         composer.set_text_content("draft text".to_string());
@@ -2244,6 +2349,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         let (result, needs_redraw) =
@@ -2285,6 +2391,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         for ch in ['h', 'i', '?', 't', 'h', 'e', 'r', 'e'] {
@@ -2314,6 +2421,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
@@ -2488,6 +2596,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE));
@@ -2517,6 +2626,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         let needs_redraw = composer.handle_paste("hello".to_string());
@@ -2546,6 +2656,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         // Ensure composer is empty and press Enter.
@@ -2573,6 +2684,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         let large = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 10);
@@ -2608,6 +2720,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         composer.handle_paste(large);
@@ -2649,6 +2762,7 @@ mod tests {
                 false,
                 "Ask Codex to do anything".to_string(),
                 false,
+                default_keybindings(false),
             );
 
             if let Some(text) = input {
@@ -2692,6 +2806,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         // Type "/mo" humanlike so paste-burst doesn’t interfere.
@@ -2720,6 +2835,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
         type_chars_humanlike(&mut composer, &['/', 'm', 'o']);
 
@@ -2751,6 +2867,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         // Type "/res" humanlike so paste-burst doesn’t interfere.
@@ -2776,6 +2893,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
         type_chars_humanlike(&mut composer, &['/', 'r', 'e', 's']);
 
@@ -2819,6 +2937,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         // Type the slash command.
@@ -2872,6 +2991,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         type_chars_humanlike(&mut composer, &['/', 'c']);
@@ -2893,6 +3013,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         // Type a prefix and complete with Tab, which inserts a trailing space
@@ -2929,6 +3050,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         type_chars_humanlike(&mut composer, &['/', 'm', 'e', 'n', 't', 'i', 'o', 'n']);
@@ -2964,6 +3086,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         // Define test cases: (paste content, is_large)
@@ -3043,6 +3166,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         // Define test cases: (content, is_large)
@@ -3115,6 +3239,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         let paste = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 4);
@@ -3152,6 +3277,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         let paste = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 4);
@@ -3192,6 +3318,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         // Define test cases: (cursor_position_from_end, expected_pending_count)
@@ -3240,6 +3367,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
         let path = PathBuf::from("/tmp/image1.png");
         composer.attach_image(path.clone(), 32, 16, "PNG");
@@ -3264,6 +3392,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
         let path = PathBuf::from("/tmp/image2.png");
         composer.attach_image(path.clone(), 10, 5, "PNG");
@@ -3289,6 +3418,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
         let path = PathBuf::from("/tmp/image3.png");
         composer.attach_image(path.clone(), 20, 10, "PNG");
@@ -3330,6 +3460,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         // Insert an image placeholder at the start
@@ -3361,6 +3492,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         let path1 = PathBuf::from("/tmp/image_dup1.png");
@@ -3418,6 +3550,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         let needs_redraw = composer.handle_paste(tmp_path.to_string_lossy().to_string());
@@ -3445,6 +3578,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         // Inject prompts as if received via event.
@@ -3481,6 +3615,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         composer.set_custom_prompts(vec![CustomPrompt {
@@ -3515,6 +3650,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         composer.set_custom_prompts(vec![CustomPrompt {
@@ -3553,6 +3689,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         // Create a custom prompt with positional args (no named args like $USER)
@@ -3617,6 +3754,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         composer
@@ -3653,6 +3791,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         composer.textarea.set_text(" /this-looks-like-a-command");
@@ -3683,6 +3822,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         composer.set_custom_prompts(vec![CustomPrompt {
@@ -3733,6 +3873,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         composer.set_custom_prompts(vec![CustomPrompt {
@@ -3786,6 +3927,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         composer.set_custom_prompts(vec![CustomPrompt {
@@ -3823,6 +3965,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         composer.set_custom_prompts(vec![CustomPrompt {
@@ -3854,6 +3997,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         composer.set_custom_prompts(vec![CustomPrompt {
@@ -3890,6 +4034,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         composer.set_custom_prompts(vec![CustomPrompt {
@@ -3927,6 +4072,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         composer.set_custom_prompts(vec![CustomPrompt {
@@ -3965,6 +4111,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         let count = 32;
@@ -4009,6 +4156,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         let count = LARGE_PASTE_CHAR_THRESHOLD + 1; // > threshold to trigger placeholder
@@ -4041,6 +4189,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         let count = LARGE_PASTE_CHAR_THRESHOLD; // 1000 in current config
@@ -4066,6 +4215,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         // Simulate history-like content: "/ test"
@@ -4096,6 +4246,7 @@ mod tests {
             false,
             "Ask Codex to do anything".to_string(),
             false,
+            default_keybindings(false),
         );
 
         // Case 1: bare "/"

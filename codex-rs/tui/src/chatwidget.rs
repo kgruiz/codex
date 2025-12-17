@@ -99,7 +99,10 @@ use crate::bottom_pane::SelectionViewParams;
 use crate::bottom_pane::ViewCompletionBehavior;
 use crate::bottom_pane::custom_prompt_view::CustomPromptView;
 use crate::bottom_pane::popup_consts::standard_popup_hint_line;
+use crate::clipboard_paste::PasteImageError;
+use crate::clipboard_paste::copy_text_to_clipboard;
 use crate::clipboard_paste::paste_image_to_temp_png;
+use crate::clipboard_paste::paste_text_from_clipboard;
 use crate::diff_render::display_path_for;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::ExecCell;
@@ -111,6 +114,7 @@ use crate::history_cell::AgentMessageCell;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::McpToolCallCell;
 use crate::history_cell::PlainHistoryCell;
+use crate::keybindings::Keybindings;
 use crate::markdown::append_markdown;
 use crate::render::Insets;
 use crate::render::renderable::ColumnRenderable;
@@ -289,6 +293,7 @@ pub(crate) struct ChatWidget {
     bottom_pane: BottomPane,
     active_cell: Option<Box<dyn HistoryCell>>,
     config: Config,
+    keybindings: Keybindings,
     model_family: ModelFamily,
     auth_manager: Arc<AuthManager>,
     models_manager: Arc<ModelsManager>,
@@ -1345,6 +1350,15 @@ impl ChatWidget {
         let model_slug = model_family.get_model_slug().to_string();
         let mut config = config;
         config.model = Some(model_slug.clone());
+
+        #[cfg(target_os = "linux")]
+        let is_wsl = crate::clipboard_paste::is_probably_wsl();
+        #[cfg(not(target_os = "linux"))]
+        let is_wsl = false;
+
+        let keybindings =
+            Keybindings::from_config(&config.keybindings, enhanced_keys_supported, is_wsl);
+
         let mut rng = rand::rng();
         let placeholder = EXAMPLE_PROMPTS[rng.random_range(0..EXAMPLE_PROMPTS.len())].to_string();
         let codex_op_tx = spawn_agent(config.clone(), app_event_tx.clone(), conversation_manager);
@@ -1362,9 +1376,11 @@ impl ChatWidget {
                 disable_paste_burst: config.disable_paste_burst,
                 animations_enabled: config.animations,
                 skills: None,
+                keybindings: keybindings.clone(),
             }),
             active_cell: None,
             config,
+            keybindings,
             model_family,
             auth_manager,
             models_manager,
@@ -1446,6 +1462,14 @@ impl ChatWidget {
         let codex_op_tx =
             spawn_agent_from_existing(conversation, session_configured, app_event_tx.clone());
 
+        #[cfg(target_os = "linux")]
+        let is_wsl = crate::clipboard_paste::is_probably_wsl();
+        #[cfg(not(target_os = "linux"))]
+        let is_wsl = false;
+
+        let keybindings =
+            Keybindings::from_config(&config.keybindings, enhanced_keys_supported, is_wsl);
+
         let mut widget = Self {
             app_event_tx: app_event_tx.clone(),
             frame_requester: frame_requester.clone(),
@@ -1459,9 +1483,11 @@ impl ChatWidget {
                 disable_paste_burst: config.disable_paste_burst,
                 animations_enabled: config.animations,
                 skills: None,
+                keybindings: keybindings.clone(),
             }),
             active_cell: None,
             config,
+            keybindings,
             model_family,
             auth_manager,
             models_manager,
@@ -1601,30 +1627,22 @@ impl ChatWidget {
                 self.on_ctrl_c();
                 return;
             }
-            KeyEvent {
-                code: KeyCode::Char(c),
-                modifiers,
-                kind: KeyEventKind::Press,
-                ..
-            } if modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-                && c.eq_ignore_ascii_case(&'v') =>
+            key_event
+                if key_event.kind == KeyEventKind::Press
+                    && self.keybindings.paste.iter().any(|b| b.matches(&key_event)) =>
             {
-                match paste_image_to_temp_png() {
-                    Ok((path, info)) => {
-                        self.attach_image(
-                            path,
-                            info.width,
-                            info.height,
-                            info.encoded_format.label(),
-                        );
-                    }
-                    Err(err) => {
-                        tracing::warn!("failed to paste image: {err}");
-                        self.add_to_history(history_cell::new_error_event(format!(
-                            "Failed to paste image: {err}",
-                        )));
-                    }
-                }
+                self.paste_from_clipboard();
+                return;
+            }
+            key_event
+                if key_event.kind == KeyEventKind::Press
+                    && self
+                        .keybindings
+                        .copy_prompt
+                        .iter()
+                        .any(|b| b.matches(&key_event)) =>
+            {
+                self.copy_prompt_to_clipboard();
                 return;
             }
             other if other.kind == KeyEventKind::Press => {
@@ -1670,6 +1688,57 @@ impl ChatWidget {
         }
 
         self.maybe_send_next_queued_input();
+    }
+
+    fn paste_from_clipboard(&mut self) {
+        let active_view = self.bottom_pane.has_active_view();
+
+        let mut image_error: Option<PasteImageError> = None;
+        if !active_view {
+            match paste_image_to_temp_png() {
+                Ok((path, info)) => {
+                    self.attach_image(path, info.width, info.height, info.encoded_format.label());
+                    return;
+                }
+                Err(err) => {
+                    image_error = Some(err);
+                }
+            }
+        }
+
+        match paste_text_from_clipboard() {
+            Ok(text) => {
+                self.bottom_pane.handle_paste(text);
+            }
+            Err(err) => {
+                let message = if let Some(img_err) = image_error {
+                    format!("Failed to paste from clipboard: {img_err}; {err}")
+                } else {
+                    format!("Failed to paste from clipboard: {err}")
+                };
+
+                self.add_to_history(history_cell::new_error_event(message));
+                self.request_redraw();
+            }
+        }
+    }
+
+    fn copy_prompt_to_clipboard(&mut self) {
+        if self.bottom_pane.has_active_view() {
+            return;
+        }
+
+        let text = self.bottom_pane.composer_text();
+        if text.trim().is_empty() {
+            return;
+        }
+
+        if let Err(err) = copy_text_to_clipboard(&text) {
+            self.add_to_history(history_cell::new_error_event(format!(
+                "Failed to copy prompt to clipboard: {err}",
+            )));
+            self.request_redraw();
+        }
     }
 
     fn handle_queue_edit_key_event(&mut self, key_event: KeyEvent) -> bool {
