@@ -1506,6 +1506,37 @@ impl ChatWidget {
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event {
             KeyEvent {
+                code: KeyCode::Tab,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view()
+                && !self.bottom_pane.composer_popup_active()
+                && !self.bottom_pane.is_task_running()
+                && self.queued_edit_state.is_none() =>
+            {
+                self.cycle_thinking_effort(1);
+                return;
+            }
+            KeyEvent {
+                code: KeyCode::BackTab,
+                kind: KeyEventKind::Press,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Tab,
+                modifiers: KeyModifiers::SHIFT,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view()
+                && !self.bottom_pane.composer_popup_active()
+                && !self.bottom_pane.is_task_running()
+                && self.queued_edit_state.is_none() =>
+            {
+                self.cycle_thinking_effort(-1);
+                return;
+            }
+            KeyEvent {
                 code: KeyCode::Char('p'),
                 modifiers: KeyModifiers::CONTROL,
                 kind: KeyEventKind::Press,
@@ -1540,7 +1571,7 @@ impl ChatWidget {
             }
             KeyEvent {
                 code: KeyCode::Char('m' | 'M'),
-                modifiers: KeyModifiers::ALT,
+                modifiers: KeyModifiers::CONTROL,
                 kind: KeyEventKind::Press,
                 ..
             } if !self.bottom_pane.has_active_view()
@@ -1549,19 +1580,6 @@ impl ChatWidget {
                 && self.queued_edit_state.is_none() =>
             {
                 self.open_model_popup();
-                return;
-            }
-            KeyEvent {
-                code: KeyCode::Char('t' | 'T'),
-                modifiers: KeyModifiers::ALT,
-                kind: KeyEventKind::Press,
-                ..
-            } if !self.bottom_pane.has_active_view()
-                && !self.bottom_pane.composer_popup_active()
-                && !self.bottom_pane.is_task_running()
-                && self.queued_edit_state.is_none() =>
-            {
-                self.open_thinking_popup();
                 return;
             }
             KeyEvent {
@@ -1656,6 +1674,76 @@ impl ChatWidget {
         }
 
         self.maybe_send_next_queued_input();
+    }
+
+    fn cycle_thinking_effort(&mut self, direction: isize) {
+        let model_slug = self.model_family.get_model_slug().to_string();
+        let current_effort = self.config.model_reasoning_effort;
+
+        let presets = match self.models_manager.try_list_models() {
+            Ok(presets) => presets,
+            Err(_) => {
+                self.add_info_message(
+                    "Models are being updated; please try again in a moment.".to_string(),
+                    None,
+                );
+                return;
+            }
+        };
+
+        let Some(preset) = presets
+            .into_iter()
+            .find(|preset| preset.model == model_slug)
+        else {
+            self.add_info_message(
+                format!("Model '{model_slug}' is not available right now."),
+                None,
+            );
+            return;
+        };
+
+        let mut choices: Vec<Option<ReasoningEffortConfig>> = vec![None];
+        for option in preset.supported_reasoning_efforts {
+            let effort = option.effort;
+            if !choices.iter().any(|choice| *choice == Some(effort)) {
+                choices.push(Some(effort));
+            }
+        }
+
+        if choices.len() <= 1 {
+            return;
+        }
+
+        let current_idx = current_effort
+            .and_then(|effort| choices.iter().position(|choice| *choice == Some(effort)))
+            .unwrap_or(0);
+
+        let len = choices.len() as isize;
+        let next_idx = (current_idx as isize + direction).rem_euclid(len) as usize;
+        let next_effort = choices[next_idx];
+
+        self.app_event_tx
+            .send(AppEvent::CodexOp(Op::OverrideTurnContext {
+                cwd: None,
+                approval_policy: None,
+                sandbox_policy: None,
+                model: None,
+                effort: Some(next_effort),
+                summary: None,
+            }));
+
+        self.app_event_tx
+            .send(AppEvent::UpdateReasoningEffort(next_effort));
+
+        self.app_event_tx.send(AppEvent::PersistModelSelection {
+            model: self.model_family.get_model_slug().to_string(),
+            effort: next_effort,
+        });
+
+        let effort_label = next_effort
+            .map(|effort| effort.to_string())
+            .unwrap_or_else(|| "default".to_string());
+        tracing::info!("Selected effort: {effort_label}");
     }
 
     fn handle_queue_edit_key_event(&mut self, key_event: KeyEvent) -> bool {

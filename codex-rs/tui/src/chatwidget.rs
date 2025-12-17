@@ -52,6 +52,7 @@ use codex_core::protocol::TerminalInteractionEvent;
 use codex_core::protocol::TokenUsage;
 use codex_core::protocol::TokenUsageInfo;
 use codex_core::protocol::TurnAbortReason;
+use codex_core::protocol::TurnContextUpdatedEvent;
 use codex_core::protocol::TurnDiffEvent;
 use codex_core::protocol::UndoCompletedEvent;
 use codex_core::protocol::UndoStartedEvent;
@@ -452,6 +453,7 @@ impl ChatWidget {
         self.current_rollout_path = Some(event.rollout_path.clone());
         let initial_messages = event.initial_messages.clone();
         let model_for_header = event.model.clone();
+        self.config.model = Some(model_for_header.clone());
         self.session_header.set_model(&model_for_header);
         self.bottom_pane.set_session_model(model_for_header.clone());
         self.bottom_pane.set_session_reasoning_effort(
@@ -475,6 +477,21 @@ impl ChatWidget {
         if !self.suppress_session_configured_redraw {
             self.request_redraw();
         }
+    }
+
+    fn on_turn_context_updated(&mut self, event: TurnContextUpdatedEvent) {
+        self.config.model = Some(event.model.clone());
+        self.config.model_reasoning_effort = event.reasoning_effort;
+
+        self.session_header.set_model(&event.model);
+        self.bottom_pane.set_session_model(event.model.clone());
+        self.bottom_pane
+            .set_session_reasoning_effort(event.reasoning_effort);
+
+        // Update app-level state and refresh the model family asynchronously.
+        self.app_event_tx.send(AppEvent::UpdateModel(event.model));
+        self.app_event_tx
+            .send(AppEvent::UpdateReasoningEffort(event.reasoning_effort));
     }
 
     fn set_skills(&mut self, skills: Option<Vec<SkillMetadata>>) {
@@ -1546,6 +1563,37 @@ impl ChatWidget {
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event {
             KeyEvent {
+                code: KeyCode::Tab,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view()
+                && !self.bottom_pane.composer_popup_active()
+                && !self.bottom_pane.is_task_running()
+                && self.queued_edit_state.is_none() =>
+            {
+                self.cycle_thinking_effort(1);
+                return;
+            }
+            KeyEvent {
+                code: KeyCode::BackTab,
+                kind: KeyEventKind::Press,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Tab,
+                modifiers: KeyModifiers::SHIFT,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view()
+                && !self.bottom_pane.composer_popup_active()
+                && !self.bottom_pane.is_task_running()
+                && self.queued_edit_state.is_none() =>
+            {
+                self.cycle_thinking_effort(-1);
+                return;
+            }
+            KeyEvent {
                 code: KeyCode::Char('p'),
                 modifiers: KeyModifiers::CONTROL,
                 kind: KeyEventKind::Press,
@@ -1580,7 +1628,7 @@ impl ChatWidget {
             }
             KeyEvent {
                 code: KeyCode::Char('m' | 'M'),
-                modifiers: KeyModifiers::ALT,
+                modifiers: KeyModifiers::CONTROL,
                 kind: KeyEventKind::Press,
                 ..
             } if !self.bottom_pane.has_active_view()
@@ -1589,19 +1637,6 @@ impl ChatWidget {
                 && self.queued_edit_state.is_none() =>
             {
                 self.open_model_popup();
-                return;
-            }
-            KeyEvent {
-                code: KeyCode::Char('t' | 'T'),
-                modifiers: KeyModifiers::ALT,
-                kind: KeyEventKind::Press,
-                ..
-            } if !self.bottom_pane.has_active_view()
-                && !self.bottom_pane.composer_popup_active()
-                && !self.bottom_pane.is_task_running()
-                && self.queued_edit_state.is_none() =>
-            {
-                self.open_thinking_popup();
                 return;
             }
             KeyEvent {
@@ -1688,6 +1723,76 @@ impl ChatWidget {
         }
 
         self.maybe_send_next_queued_input();
+    }
+
+    fn cycle_thinking_effort(&mut self, direction: isize) {
+        let model_slug = self.model_family.get_model_slug().to_string();
+        let current_effort = self.config.model_reasoning_effort;
+
+        let presets = match self.models_manager.try_list_models() {
+            Ok(presets) => presets,
+            Err(_) => {
+                self.add_info_message(
+                    "Models are being updated; please try again in a moment.".to_string(),
+                    None,
+                );
+                return;
+            }
+        };
+
+        let Some(preset) = presets
+            .into_iter()
+            .find(|preset| preset.model == model_slug)
+        else {
+            self.add_info_message(
+                format!("Model '{model_slug}' is not available right now."),
+                None,
+            );
+            return;
+        };
+
+        let mut choices: Vec<Option<ReasoningEffortConfig>> = vec![None];
+        for option in preset.supported_reasoning_efforts {
+            let effort = option.effort;
+            if !choices.iter().any(|choice| *choice == Some(effort)) {
+                choices.push(Some(effort));
+            }
+        }
+
+        if choices.len() <= 1 {
+            return;
+        }
+
+        let current_idx = current_effort
+            .and_then(|effort| choices.iter().position(|choice| *choice == Some(effort)))
+            .unwrap_or(0);
+
+        let len = choices.len() as isize;
+        let next_idx = (current_idx as isize + direction).rem_euclid(len) as usize;
+        let next_effort = choices[next_idx];
+
+        self.app_event_tx
+            .send(AppEvent::CodexOp(Op::OverrideTurnContext {
+                cwd: None,
+                approval_policy: None,
+                sandbox_policy: None,
+                model: None,
+                effort: Some(next_effort),
+                summary: None,
+            }));
+
+        self.app_event_tx
+            .send(AppEvent::UpdateReasoningEffort(next_effort));
+
+        self.app_event_tx.send(AppEvent::PersistModelSelection {
+            model: self.model_family.get_model_slug().to_string(),
+            effort: next_effort,
+        });
+
+        let effort_label = next_effort
+            .map(|effort| effort.to_string())
+            .unwrap_or_else(|| "default".to_string());
+        tracing::info!("Selected effort: {effort_label}");
     }
 
     fn paste_from_clipboard(&mut self) {
@@ -2971,6 +3076,7 @@ impl ChatWidget {
 
         match msg {
             EventMsg::SessionConfigured(e) => self.on_session_configured(e),
+            EventMsg::TurnContextUpdated(e) => self.on_turn_context_updated(e),
             EventMsg::AgentMessage(AgentMessageEvent { message }) => self.on_agent_message(message),
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 self.on_agent_message_delta(delta)
@@ -3244,6 +3350,11 @@ impl ChatWidget {
         } else {
             (&default_usage, Some(&default_usage))
         };
+        let model_slug = self
+            .config
+            .model
+            .as_deref()
+            .unwrap_or_else(|| self.model_family.get_model_slug());
         self.add_to_history(crate::status::new_status_output(
             &self.config,
             self.auth_manager.as_ref(),
@@ -3254,7 +3365,7 @@ impl ChatWidget {
             self.rate_limit_snapshot.as_ref(),
             self.plan_type,
             Local::now(),
-            self.model_family.get_model_slug(),
+            model_slug,
         ));
     }
     fn stop_rate_limit_poller(&mut self) {
@@ -3338,8 +3449,6 @@ impl ChatWidget {
                 effort: Some(Some(default_effort)),
                 summary: None,
             }));
-            tx.send(AppEvent::UpdateModel(switch_model.clone()));
-            tx.send(AppEvent::UpdateReasoningEffort(Some(default_effort)));
         })];
 
         let keep_actions: Vec<SelectionAction> = Vec::new();
@@ -3627,8 +3736,6 @@ impl ChatWidget {
                 effort: Some(effort_for_action),
                 summary: None,
             }));
-            tx.send(AppEvent::UpdateModel(model_for_action.clone()));
-            tx.send(AppEvent::UpdateReasoningEffort(effort_for_action));
             tx.send(AppEvent::PersistModelSelection {
                 model: model_for_action.clone(),
                 effort: effort_for_action,
@@ -3824,9 +3931,6 @@ impl ChatWidget {
                 effort: Some(effort),
                 summary: None,
             }));
-        self.app_event_tx.send(AppEvent::UpdateModel(model.clone()));
-        self.app_event_tx
-            .send(AppEvent::UpdateReasoningEffort(effort));
         self.app_event_tx.send(AppEvent::PersistModelSelection {
             model: model.clone(),
             effort,

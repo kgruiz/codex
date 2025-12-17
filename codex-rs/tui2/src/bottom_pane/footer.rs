@@ -343,7 +343,15 @@ impl ShortcutDescriptor {
 
     fn overlay_entry(&self, state: ShortcutsState) -> Option<Line<'static>> {
         let binding = self.binding_for(state)?;
-        let mut line = Line::from(vec![self.prefix.into(), binding.key.into()]);
+        let mut line = match self.id {
+            ShortcutId::Thinking => Line::from(vec![
+                self.prefix.into(),
+                key_hint::plain(KeyCode::Tab).into(),
+                " / ".into(),
+                key_hint::shift(KeyCode::Tab).into(),
+            ]),
+            _ => Line::from(vec![self.prefix.into(), binding.key.into()]),
+        };
         match self.id {
             ShortcutId::EditPrevious => {
                 if state.esc_backtrack_hint {
@@ -375,7 +383,7 @@ const SHORTCUTS: &[ShortcutDescriptor] = &[
     ShortcutDescriptor {
         id: ShortcutId::Model,
         bindings: &[ShortcutBinding {
-            key: key_hint::alt(KeyCode::Char('m')),
+            key: key_hint::ctrl(KeyCode::Char('m')),
             condition: DisplayCondition::Always,
         }],
         prefix: "",
@@ -384,7 +392,7 @@ const SHORTCUTS: &[ShortcutDescriptor] = &[
     ShortcutDescriptor {
         id: ShortcutId::Thinking,
         bindings: &[ShortcutBinding {
-            key: key_hint::alt(KeyCode::Char('t')),
+            key: key_hint::plain(KeyCode::Tab),
             condition: DisplayCondition::Always,
         }],
         prefix: "",

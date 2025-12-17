@@ -2185,10 +2185,12 @@ fn single_reasoning_option_skips_selection() {
     }
 
     assert!(
-        events
-            .iter()
-            .any(|ev| matches!(ev, AppEvent::UpdateReasoningEffort(Some(effort)) if *effort == ReasoningEffortConfig::High)),
-        "expected reasoning effort to be applied automatically; events: {events:?}"
+        events.iter().any(|ev| matches!(
+            ev,
+            AppEvent::CodexOp(Op::OverrideTurnContext { model: Some(m), effort: Some(Some(e)), .. })
+                if m == "model-with-single-reasoning" && *e == ReasoningEffortConfig::High
+        )),
+        "expected reasoning override to be sent automatically; events: {events:?}"
     );
 }
 
