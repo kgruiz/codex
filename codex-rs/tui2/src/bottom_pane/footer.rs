@@ -383,7 +383,7 @@ const SHORTCUTS: &[ShortcutDescriptor] = &[
     ShortcutDescriptor {
         id: ShortcutId::Model,
         bindings: &[ShortcutBinding {
-            key: key_hint::ctrl(KeyCode::Char('m')),
+            key: key_hint::ctrl(KeyCode::Char('k')),
             condition: DisplayCondition::Always,
         }],
         prefix: "",

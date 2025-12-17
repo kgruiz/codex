@@ -1569,8 +1569,7 @@ impl ChatWidget {
                 ..
             } if !self.bottom_pane.has_active_view()
                 && !self.bottom_pane.composer_popup_active()
-                && !self.bottom_pane.is_task_running()
-                && self.queued_edit_state.is_none() =>
+                && !self.bottom_pane.is_task_running() =>
             {
                 self.cycle_thinking_effort(1);
                 return;
@@ -1587,8 +1586,7 @@ impl ChatWidget {
                 ..
             } if !self.bottom_pane.has_active_view()
                 && !self.bottom_pane.composer_popup_active()
-                && !self.bottom_pane.is_task_running()
-                && self.queued_edit_state.is_none() =>
+                && !self.bottom_pane.is_task_running() =>
             {
                 self.cycle_thinking_effort(-1);
                 return;
@@ -1627,8 +1625,21 @@ impl ChatWidget {
                 return;
             }
             KeyEvent {
-                code: KeyCode::Char('m' | 'M'),
+                code: KeyCode::Char('k' | 'K'),
                 modifiers: KeyModifiers::CONTROL,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view()
+                && !self.bottom_pane.composer_popup_active()
+                && !self.bottom_pane.is_task_running()
+                && self.queued_edit_state.is_none() =>
+            {
+                self.open_model_popup();
+                return;
+            }
+            KeyEvent {
+                code: KeyCode::Char('\u{000b}'),
+                modifiers: KeyModifiers::NONE,
                 kind: KeyEventKind::Press,
                 ..
             } if !self.bottom_pane.has_active_view()
@@ -1754,7 +1765,7 @@ impl ChatWidget {
         let mut choices: Vec<Option<ReasoningEffortConfig>> = vec![None];
         for option in preset.supported_reasoning_efforts {
             let effort = option.effort;
-            if !choices.iter().any(|choice| *choice == Some(effort)) {
+            if !choices.contains(&Some(effort)) {
                 choices.push(Some(effort));
             }
         }
@@ -2540,8 +2551,8 @@ impl ChatWidget {
             ("Enter".to_string(), "save".to_string()),
             ("Esc".to_string(), "cancel".to_string()),
             ("Alt+↑/↓".to_string(), "switch".to_string()),
-            ("Alt+M".to_string(), "model".to_string()),
-            ("Alt+T".to_string(), "thinking".to_string()),
+            ("Ctrl+K".to_string(), "model".to_string()),
+            ("Tab".to_string(), "thinking".to_string()),
         ];
 
         self.bottom_pane
@@ -3592,6 +3603,7 @@ impl ChatWidget {
         });
     }
 
+    #[allow(dead_code)]
     fn open_thinking_popup(&mut self) {
         let model_slug = self.model_family.get_model_slug().to_string();
         let current_effort = self.config.model_reasoning_effort;
