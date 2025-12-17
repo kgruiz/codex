@@ -1637,7 +1637,7 @@ impl ChatWidget {
                 && !self.bottom_pane.composer_popup_active()
                 && !self.bottom_pane.is_task_running() =>
             {
-                self.cycle_thinking_effort(1);
+                self.cycle_model(1);
                 return;
             }
             KeyEvent {
@@ -1648,6 +1648,36 @@ impl ChatWidget {
             | KeyEvent {
                 code: KeyCode::Tab,
                 modifiers: KeyModifiers::SHIFT,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view()
+                && !self.bottom_pane.composer_popup_active()
+                && !self.bottom_pane.is_task_running() =>
+            {
+                self.cycle_model(-1);
+                return;
+            }
+            KeyEvent {
+                code: KeyCode::Char(']'),
+                modifiers: KeyModifiers::CONTROL,
+                kind: KeyEventKind::Press,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('\u{001d}'),
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view()
+                && !self.bottom_pane.composer_popup_active()
+                && !self.bottom_pane.is_task_running() =>
+            {
+                self.cycle_thinking_effort(1);
+                return;
+            }
+            KeyEvent {
+                code: KeyCode::Char('['),
+                modifiers: KeyModifiers::CONTROL,
                 kind: KeyEventKind::Press,
                 ..
             } if !self.bottom_pane.has_active_view()
@@ -1800,6 +1830,90 @@ impl ChatWidget {
         }
 
         self.maybe_send_next_queued_input();
+    }
+
+    fn cycle_model(&mut self, direction: isize) {
+        let current_model = self.model_family.get_model_slug().to_string();
+        let presets: Vec<ModelPreset> =
+            // todo(aibrahim): make this async function
+            match self.models_manager.try_list_models() {
+                Ok(models) => models,
+                Err(_) => {
+                    self.add_info_message(
+                        "Models are being updated; please try again in a moment.".to_string(),
+                        None,
+                    );
+                    return;
+                }
+            };
+
+        let (mut auto_presets, other_presets): (Vec<ModelPreset>, Vec<ModelPreset>) = presets
+            .into_iter()
+            .partition(|preset| Self::is_auto_model(&preset.model));
+
+        let choices = if auto_presets.is_empty() {
+            let mut presets = other_presets;
+            presets.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+            presets
+        } else {
+            auto_presets.sort_by_key(|preset| Self::auto_model_order(&preset.model));
+            if auto_presets
+                .iter()
+                .any(|preset| preset.model == current_model)
+            {
+                auto_presets
+            } else {
+                let current_preset = other_presets
+                    .iter()
+                    .find(|preset| preset.model == current_model)
+                    .cloned();
+                if let Some(current_preset) = current_preset {
+                    auto_presets.insert(0, current_preset);
+                }
+                auto_presets
+            }
+        };
+
+        if choices.len() <= 1 {
+            return;
+        }
+
+        let current_idx = choices
+            .iter()
+            .position(|preset| preset.model == current_model)
+            .unwrap_or(0);
+
+        let len = choices.len() as isize;
+        let next_idx = (current_idx as isize + direction).rem_euclid(len) as usize;
+        let next = choices[next_idx].clone();
+        let next_model = next.model.to_string();
+        let next_effort = Some(next.default_reasoning_effort);
+
+        self.app_event_tx
+            .send(AppEvent::CodexOp(Op::OverrideTurnContext {
+                cwd: None,
+                approval_policy: None,
+                sandbox_policy: None,
+                model: Some(next_model.clone()),
+                effort: Some(next_effort),
+                summary: None,
+            }));
+
+        self.app_event_tx
+            .send(AppEvent::UpdateModel(next_model.clone()));
+
+        self.app_event_tx
+            .send(AppEvent::UpdateReasoningEffort(next_effort));
+
+        self.app_event_tx.send(AppEvent::PersistModelSelection {
+            model: next_model.clone(),
+            effort: next_effort,
+        });
+
+        let effort_label = next_effort
+            .map(|effort| effort.to_string())
+            .unwrap_or_else(|| "default".to_string());
+        tracing::info!("Selected model: {next_model}, Selected effort: {effort_label}");
     }
 
     fn cycle_thinking_effort(&mut self, direction: isize) {
@@ -2992,9 +3106,7 @@ impl ChatWidget {
         let apply_effort = queued.effort_override;
 
         let session = self.session_turn_context();
-        let effective_model = apply_model
-            .as_deref()
-            .unwrap_or(session.model.as_str());
+        let effective_model = apply_model.as_deref().unwrap_or(session.model.as_str());
         let effective_effort = match apply_effort {
             Some(effort) => effort,
             None => session.reasoning_effort,
