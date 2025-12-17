@@ -9,7 +9,7 @@ Add new items below as you think of them.
 3. [x] Add a keybind (e.g. `Tab`) to change model quickly (https://github.com/openai/codex/issues/2920)
     - Make model switching possible mid-edit, even after writing a long prompt.
     - Keep the UX comparable to ChatGPT (change any time) rather than requiring slash commands.
-4. [ ] Export chats as Markdown
+4. [x] Export chats as Markdown
 5. [ ] Add current model name to the status line (https://github.com/openai/codex/issues/2920)
     - Show the active model/thinking setting in the status bar so it is obvious what will be used on submit.
 6. [ ] Syntax highlighting (code blocks)
