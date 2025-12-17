@@ -531,6 +531,14 @@ pub enum EventMsg {
     /// Ack the client's configure message.
     SessionConfigured(SessionConfiguredEvent),
 
+    /// Server-confirmed updates to the session's effective model settings.
+    ///
+    /// This is emitted whenever the persistent turn context changes (for example
+    /// after `Op::OverrideTurnContext`), and is intended to be the authoritative
+    /// source of truth for UIs that display the current model and reasoning
+    /// effort.
+    TurnContextUpdated(TurnContextUpdatedEvent),
+
     /// Incremental MCP startup progress updates.
     McpStartupUpdate(McpStartupUpdateEvent),
 
@@ -1140,6 +1148,7 @@ impl InitialHistory {
                     .history
                     .iter()
                     .filter_map(|ri| match ri {
+                        RolloutItem::EventMsg(EventMsg::TurnContextUpdated(_)) => None,
                         RolloutItem::EventMsg(ev) => Some(ev.clone()),
                         _ => None,
                     })
@@ -1149,6 +1158,7 @@ impl InitialHistory {
                 items
                     .iter()
                     .filter_map(|ri| match ri {
+                        RolloutItem::EventMsg(EventMsg::TurnContextUpdated(_)) => None,
                         RolloutItem::EventMsg(ev) => Some(ev.clone()),
                         _ => None,
                     })
@@ -1730,6 +1740,18 @@ pub struct SessionConfiguredEvent {
     pub initial_messages: Option<Vec<EventMsg>>,
 
     pub rollout_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
+pub struct TurnContextUpdatedEvent {
+    /// The effective model slug that Codex will use for new turns.
+    pub model: String,
+
+    /// The effective reasoning effort for the current model, including defaults.
+    ///
+    /// When the model does not support reasoning effort, this will be `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<ReasoningEffortConfig>,
 }
 
 /// User's decision in response to an ExecApprovalRequest.
