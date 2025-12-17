@@ -575,6 +575,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             | EventMsg::ListSkillsResponse(_)
             | EventMsg::RawResponseItem(_)
             | EventMsg::UserMessage(_)
+            | EventMsg::TurnContextUpdated(_)
             | EventMsg::EnteredReviewMode(_)
             | EventMsg::ExitedReviewMode(_)
             | EventMsg::AgentMessageDelta(_)
