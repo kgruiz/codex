@@ -22,6 +22,10 @@ pub(crate) struct FooterProps<'a> {
     pub(crate) context_window_used_tokens: Option<i64>,
     pub(crate) model: &'a str,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
+    pub(crate) next_model: &'a str,
+    pub(crate) next_reasoning_effort: Option<ReasoningEffort>,
+    pub(crate) active_model: Option<&'a str>,
+    pub(crate) active_reasoning_effort: Option<ReasoningEffort>,
     pub(crate) keybindings: &'a Keybindings,
 }
 
@@ -86,7 +90,15 @@ fn footer_lines(props: FooterProps<'_>) -> Vec<Line<'static>> {
             is_task_running: props.is_task_running,
         })],
         FooterMode::ShortcutSummary => {
-            let mut line = status_line_prefix(props.model, props.reasoning_effort);
+            let mut line = status_line_prefix(
+                props.model,
+                props.reasoning_effort,
+                props.next_model,
+                props.next_reasoning_effort,
+                props.active_model,
+                props.active_reasoning_effort,
+                props.is_task_running,
+            );
             if !line.spans.is_empty() {
                 line.push_span(" · ".dim());
             }
@@ -109,7 +121,15 @@ fn footer_lines(props: FooterProps<'_>) -> Vec<Line<'static>> {
         }),
         FooterMode::EscHint => vec![esc_hint_line(props.esc_backtrack_hint)],
         FooterMode::ContextOnly => {
-            let mut line = status_line_prefix(props.model, props.reasoning_effort);
+            let mut line = status_line_prefix(
+                props.model,
+                props.reasoning_effort,
+                props.next_model,
+                props.next_reasoning_effort,
+                props.active_model,
+                props.active_reasoning_effort,
+                props.is_task_running,
+            );
             if !line.spans.is_empty() {
                 line.push_span(" · ".dim());
             }
@@ -310,19 +330,50 @@ fn context_window_line(percent: Option<i64>, used_tokens: Option<i64>) -> Line<'
     Line::from(vec![Span::from("100% context left").dim()])
 }
 
-fn status_line_prefix(model: &str, effort: Option<ReasoningEffort>) -> Line<'static> {
+fn status_line_prefix(
+    model: &str,
+    effort: Option<ReasoningEffort>,
+    next_model: &str,
+    next_effort: Option<ReasoningEffort>,
+    active_model: Option<&str>,
+    active_effort: Option<ReasoningEffort>,
+    is_task_running: bool,
+) -> Line<'static> {
     if model.trim().is_empty() {
         return Line::from("");
     }
 
-    let mut line = Line::from(model.to_string());
+    let mut line = Line::default();
+    push_model_segment(&mut line, "Session", model, effort);
 
-    if let Some(label) = thinking_label_for(model, effort) {
+    if is_task_running
+        && let Some(active_model) = active_model
+        && (active_model != model || active_effort != effort)
+    {
         line.push_span(" · ".dim());
-        line.push_span(format!("thinking {label}").dim());
+        push_model_segment(&mut line, "Active", active_model, active_effort);
+    }
+
+    if !next_model.trim().is_empty() {
+        line.push_span(" · ".dim());
+        push_model_segment(&mut line, "Next", next_model, next_effort);
     }
 
     line
+}
+
+fn push_model_segment(
+    line: &mut Line<'static>,
+    label: &'static str,
+    model: &str,
+    effort: Option<ReasoningEffort>,
+) {
+    line.push_span(format!("{label}: ").dim());
+    line.push_span(model.to_string());
+
+    if let Some(label) = thinking_label_for(model, effort) {
+        line.push_span(format!(" (think {label})").dim());
+    }
 }
 
 fn thinking_label_for(model: &str, effort: Option<ReasoningEffort>) -> Option<&'static str> {
@@ -380,6 +431,10 @@ mod tests {
                 context_window_used_tokens: None,
                 model: "",
                 reasoning_effort: None,
+                next_model: "",
+                next_reasoning_effort: None,
+                active_model: None,
+                active_reasoning_effort: None,
                 keybindings: &keybindings_default,
             },
         );
@@ -394,6 +449,10 @@ mod tests {
                 context_window_used_tokens: None,
                 model: "",
                 reasoning_effort: None,
+                next_model: "",
+                next_reasoning_effort: None,
+                active_model: None,
+                active_reasoning_effort: None,
                 keybindings: &keybindings_shift,
             },
         );
@@ -408,6 +467,10 @@ mod tests {
                 context_window_used_tokens: None,
                 model: "",
                 reasoning_effort: None,
+                next_model: "",
+                next_reasoning_effort: None,
+                active_model: None,
+                active_reasoning_effort: None,
                 keybindings: &keybindings_default,
             },
         );
@@ -422,6 +485,10 @@ mod tests {
                 context_window_used_tokens: None,
                 model: "",
                 reasoning_effort: None,
+                next_model: "",
+                next_reasoning_effort: None,
+                active_model: None,
+                active_reasoning_effort: None,
                 keybindings: &keybindings_default,
             },
         );
@@ -436,6 +503,10 @@ mod tests {
                 context_window_used_tokens: None,
                 model: "",
                 reasoning_effort: None,
+                next_model: "",
+                next_reasoning_effort: None,
+                active_model: None,
+                active_reasoning_effort: None,
                 keybindings: &keybindings_default,
             },
         );
@@ -450,6 +521,10 @@ mod tests {
                 context_window_used_tokens: None,
                 model: "",
                 reasoning_effort: None,
+                next_model: "",
+                next_reasoning_effort: None,
+                active_model: None,
+                active_reasoning_effort: None,
                 keybindings: &keybindings_default,
             },
         );
@@ -464,6 +539,10 @@ mod tests {
                 context_window_used_tokens: None,
                 model: "",
                 reasoning_effort: None,
+                next_model: "",
+                next_reasoning_effort: None,
+                active_model: None,
+                active_reasoning_effort: None,
                 keybindings: &keybindings_default,
             },
         );
@@ -478,6 +557,10 @@ mod tests {
                 context_window_used_tokens: Some(123_456),
                 model: "",
                 reasoning_effort: None,
+                next_model: "",
+                next_reasoning_effort: None,
+                active_model: None,
+                active_reasoning_effort: None,
                 keybindings: &keybindings_default,
             },
         );
@@ -492,6 +575,10 @@ mod tests {
                 context_window_used_tokens: None,
                 model: "gpt-5.1-codex",
                 reasoning_effort: Some(ReasoningEffort::Medium),
+                next_model: "gpt-5.1-codex",
+                next_reasoning_effort: Some(ReasoningEffort::Medium),
+                active_model: None,
+                active_reasoning_effort: None,
                 keybindings: &keybindings_default,
             },
         );

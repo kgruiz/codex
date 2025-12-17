@@ -354,6 +354,8 @@ pub(crate) struct ChatWidget {
     feedback: codex_feedback::CodexFeedback,
     // Current session rollout path (if known)
     current_rollout_path: Option<PathBuf>,
+
+    pending_active_turn_context: Option<PendingTurnContext>,
 }
 
 struct UserMessage {
@@ -367,6 +369,12 @@ struct QueuedUserMessage {
     attachments: Vec<ComposerAttachment>,
     model_override: Option<String>,
     effort_override: Option<Option<ReasoningEffortConfig>>,
+}
+
+#[derive(Clone, Debug)]
+struct PendingTurnContext {
+    model: String,
+    reasoning_effort: Option<ReasoningEffortConfig>,
 }
 
 #[derive(Clone)]
@@ -416,6 +424,42 @@ fn create_initial_user_message(text: String, image_paths: Vec<PathBuf>) -> Optio
 }
 
 impl ChatWidget {
+    fn session_turn_context(&self) -> PendingTurnContext {
+        PendingTurnContext {
+            model: self
+                .config
+                .model
+                .clone()
+                .unwrap_or_else(|| self.model_family.get_model_slug().to_string()),
+            reasoning_effort: self.effective_reasoning_effort(),
+        }
+    }
+
+    fn next_turn_context(&self) -> PendingTurnContext {
+        let session = self.session_turn_context();
+        let Some(next) = self.queued_user_messages.front() else {
+            return session;
+        };
+
+        PendingTurnContext {
+            model: next
+                .model_override
+                .clone()
+                .unwrap_or_else(|| session.model.clone()),
+            reasoning_effort: match next.effort_override {
+                Some(effort) => effort,
+                None => session.reasoning_effort,
+            },
+        }
+    }
+
+    fn sync_next_turn_context(&mut self) {
+        let next = self.next_turn_context();
+        self.bottom_pane.set_next_model(next.model);
+        self.bottom_pane
+            .set_next_reasoning_effort(next.reasoning_effort);
+    }
+
     fn flush_answer_stream_with_separator(&mut self) {
         if self.stream_paused {
             if self.stream_controller.is_some() || !self.paused_agent_deltas.is_empty() {
@@ -459,6 +503,10 @@ impl ChatWidget {
         self.bottom_pane.set_session_reasoning_effort(
             event.reasoning_effort.or(self.effective_reasoning_effort()),
         );
+        self.bottom_pane.set_active_model(None);
+        self.bottom_pane.set_active_reasoning_effort(None);
+        self.pending_active_turn_context = None;
+        self.sync_next_turn_context();
         self.add_to_history(history_cell::new_session_info(
             &self.config,
             &model_for_header,
@@ -487,6 +535,7 @@ impl ChatWidget {
         self.bottom_pane.set_session_model(event.model.clone());
         self.bottom_pane
             .set_session_reasoning_effort(event.reasoning_effort);
+        self.sync_next_turn_context();
 
         // Update app-level state and refresh the model family asynchronously.
         self.app_event_tx.send(AppEvent::UpdateModel(event.model));
@@ -607,6 +656,13 @@ impl ChatWidget {
     fn on_task_started(&mut self) {
         self.bottom_pane.clear_ctrl_c_quit_hint();
         self.bottom_pane.set_task_running(true);
+        let active = self
+            .pending_active_turn_context
+            .take()
+            .unwrap_or_else(|| self.session_turn_context());
+        self.bottom_pane.set_active_model(Some(active.model));
+        self.bottom_pane
+            .set_active_reasoning_effort(active.reasoning_effort);
         self.retry_status_header = None;
         self.bottom_pane.set_interrupt_hint_visible(true);
         self.set_status_header(String::from("Working"));
@@ -623,6 +679,9 @@ impl ChatWidget {
         self.flush_answer_stream_with_separator();
         // Mark task stopped and request redraw now that all content is in history.
         self.bottom_pane.set_task_running(false);
+        self.bottom_pane.set_active_model(None);
+        self.bottom_pane.set_active_reasoning_effort(None);
+        self.pending_active_turn_context = None;
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
         self.last_unified_wait = None;
@@ -759,6 +818,9 @@ impl ChatWidget {
         self.finalize_active_cell_as_failed();
         // Reset running state and clear streaming buffers.
         self.bottom_pane.set_task_running(false);
+        self.bottom_pane.set_active_model(None);
+        self.bottom_pane.set_active_reasoning_effort(None);
+        self.pending_active_turn_context = None;
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
         self.last_unified_wait = None;
@@ -1442,6 +1504,7 @@ impl ChatWidget {
             last_rendered_width: std::cell::Cell::new(None),
             feedback,
             current_rollout_path: None,
+            pending_active_turn_context: None,
         };
 
         widget.prefetch_rate_limits();
@@ -1449,6 +1512,7 @@ impl ChatWidget {
         widget
             .bottom_pane
             .set_session_reasoning_effort(widget.effective_reasoning_effort());
+        widget.sync_next_turn_context();
 
         widget
     }
@@ -1549,6 +1613,7 @@ impl ChatWidget {
             last_rendered_width: std::cell::Cell::new(None),
             feedback,
             current_rollout_path: None,
+            pending_active_turn_context: None,
         };
 
         widget.prefetch_rate_limits();
@@ -1556,6 +1621,7 @@ impl ChatWidget {
         widget
             .bottom_pane
             .set_session_reasoning_effort(widget.effective_reasoning_effort());
+        widget.sync_next_turn_context();
 
         widget
     }
@@ -2925,21 +2991,28 @@ impl ChatWidget {
         let apply_model = queued.model_override.clone();
         let apply_effort = queued.effort_override;
 
-        let restore_model = apply_model
-            .as_ref()
-            .map(|_| self.model_family.get_model_slug().to_string());
-        let restore_effort = apply_effort
-            .as_ref()
-            .map(|_| self.config.model_reasoning_effort);
+        let session = self.session_turn_context();
+        let effective_model = apply_model
+            .as_deref()
+            .unwrap_or(session.model.as_str());
+        let effective_effort = match apply_effort {
+            Some(effort) => effort,
+            None => session.reasoning_effort,
+        };
+        self.pending_active_turn_context = Some(PendingTurnContext {
+            model: effective_model.to_string(),
+            reasoning_effort: effective_effort,
+        });
+
+        let restore_model = apply_model.as_ref().map(|_| session.model.clone());
+        let restore_effort = apply_effort.as_ref().map(|_| session.reasoning_effort);
 
         if apply_model.is_some() || apply_effort.is_some() {
-            let session_model = self.model_family.get_model_slug();
+            let session_model = session.model.as_str();
             let effective_model = apply_model.as_deref().unwrap_or(session_model);
-            let effective_effort = apply_effort.unwrap_or(self.config.model_reasoning_effort);
+            let effective_effort = apply_effort.unwrap_or(session.reasoning_effort);
 
-            if effective_model != session_model
-                || effective_effort != self.config.model_reasoning_effort
-            {
+            if effective_model != session_model || effective_effort != session.reasoning_effort {
                 self.add_info_message(
                     self.queued_override_info_message(effective_model, effective_effort),
                     None,
@@ -3020,6 +3093,10 @@ impl ChatWidget {
                     path: skill.path.clone(),
                 });
             }
+        }
+
+        if self.pending_active_turn_context.is_none() {
+            self.pending_active_turn_context = Some(self.session_turn_context());
         }
 
         self.codex_op_tx
@@ -3344,6 +3421,7 @@ impl ChatWidget {
             })
             .collect();
         self.bottom_pane.set_queued_user_messages(messages);
+        self.sync_next_turn_context();
     }
 
     pub(crate) fn add_diff_in_progress(&mut self) {
@@ -4407,6 +4485,7 @@ impl ChatWidget {
         self.config.model_reasoning_effort = effort;
         self.bottom_pane
             .set_session_reasoning_effort(self.effective_reasoning_effort());
+        self.sync_next_turn_context();
     }
 
     /// Set the model in the widget's config copy.
@@ -4417,6 +4496,7 @@ impl ChatWidget {
         self.bottom_pane.set_session_model(model.to_string());
         self.bottom_pane
             .set_session_reasoning_effort(self.effective_reasoning_effort());
+        self.sync_next_turn_context();
     }
 
     pub(crate) fn add_info_message(&mut self, message: String, hint: Option<String>) {
