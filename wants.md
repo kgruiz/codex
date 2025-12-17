@@ -17,21 +17,21 @@ Add new items below as you think of them.
 8. [ ] Show tokens/sec (and other live stats like latency, cost, tool time)
 9. [ ] Support handing off long prompts to external editor via `Ctrl+G`
 10. [ ] Edit last message without branching
-11. [ ] Input shortcuts & editor behavior
-    - [ ] Paste images from clipboard via `Cmd+V` when clipboard contains an image (toggleable)
-    - [ ] Use `Shift+Enter` for newline instead of `Option+Enter` (toggleable)
-    - [ ] Configure any shortcuts (keymap/config file) (https://github.com/openai/codex/issues/3049)
+11. [x] Input shortcuts & editor behavior
+    - [x] Paste images from clipboard via `Cmd+V` when clipboard contains an image (toggleable)
+    - [x] Use `Shift+Enter` for newline instead of `Option+Enter` (toggleable)
+    - [x] Configure any shortcuts (keymap/config file) (https://github.com/openai/codex/issues/3049)
         - Add a `[keybindings]` section to `config.toml` mapping actions (newline, backspace, move, etc.) to key chords.
         - Document supported key names/modifiers (`Ctrl`, `Alt`, `Shift`, `Enter`, single chars) and defaults.
-    - [ ] Configurable submit vs newline behavior (Enter, Ctrl+Enter, Alt/Option+Enter, Shift+Enter) (https://github.com/openai/codex/issues/5716, https://github.com/openai/codex/issues/6100)
+    - [x] Configurable submit vs newline behavior (Enter, Ctrl+Enter, Alt/Option+Enter, Shift+Enter) (https://github.com/openai/codex/issues/5716, https://github.com/openai/codex/issues/6100)
         - Provide a config option to swap defaults (Enter inserts newline, `Ctrl+Enter` submits) for multi-line-first workflows.
         - Consider restoring/making optional the “Alt/Option+Enter submits” behavior mentioned as a regression.
-    - [ ] Fix prompt editor copy/paste behavior (Ctrl+C/Ctrl+V, etc.) (https://github.com/openai/codex/issues/5325)
+    - [x] Fix prompt editor copy/paste behavior (Ctrl+C/Ctrl+V, etc.) (https://github.com/openai/codex/issues/5325)
         - Make common shortcuts non-destructive, and support copying the current prompt text from within the TUI.
         - Ensure paste behaves as expected (instead of clearing prompt content).
-    - [ ] Support Alt+d delete-word-forward (readline-style) (https://github.com/openai/codex/issues/5018)
+    - [x] Support Alt+d delete-word-forward (readline-style) (https://github.com/openai/codex/issues/5018)
         - Implement readline `M-d`: delete from cursor to end of current word (word-kill forward).
-    - [ ] Platform-specific key-hint formatting on macOS (⌃ ⌥ ⇧, Fn+Arrow alternatives) (https://github.com/openai/codex/issues/4914)
+    - [x] Platform-specific key-hint formatting on macOS (⌃ ⌥ ⇧, Fn+Arrow alternatives) (https://github.com/openai/codex/issues/4914)
         - Display macOS-style modifier symbols (⌃ ⌥ ⇧) and optionally omit verbose names for cleaner hints.
         - Include `Fn+Arrow` alternatives for PageUp/PageDown/Home/End on compact keyboards; keep other platforms unchanged.
 12. [ ] Render images inline in terminal output when supported (iTerm image protocol, Kitty graphics, etc.) (https://github.com/openai/codex/issues/6123)
