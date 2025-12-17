@@ -158,6 +158,23 @@ windows_wsl_setup_acknowledged = false
 # Example: notify = ["notify-send", "Codex"]
 # notify = [ ]
 
+################################################################################
+# Keybindings (TUI)
+################################################################################
+
+[keybindings]
+# Customize common TUI shortcuts. Each action can be a string or an array of strings.
+# Leave this table empty to use built-in defaults.
+#
+# submit = "Enter"
+# newline = "Shift+Enter"
+# paste = ["Cmd+V", "Ctrl+V"]
+# copy_prompt = "Alt+C"
+#
+# Example: multi-line-first workflow (Enter inserts newline, Ctrl+Enter submits)
+# submit = "Ctrl+Enter"
+# newline = "Enter"
+
 # In-product notices (mostly set automatically by Codex).
 [notice]
 # hide_full_access_warning = true

@@ -892,6 +892,77 @@ animations = false
 
 > [!NOTE] > `tui.notifications` is built‑in and limited to the TUI session. For programmatic or cross‑environment notifications—or to integrate with OS‑specific notifiers—use the top‑level `notify` option to run an external program that receives event JSON. The two settings are independent and can be used together.
 
+### keybindings
+
+Codex lets you customize common TUI shortcuts via the top-level `[keybindings]` table:
+
+```toml
+[keybindings]
+submit = "Enter"
+newline = "Shift+Enter"
+paste = ["Cmd+V", "Ctrl+V"]
+copy_prompt = "Alt+C"
+```
+
+Each value can be either a single string or an array of strings. Each string is a key chord in the form `Modifier+Key` (for example `Ctrl+Enter`). Unknown or invalid bindings are ignored and Codex falls back to the defaults for that action.
+
+#### Supported actions
+
+- `submit` - submit the current prompt.
+- `newline` - insert a newline.
+- `paste` - paste from clipboard (prefers images when the prompt editor is focused, otherwise pastes text).
+- `copy_prompt` - copy the current prompt text to clipboard (prompt editor only).
+
+Editor actions (extra bindings, in addition to the built-in editor behavior):
+
+- `editor_move_left`, `editor_move_right`, `editor_move_up`, `editor_move_down`
+- `editor_move_word_left`, `editor_move_word_right`
+- `editor_delete_backward`, `editor_delete_forward`
+- `editor_delete_word_backward`, `editor_delete_word_forward`
+- `editor_home`, `editor_end`
+
+#### Defaults
+
+- `submit`: `Enter`
+- `newline`: `Shift+Enter` (when enhanced keys are supported), otherwise `Ctrl+J`
+- `paste`: `Ctrl+V` (WSL also adds `Ctrl+Alt+V`; macOS also adds `Cmd+V`)
+- `copy_prompt`: `Alt+C`
+- `editor_*`: no additional bindings by default (uses built-in editor behavior)
+
+#### Supported modifiers and keys
+
+Modifiers (case-insensitive):
+
+- `Ctrl` (also `Control`, `Ctl`)
+- `Alt` (also `Option`, `Opt`, `Meta`)
+- `Shift`
+- `Cmd` (also `Command`, `Super`)
+- `Fn` (special: supports `Fn+Up/Down/Left/Right` to represent `PageUp/PageDown/Home/End`)
+
+Keys:
+
+- Named keys: `Enter`/`Return`, `Esc`/`Escape`, `Tab`, `Backspace`/`Bs`, `Delete`/`Del`, `Space`/`Spc`
+- Arrows: `Up`, `Down`, `Left`, `Right`
+- Paging: `PageUp`/`PgUp`, `PageDown`/`PgDn`, `Home`, `End`
+- Single characters: `a`, `b`, `c`, `1`, `?`, etc.
+
+#### Examples
+
+Multi-line-first workflow (Enter inserts newline, `Ctrl+Enter` submits):
+
+```toml
+[keybindings]
+submit = "Ctrl+Enter"
+newline = "Enter"
+```
+
+Restore `Alt+Enter` submit (also keep Enter submit):
+
+```toml
+[keybindings]
+submit = ["Enter", "Alt+Enter"]
+```
+
 ## Authentication and authorization
 
 ### Forcing a login method
@@ -974,6 +1045,7 @@ Valid values:
 | `file_opener`                                    | `vscode` \| `vscode-insiders` \| `windsurf` \| `cursor` \| `none` | URI scheme for clickable citations (default: `vscode`).                                                                         |
 | `tui`                                            | table                                                             | TUI‑specific options.                                                                                                           |
 | `tui.notifications`                              | boolean \| array<string>                                          | Enable desktop notifications in the tui (default: true).                                                                        |
+| `keybindings`                                    | table<string,string \| array<string>>                             | Customize common TUI shortcuts (see `keybindings`).                                                                             |
 | `hide_agent_reasoning`                           | boolean                                                           | Hide model reasoning events.                                                                                                    |
 | `check_for_update_on_startup`                    | boolean                                                           | Check for Codex updates on startup (default: true). Set to `false` only if updates are centrally managed.                       |
 | `show_raw_agent_reasoning`                       | boolean                                                           | Show raw reasoning (when available).                                                                                            |
