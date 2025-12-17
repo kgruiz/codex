@@ -367,26 +367,16 @@ impl BottomPane {
         }
     }
 
-    pub(crate) fn set_next_model(&mut self, model: String) {
-        if self.composer.set_next_model(model) {
-            self.request_redraw();
-        }
-    }
-
-    pub(crate) fn set_next_reasoning_effort(&mut self, effort: Option<ReasoningEffort>) {
-        if self.composer.set_next_reasoning_effort(effort) {
-            self.request_redraw();
-        }
-    }
-
     pub(crate) fn set_active_model(&mut self, model: Option<String>) {
-        if self.composer.set_active_model(model) {
+        if let Some(status) = self.status.as_mut() {
+            status.set_active_model(model);
             self.request_redraw();
         }
     }
 
     pub(crate) fn set_active_reasoning_effort(&mut self, effort: Option<ReasoningEffort>) {
-        if self.composer.set_active_reasoning_effort(effort) {
+        if let Some(status) = self.status.as_mut() {
+            status.set_active_reasoning_effort(effort);
             self.request_redraw();
         }
     }

@@ -146,10 +146,6 @@ pub(crate) struct ChatComposer {
     context_window_used_tokens: Option<i64>,
     session_model: String,
     session_reasoning_effort: Option<ReasoningEffort>,
-    next_model: String,
-    next_reasoning_effort: Option<ReasoningEffort>,
-    active_model: Option<String>,
-    active_reasoning_effort: Option<ReasoningEffort>,
     skills: Option<Vec<SkillMetadata>>,
     dismissed_skill_popup_token: Option<String>,
     keybindings: Keybindings,
@@ -200,10 +196,6 @@ impl ChatComposer {
             context_window_used_tokens: None,
             session_model: String::new(),
             session_reasoning_effort: None,
-            next_model: String::new(),
-            next_reasoning_effort: None,
-            active_model: None,
-            active_reasoning_effort: None,
             skills: None,
             dismissed_skill_popup_token: None,
             keybindings,
@@ -1711,10 +1703,6 @@ impl ChatComposer {
             context_window_used_tokens: self.context_window_used_tokens,
             model: &self.session_model,
             reasoning_effort: self.session_reasoning_effort,
-            next_model: &self.next_model,
-            next_reasoning_effort: self.next_reasoning_effort,
-            active_model: self.active_model.as_deref(),
-            active_reasoning_effort: self.active_reasoning_effort,
             keybindings: &self.keybindings,
         }
     }
@@ -1971,42 +1959,6 @@ impl ChatComposer {
         }
 
         self.session_reasoning_effort = effort;
-        true
-    }
-
-    pub(crate) fn set_next_model(&mut self, model: String) -> bool {
-        if self.next_model == model {
-            return false;
-        }
-
-        self.next_model = model;
-        true
-    }
-
-    pub(crate) fn set_next_reasoning_effort(&mut self, effort: Option<ReasoningEffort>) -> bool {
-        if self.next_reasoning_effort == effort {
-            return false;
-        }
-
-        self.next_reasoning_effort = effort;
-        true
-    }
-
-    pub(crate) fn set_active_model(&mut self, model: Option<String>) -> bool {
-        if self.active_model == model {
-            return false;
-        }
-
-        self.active_model = model;
-        true
-    }
-
-    pub(crate) fn set_active_reasoning_effort(&mut self, effort: Option<ReasoningEffort>) -> bool {
-        if self.active_reasoning_effort == effort {
-            return false;
-        }
-
-        self.active_reasoning_effort = effort;
         true
     }
 

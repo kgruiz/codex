@@ -435,31 +435,6 @@ impl ChatWidget {
         }
     }
 
-    fn next_turn_context(&self) -> PendingTurnContext {
-        let session = self.session_turn_context();
-        let Some(next) = self.queued_user_messages.front() else {
-            return session;
-        };
-
-        PendingTurnContext {
-            model: next
-                .model_override
-                .clone()
-                .unwrap_or_else(|| session.model.clone()),
-            reasoning_effort: match next.effort_override {
-                Some(effort) => effort,
-                None => session.reasoning_effort,
-            },
-        }
-    }
-
-    fn sync_next_turn_context(&mut self) {
-        let next = self.next_turn_context();
-        self.bottom_pane.set_next_model(next.model);
-        self.bottom_pane
-            .set_next_reasoning_effort(next.reasoning_effort);
-    }
-
     fn flush_answer_stream_with_separator(&mut self) {
         if self.stream_paused {
             if self.stream_controller.is_some() || !self.paused_agent_deltas.is_empty() {
@@ -506,7 +481,6 @@ impl ChatWidget {
         self.bottom_pane.set_active_model(None);
         self.bottom_pane.set_active_reasoning_effort(None);
         self.pending_active_turn_context = None;
-        self.sync_next_turn_context();
         self.add_to_history(history_cell::new_session_info(
             &self.config,
             &model_for_header,
@@ -535,7 +509,6 @@ impl ChatWidget {
         self.bottom_pane.set_session_model(event.model.clone());
         self.bottom_pane
             .set_session_reasoning_effort(event.reasoning_effort);
-        self.sync_next_turn_context();
 
         // Update app-level state and refresh the model family asynchronously.
         self.app_event_tx.send(AppEvent::UpdateModel(event.model));
@@ -1512,8 +1485,6 @@ impl ChatWidget {
         widget
             .bottom_pane
             .set_session_reasoning_effort(widget.effective_reasoning_effort());
-        widget.sync_next_turn_context();
-
         widget
     }
 
@@ -1621,8 +1592,6 @@ impl ChatWidget {
         widget
             .bottom_pane
             .set_session_reasoning_effort(widget.effective_reasoning_effort());
-        widget.sync_next_turn_context();
-
         widget
     }
 
@@ -2731,8 +2700,8 @@ impl ChatWidget {
             ("Enter".to_string(), "save".to_string()),
             ("Esc".to_string(), "cancel".to_string()),
             ("Alt+↑/↓".to_string(), "switch".to_string()),
-            ("Ctrl+K".to_string(), "model".to_string()),
-            ("Tab".to_string(), "thinking".to_string()),
+            ("Alt+M".to_string(), "model".to_string()),
+            ("Alt+T".to_string(), "thinking".to_string()),
         ];
 
         self.bottom_pane
@@ -3517,6 +3486,7 @@ impl ChatWidget {
 
     /// Rebuild and update the queued user messages from the current queue.
     fn refresh_queued_user_messages(&mut self) {
+        let session = self.session_turn_context();
         let editing_id = self
             .queued_edit_state
             .as_ref()
@@ -3525,15 +3495,40 @@ impl ChatWidget {
             .queued_user_messages
             .iter()
             .map(|message| {
-                if Some(message.id) == editing_id {
-                    format!("✎ {}", message.text)
+                let effective_model = message
+                    .model_override
+                    .as_deref()
+                    .unwrap_or(session.model.as_str());
+                let effective_effort = match message.effort_override {
+                    Some(effort) => effort,
+                    None => session.reasoning_effort,
+                };
+
+                let tag = if message.model_override.is_some() || message.effort_override.is_some() {
+                    let mut tag = format!("[{effective_model}");
+                    if let Some(label) = Self::thinking_label_for(effective_model, effective_effort)
+                        .or_else(|| {
+                            (!effective_model.starts_with("codex-auto-")
+                                && effective_effort.is_none())
+                            .then_some("default")
+                        })
+                    {
+                        tag.push_str(&format!(" · think {label}"));
+                    }
+                    tag.push_str("] ");
+                    tag
                 } else {
-                    message.text.clone()
+                    String::new()
+                };
+
+                if Some(message.id) == editing_id {
+                    format!("✎ {tag}{}", message.text)
+                } else {
+                    format!("{tag}{}", message.text)
                 }
             })
             .collect();
         self.bottom_pane.set_queued_user_messages(messages);
-        self.sync_next_turn_context();
     }
 
     pub(crate) fn add_diff_in_progress(&mut self) {
@@ -4123,6 +4118,28 @@ impl ChatWidget {
         message
     }
 
+    fn thinking_label_for(
+        model: &str,
+        effort: Option<ReasoningEffortConfig>,
+    ) -> Option<&'static str> {
+        if model.starts_with("codex-auto-") {
+            return None;
+        }
+
+        effort.map(Self::thinking_label)
+    }
+
+    fn thinking_label(effort: ReasoningEffortConfig) -> &'static str {
+        match effort {
+            ReasoningEffortConfig::Minimal => "minimal",
+            ReasoningEffortConfig::Low => "low",
+            ReasoningEffortConfig::Medium => "medium",
+            ReasoningEffortConfig::High => "high",
+            ReasoningEffortConfig::XHigh => "xhigh",
+            ReasoningEffortConfig::None => "none",
+        }
+    }
+
     fn apply_model_and_effort(&self, model: String, effort: Option<ReasoningEffortConfig>) {
         self.app_event_tx
             .send(AppEvent::CodexOp(Op::OverrideTurnContext {
@@ -4597,7 +4614,6 @@ impl ChatWidget {
         self.config.model_reasoning_effort = effort;
         self.bottom_pane
             .set_session_reasoning_effort(self.effective_reasoning_effort());
-        self.sync_next_turn_context();
     }
 
     /// Set the model in the widget's config copy.
@@ -4608,7 +4624,6 @@ impl ChatWidget {
         self.bottom_pane.set_session_model(model.to_string());
         self.bottom_pane
             .set_session_reasoning_effort(self.effective_reasoning_effort());
-        self.sync_next_turn_context();
     }
 
     pub(crate) fn add_info_message(&mut self, message: String, hint: Option<String>) {

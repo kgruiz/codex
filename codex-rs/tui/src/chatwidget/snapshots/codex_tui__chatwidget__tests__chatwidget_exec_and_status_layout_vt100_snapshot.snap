@@ -9,7 +9,7 @@ expression: term.backend().vt100().screen().contents()
   └ Search Change Approved
     Read diff_render.rs
 
-• Investigating rendering code (0s • esc to interrupt)
+• Investigating rendering code · gpt-5.1-codex-max (think default) (0s • esc to 
 
 
 › Summarize recent commits

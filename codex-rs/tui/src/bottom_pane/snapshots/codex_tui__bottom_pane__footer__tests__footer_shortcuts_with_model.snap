@@ -2,4 +2,4 @@
 source: tui/src/bottom_pane/footer.rs
 expression: terminal.backend()
 ---
-"  Session: gpt-5.1-codex (think medium) · Next: gpt-5.1-codex (think medium) · 1"
+"  Model: gpt-5.1-codex (think medium) · 100% context left · ? for shortcuts     "
