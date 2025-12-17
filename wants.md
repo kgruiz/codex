@@ -17,40 +17,41 @@ Add new items below as you think of them.
 8. [ ] Show tokens/sec (and other live stats like latency, cost, tool time)
 9. [ ] Support handing off long prompts to external editor via `Ctrl+G`
 10. [ ] Edit last message without branching
-11. [ ] Paste images from clipboard via `Cmd+V` when clipboard contains an image (toggleable)
-12. [ ] Use `Shift+Enter` for newline instead of `Option+Enter` (toggleable)
-13. [ ] Configure any shortcuts (keymap/config file) (https://github.com/openai/codex/issues/3049)
-    - Add a `[keybindings]` section to `config.toml` mapping actions (newline, backspace, move, etc.) to key chords.
-    - Document supported key names/modifiers (`Ctrl`, `Alt`, `Shift`, `Enter`, single chars) and defaults.
-14. [ ] Render images inline in terminal output when supported (iTerm image protocol, Kitty graphics, etc.) (https://github.com/openai/codex/issues/6123)
+11. [ ] Input shortcuts & editor behavior
+    - [ ] Paste images from clipboard via `Cmd+V` when clipboard contains an image (toggleable)
+    - [ ] Use `Shift+Enter` for newline instead of `Option+Enter` (toggleable)
+    - [ ] Configure any shortcuts (keymap/config file) (https://github.com/openai/codex/issues/3049)
+        - Add a `[keybindings]` section to `config.toml` mapping actions (newline, backspace, move, etc.) to key chords.
+        - Document supported key names/modifiers (`Ctrl`, `Alt`, `Shift`, `Enter`, single chars) and defaults.
+    - [ ] Configurable submit vs newline behavior (Enter, Ctrl+Enter, Alt/Option+Enter, Shift+Enter) (https://github.com/openai/codex/issues/5716, https://github.com/openai/codex/issues/6100)
+        - Provide a config option to swap defaults (Enter inserts newline, `Ctrl+Enter` submits) for multi-line-first workflows.
+        - Consider restoring/making optional the “Alt/Option+Enter submits” behavior mentioned as a regression.
+    - [ ] Fix prompt editor copy/paste behavior (Ctrl+C/Ctrl+V, etc.) (https://github.com/openai/codex/issues/5325)
+        - Make common shortcuts non-destructive, and support copying the current prompt text from within the TUI.
+        - Ensure paste behaves as expected (instead of clearing prompt content).
+    - [ ] Support Alt+d delete-word-forward (readline-style) (https://github.com/openai/codex/issues/5018)
+        - Implement readline `M-d`: delete from cursor to end of current word (word-kill forward).
+    - [ ] Platform-specific key-hint formatting on macOS (⌃ ⌥ ⇧, Fn+Arrow alternatives) (https://github.com/openai/codex/issues/4914)
+        - Display macOS-style modifier symbols (⌃ ⌥ ⇧) and optionally omit verbose names for cleaner hints.
+        - Include `Fn+Arrow` alternatives for PageUp/PageDown/Home/End on compact keyboards; keep other platforms unchanged.
+12. [ ] Render images inline in terminal output when supported (iTerm image protocol, Kitty graphics, etc.) (https://github.com/openai/codex/issues/6123)
     - Render pasted images or image links/previews directly in the terminal when the terminal supports it.
     - Fall back gracefully (e.g. show URL/alt text) when inline rendering is unavailable.
-15. [ ] In-TUI session management (list/switch/rename/delete sessions) (https://github.com/openai/codex/issues/6500)
+13. [ ] In-TUI session management (list/switch/rename/delete sessions) (https://github.com/openai/codex/issues/6500)
     - Add an interactive `/session` view to list and switch sessions with metadata (name, ID, last activity, directory).
     - Support `/session rename …` and `/session delete …`, plus optional non-TUI subcommands (`codex session …`).
-16. [ ] Configurable submit vs newline behavior (Enter, Ctrl+Enter, Alt/Option+Enter, Shift+Enter) (https://github.com/openai/codex/issues/5716, https://github.com/openai/codex/issues/6100)
-    - Provide a config option to swap defaults (Enter inserts newline, `Ctrl+Enter` submits) for multi-line-first workflows.
-    - Consider restoring/making optional the “Alt/Option+Enter submits” behavior mentioned as a regression.
-17. [ ] TUI appearance settings (hide startup tips, session header, placeholder title) (https://github.com/openai/codex/issues/6089)
+14. [ ] TUI appearance settings (hide startup tips, session header, placeholder title) (https://github.com/openai/codex/issues/6089)
     - Add toggles to hide startup tips and session header, and to hide/replace the placeholder title.
     - Support a minimal “prompt + output” startup layout.
-18. [ ] Fix prompt editor copy/paste behavior (Ctrl+C/Ctrl+V, etc.) (https://github.com/openai/codex/issues/5325)
-    - Make common shortcuts non-destructive, and support copying the current prompt text from within the TUI.
-    - Ensure paste behaves as expected (instead of clearing prompt content).
-19. [ ] Support Alt+d delete-word-forward (readline-style) (https://github.com/openai/codex/issues/5018)
-    - Implement readline `M-d`: delete from cursor to end of current word (word-kill forward).
-20. [ ] Platform-specific key-hint formatting on macOS (⌃ ⌥ ⇧, Fn+Arrow alternatives) (https://github.com/openai/codex/issues/4914)
-    - Display macOS-style modifier symbols (⌃ ⌥ ⇧) and optionally omit verbose names for cleaner hints.
-    - Include `Fn+Arrow` alternatives for PageUp/PageDown/Home/End on compact keyboards; keep other platforms unchanged.
-21. [ ] `/status` should list global `~/.codex/AGENTS.md` / `$CODEX_HOME/AGENTS.md` (https://github.com/openai/codex/issues/3793)
+15. [ ] `/status` should list global `~/.codex/AGENTS.md` / `$CODEX_HOME/AGENTS.md` (https://github.com/openai/codex/issues/3793)
     - `/status` should include the global AGENTS file in the “AGENTS files” list when present (expected vs actual).
-22. [ ] Customizable status line (show cwd, git branch, etc.) (https://github.com/openai/codex/issues/2926)
+16. [ ] Customizable status line (show cwd, git branch, etc.) (https://github.com/openai/codex/issues/2926)
     - Show project context like current working directory and git branch in the status line.
     - Consider making the status line user-configurable (similar to Claude Code).
-23. [ ] Add colors/highlighting for emphasis (thinking vs final, headers) (https://github.com/openai/codex/issues/2711)
+17. [ ] Add colors/highlighting for emphasis (thinking vs final, headers) (https://github.com/openai/codex/issues/2711)
     - Add configurable color settings to distinguish thinking vs final output.
     - Highlight headers/sections like next steps/recommendations for better scanability.
-24. [ ] Interactive history reverse search (Ctrl+R) (https://github.com/openai/codex/issues/2622)
+18. [ ] Interactive history reverse search (Ctrl+R) (https://github.com/openai/codex/issues/2622)
     - `Ctrl+R` enters reverse-i-search with fuzzy/substring matching; repeated `Ctrl+R` cycles matches (`Ctrl+S` forward).
     - Enter accepts, Escape cancels, and editing the selected prompt should be easy (exit search and edit in place).
     - Persist history with configurable size limits and optional frecency ordering.
