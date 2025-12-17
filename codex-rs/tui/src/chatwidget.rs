@@ -83,6 +83,7 @@ use tokio::task::JoinHandle;
 use tracing::debug;
 
 use crate::app_event::AppEvent;
+use crate::app_event::ChatExportFormat;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::BottomPane;
@@ -103,6 +104,7 @@ use crate::diff_render::display_path_for;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::ExecCell;
 use crate::exec_cell::new_active_exec_command;
+use crate::export_markdown;
 use crate::get_git_diff::get_git_diff;
 use crate::history_cell;
 use crate::history_cell::AgentMessageCell;
@@ -2449,6 +2451,9 @@ impl ChatWidget {
             SlashCommand::Resume => {
                 self.app_event_tx.send(AppEvent::OpenResumePicker);
             }
+            SlashCommand::Export => {
+                self.open_export_picker();
+            }
             SlashCommand::Init => {
                 let init_target = self.config.cwd.join(DEFAULT_PROJECT_DOC_FILENAME);
                 if init_target.exists() {
@@ -2574,6 +2579,84 @@ impl ChatWidget {
                 }));
             }
         }
+    }
+
+    fn open_export_picker(&mut self) {
+        if self.current_rollout_path.is_none() {
+            self.add_info_message("Export is not available yet.".to_string(), None);
+            return;
+        }
+
+        let items = vec![
+            SelectionItem {
+                name: "Markdown (.md)".to_string(),
+                description: Some("Readable transcript for sharing.".to_string()),
+                actions: vec![Box::new(|tx| {
+                    tx.send(AppEvent::ExportChat {
+                        format: ChatExportFormat::Markdown,
+                    });
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+            SelectionItem {
+                name: "JSON (.json)".to_string(),
+                description: Some("Structured messages for tooling.".to_string()),
+                actions: vec![Box::new(|tx| {
+                    tx.send(AppEvent::ExportChat {
+                        format: ChatExportFormat::Json,
+                    });
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+        ];
+
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some("Export Chat".to_string()),
+            subtitle: Some("Creates a file next to the rollout (.jsonl).".to_string()),
+            footer_hint: Some(standard_popup_hint_line()),
+            completion_behavior: ViewCompletionBehavior::Pop,
+            items,
+            ..Default::default()
+        });
+    }
+
+    pub(crate) fn start_export(&mut self, format: ChatExportFormat) {
+        let Some(rollout_path) = self.current_rollout_path.clone() else {
+            self.add_info_message("Export is not available yet.".to_string(), None);
+            return;
+        };
+
+        let out_path = match format {
+            ChatExportFormat::Markdown => rollout_path.with_extension("md"),
+            ChatExportFormat::Json => rollout_path.with_extension("json"),
+        };
+
+        let tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let result = match format {
+                ChatExportFormat::Markdown => {
+                    export_markdown::export_rollout_as_markdown(&rollout_path, &out_path).await
+                }
+                ChatExportFormat::Json => {
+                    export_markdown::export_rollout_as_json(&rollout_path, &out_path).await
+                }
+            };
+
+            match result {
+                Ok(messages) => tx.send(AppEvent::ExportResult {
+                    path: out_path,
+                    messages,
+                    error: None,
+                }),
+                Err(e) => tx.send(AppEvent::ExportResult {
+                    path: out_path,
+                    messages: 0,
+                    error: Some(e.to_string()),
+                }),
+            };
+        });
     }
 
     pub(crate) fn handle_paste(&mut self, text: String) {

@@ -46,6 +46,7 @@ pub mod custom_terminal;
 mod diff_render;
 mod exec_cell;
 mod exec_command;
+mod export_markdown;
 mod file_search;
 mod frames;
 mod get_git_diff;

@@ -739,6 +739,24 @@ impl App {
                 ));
                 tui.frame_requester().schedule_frame();
             }
+            AppEvent::ExportChat { format } => {
+                self.chat_widget.start_export(format);
+            }
+            AppEvent::ExportResult {
+                path,
+                messages,
+                error,
+            } => {
+                if let Some(error) = error {
+                    self.chat_widget
+                        .add_error_message(format!("Failed to export chat: {error}"));
+                } else {
+                    self.chat_widget.add_info_message(
+                        format!("Exported chat as Markdown: {}", path.display()),
+                        Some(format!("{messages} messages")),
+                    );
+                }
+            }
             AppEvent::StartFileSearch(query) => {
                 if !query.is_empty() {
                     self.file_search.on_user_query(query);

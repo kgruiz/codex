@@ -14,6 +14,12 @@ use codex_core::protocol::AskForApproval;
 use codex_core::protocol::SandboxPolicy;
 use codex_protocol::openai_models::ReasoningEffort;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChatExportFormat {
+    Markdown,
+    Json,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum AppEvent {
@@ -50,6 +56,18 @@ pub(crate) enum AppEvent {
 
     /// Result of computing a `/diff` command.
     DiffResult(String),
+
+    /// Export the current chat in the selected format.
+    ExportChat {
+        format: ChatExportFormat,
+    },
+
+    /// Result of exporting the current chat.
+    ExportResult {
+        path: PathBuf,
+        messages: usize,
+        error: Option<String>,
+    },
 
     InsertHistoryCell(Box<dyn HistoryCell>),
 
