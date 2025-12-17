@@ -924,7 +924,7 @@ impl App {
                             message.push_str(profile);
                             message.push_str(" profile");
                         }
-                        self.chat_widget.add_info_message(message, None);
+                        tracing::info!("{message}");
                     }
                     Err(err) => {
                         tracing::error!(
