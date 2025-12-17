@@ -173,6 +173,9 @@ pub struct Config {
     /// Show startup tooltips in the TUI welcome screen.
     pub show_tooltips: bool,
 
+    /// Keybinding overrides loaded from `[keybindings]` in `config.toml`.
+    pub keybindings: HashMap<String, Vec<String>>,
+
     /// The directory that should be treated as the current working directory
     /// for the session. All relative paths inside the business-logic layer are
     /// resolved against this path.
@@ -631,6 +634,10 @@ pub struct ConfigToml {
 
     /// Collection of settings that are specific to the TUI.
     pub tui: Option<Tui>,
+
+    /// Keybinding overrides loaded from `[keybindings]` in `config.toml`.
+    #[serde(default)]
+    pub keybindings: HashMap<String, crate::config::types::OneOrManyStrings>,
 
     /// When set to `true`, `AgentReasoning` events will be hidden from the
     /// UI/output. Defaults to `false`.
@@ -1234,6 +1241,11 @@ impl Config {
                 .unwrap_or_default(),
             animations: cfg.tui.as_ref().map(|t| t.animations).unwrap_or(true),
             show_tooltips: cfg.tui.as_ref().map(|t| t.show_tooltips).unwrap_or(true),
+            keybindings: cfg
+                .keybindings
+                .into_iter()
+                .map(|(key, value)| (key, value.into_vec()))
+                .collect(),
             otel: {
                 let t: OtelConfigToml = cfg.otel.unwrap_or_default();
                 let log_user_prompt = t.log_user_prompt.unwrap_or(false);
@@ -2992,6 +3004,7 @@ model_verbosity = "high"
                 tui_notifications: Default::default(),
                 animations: true,
                 show_tooltips: true,
+                keybindings: HashMap::new(),
                 otel: OtelConfig::default(),
             },
             o3_profile_config
@@ -3067,6 +3080,7 @@ model_verbosity = "high"
             tui_notifications: Default::default(),
             animations: true,
             show_tooltips: true,
+            keybindings: HashMap::new(),
             otel: OtelConfig::default(),
         };
 
@@ -3157,6 +3171,7 @@ model_verbosity = "high"
             tui_notifications: Default::default(),
             animations: true,
             show_tooltips: true,
+            keybindings: HashMap::new(),
             otel: OtelConfig::default(),
         };
 
@@ -3233,6 +3248,7 @@ model_verbosity = "high"
             tui_notifications: Default::default(),
             animations: true,
             show_tooltips: true,
+            keybindings: HashMap::new(),
             otel: OtelConfig::default(),
         };
 
