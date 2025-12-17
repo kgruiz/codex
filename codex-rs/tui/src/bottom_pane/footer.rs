@@ -5,6 +5,7 @@ use crate::key_hint::KeyBinding;
 use crate::render::line_utils::prefix_lines;
 use crate::status::format_tokens_compact;
 use crate::ui_consts::FOOTER_INDENT_COLS;
+use codex_protocol::openai_models::ReasoningEffort;
 use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -15,13 +16,15 @@ use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct FooterProps {
+pub(crate) struct FooterProps<'a> {
     pub(crate) mode: FooterMode,
     pub(crate) esc_backtrack_hint: bool,
     pub(crate) use_shift_enter_hint: bool,
     pub(crate) is_task_running: bool,
     pub(crate) context_window_percent: Option<i64>,
     pub(crate) context_window_used_tokens: Option<i64>,
+    pub(crate) model: &'a str,
+    pub(crate) reasoning_effort: Option<ReasoningEffort>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -62,11 +65,11 @@ pub(crate) fn reset_mode_after_activity(current: FooterMode) -> FooterMode {
     }
 }
 
-pub(crate) fn footer_height(props: FooterProps) -> u16 {
+pub(crate) fn footer_height(props: FooterProps<'_>) -> u16 {
     footer_lines(props).len() as u16
 }
 
-pub(crate) fn render_footer(area: Rect, buf: &mut Buffer, props: FooterProps) {
+pub(crate) fn render_footer(area: Rect, buf: &mut Buffer, props: FooterProps<'_>) {
     Paragraph::new(prefix_lines(
         footer_lines(props),
         " ".repeat(FOOTER_INDENT_COLS).into(),
@@ -75,7 +78,7 @@ pub(crate) fn render_footer(area: Rect, buf: &mut Buffer, props: FooterProps) {
     .render(area, buf);
 }
 
-fn footer_lines(props: FooterProps) -> Vec<Line<'static>> {
+fn footer_lines(props: FooterProps<'_>) -> Vec<Line<'static>> {
     // Show the context indicator on the left, appended after the primary hint
     // (e.g., "? for shortcuts"). Keep it visible even when typing (i.e., when
     // the shortcut hint is hidden). Hide it only for the multi-line
@@ -85,10 +88,16 @@ fn footer_lines(props: FooterProps) -> Vec<Line<'static>> {
             is_task_running: props.is_task_running,
         })],
         FooterMode::ShortcutSummary => {
-            let mut line = context_window_line(
+            let mut line = status_line_prefix(props.model, props.reasoning_effort);
+            if !line.spans.is_empty() {
+                line.push_span(" · ".dim());
+            }
+
+            let mut context = context_window_line(
                 props.context_window_percent,
                 props.context_window_used_tokens,
             );
+            line.spans.append(&mut context.spans);
             line.push_span(" · ".dim());
             line.extend(vec![
                 key_hint::plain(KeyCode::Char('?')).into(),
@@ -110,10 +119,19 @@ fn footer_lines(props: FooterProps) -> Vec<Line<'static>> {
             shortcut_overlay_lines(state)
         }
         FooterMode::EscHint => vec![esc_hint_line(props.esc_backtrack_hint)],
-        FooterMode::ContextOnly => vec![context_window_line(
-            props.context_window_percent,
-            props.context_window_used_tokens,
-        )],
+        FooterMode::ContextOnly => {
+            let mut line = status_line_prefix(props.model, props.reasoning_effort);
+            if !line.spans.is_empty() {
+                line.push_span(" · ".dim());
+            }
+
+            let mut context = context_window_line(
+                props.context_window_percent,
+                props.context_window_used_tokens,
+            );
+            line.spans.append(&mut context.spans);
+            vec![line]
+        }
     }
 }
 
@@ -259,6 +277,40 @@ fn context_window_line(percent: Option<i64>, used_tokens: Option<i64>) -> Line<'
     }
 
     Line::from(vec![Span::from("100% context left").dim()])
+}
+
+fn status_line_prefix(model: &str, effort: Option<ReasoningEffort>) -> Line<'static> {
+    if model.trim().is_empty() {
+        return Line::from("");
+    }
+
+    let mut line = Line::from(model.to_string());
+
+    if let Some(label) = thinking_label_for(model, effort) {
+        line.push_span(" · ".dim());
+        line.push_span(format!("thinking {label}").dim());
+    }
+
+    line
+}
+
+fn thinking_label_for(model: &str, effort: Option<ReasoningEffort>) -> Option<&'static str> {
+    if model.starts_with("codex-auto-") {
+        return None;
+    }
+
+    effort.map(thinking_label)
+}
+
+fn thinking_label(effort: ReasoningEffort) -> &'static str {
+    match effort {
+        ReasoningEffort::Minimal => "minimal",
+        ReasoningEffort::Low => "low",
+        ReasoningEffort::Medium => "medium",
+        ReasoningEffort::High => "high",
+        ReasoningEffort::XHigh => "xhigh",
+        ReasoningEffort::None => "none",
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -443,7 +495,7 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
-    fn snapshot_footer(name: &str, props: FooterProps) {
+    fn snapshot_footer(name: &str, props: FooterProps<'_>) {
         let height = footer_height(props).max(1);
         let mut terminal = Terminal::new(TestBackend::new(80, height)).unwrap();
         terminal
@@ -466,6 +518,8 @@ mod tests {
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
+                model: "",
+                reasoning_effort: None,
             },
         );
 
@@ -478,6 +532,8 @@ mod tests {
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
+                model: "",
+                reasoning_effort: None,
             },
         );
 
@@ -490,6 +546,8 @@ mod tests {
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
+                model: "",
+                reasoning_effort: None,
             },
         );
 
@@ -502,6 +560,8 @@ mod tests {
                 is_task_running: true,
                 context_window_percent: None,
                 context_window_used_tokens: None,
+                model: "",
+                reasoning_effort: None,
             },
         );
 
@@ -514,6 +574,8 @@ mod tests {
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
+                model: "",
+                reasoning_effort: None,
             },
         );
 
@@ -526,6 +588,8 @@ mod tests {
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
+                model: "",
+                reasoning_effort: None,
             },
         );
 
@@ -538,6 +602,8 @@ mod tests {
                 is_task_running: true,
                 context_window_percent: Some(72),
                 context_window_used_tokens: None,
+                model: "",
+                reasoning_effort: None,
             },
         );
 
@@ -550,6 +616,22 @@ mod tests {
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: Some(123_456),
+                model: "",
+                reasoning_effort: None,
+            },
+        );
+
+        snapshot_footer(
+            "footer_shortcuts_with_model",
+            FooterProps {
+                mode: FooterMode::ShortcutSummary,
+                esc_backtrack_hint: false,
+                use_shift_enter_hint: false,
+                is_task_running: false,
+                context_window_percent: None,
+                context_window_used_tokens: None,
+                model: "gpt-5.1-codex",
+                reasoning_effort: Some(ReasoningEffort::Medium),
             },
         );
     }

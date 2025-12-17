@@ -46,6 +46,7 @@ use crate::style::user_message_style;
 use codex_common::fuzzy_match::fuzzy_match;
 use codex_protocol::custom_prompts::CustomPrompt;
 use codex_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
+use codex_protocol::openai_models::ReasoningEffort;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -143,6 +144,8 @@ pub(crate) struct ChatComposer {
     footer_hint_override: Option<Vec<(String, String)>>,
     context_window_percent: Option<i64>,
     context_window_used_tokens: Option<i64>,
+    session_model: String,
+    session_reasoning_effort: Option<ReasoningEffort>,
     skills: Option<Vec<SkillMetadata>>,
     dismissed_skill_popup_token: Option<String>,
 }
@@ -192,6 +195,8 @@ impl ChatComposer {
             footer_hint_override: None,
             context_window_percent: None,
             context_window_used_tokens: None,
+            session_model: String::new(),
+            session_reasoning_effort: None,
             skills: None,
             dismissed_skill_popup_token: None,
         };
@@ -1597,7 +1602,7 @@ impl ChatComposer {
         changed
     }
 
-    fn footer_props(&self) -> FooterProps {
+    fn footer_props(&self) -> FooterProps<'_> {
         FooterProps {
             mode: self.footer_mode(),
             esc_backtrack_hint: self.esc_backtrack_hint,
@@ -1605,6 +1610,8 @@ impl ChatComposer {
             is_task_running: self.is_task_running,
             context_window_percent: self.context_window_percent,
             context_window_used_tokens: self.context_window_used_tokens,
+            model: &self.session_model,
+            reasoning_effort: self.session_reasoning_effort,
         }
     }
 
@@ -1843,6 +1850,24 @@ impl ChatComposer {
         }
         self.context_window_percent = percent;
         self.context_window_used_tokens = used_tokens;
+    }
+
+    pub(crate) fn set_session_model(&mut self, model: String) -> bool {
+        if self.session_model == model {
+            return false;
+        }
+
+        self.session_model = model;
+        true
+    }
+
+    pub(crate) fn set_session_reasoning_effort(&mut self, effort: Option<ReasoningEffort>) -> bool {
+        if self.session_reasoning_effort == effort {
+            return false;
+        }
+
+        self.session_reasoning_effort = effort;
+        true
     }
 
     pub(crate) fn set_esc_backtrack_hint(&mut self, show: bool) {

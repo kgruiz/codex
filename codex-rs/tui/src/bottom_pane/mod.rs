@@ -55,6 +55,7 @@ pub(crate) use chat_composer::ChatComposer;
 pub(crate) use chat_composer::ComposerAttachment;
 pub(crate) use chat_composer::InputResult;
 use codex_protocol::custom_prompts::CustomPrompt;
+use codex_protocol::openai_models::ReasoningEffort;
 pub(crate) use queue_popup::QueuePopup;
 pub(crate) use queue_popup::QueuePopupItem;
 
@@ -347,6 +348,18 @@ impl BottomPane {
     pub(crate) fn update_status_header(&mut self, header: String) {
         if let Some(status) = self.status.as_mut() {
             status.update_header(header);
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn set_session_model(&mut self, model: String) {
+        if self.composer.set_session_model(model) {
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn set_session_reasoning_effort(&mut self, effort: Option<ReasoningEffort>) {
+        if self.composer.set_session_reasoning_effort(effort) {
             self.request_redraw();
         }
     }

@@ -448,6 +448,10 @@ impl ChatWidget {
         let initial_messages = event.initial_messages.clone();
         let model_for_header = event.model.clone();
         self.session_header.set_model(&model_for_header);
+        self.bottom_pane.set_session_model(model_for_header.clone());
+        self.bottom_pane.set_session_reasoning_effort(
+            event.reasoning_effort.or(self.effective_reasoning_effort()),
+        );
         self.add_to_history(history_cell::new_session_info(
             &self.config,
             &model_for_header,
@@ -1364,7 +1368,7 @@ impl ChatWidget {
             model_family,
             auth_manager,
             models_manager,
-            session_header: SessionHeader::new(model_slug),
+            session_header: SessionHeader::new(model_slug.clone()),
             initial_user_message: create_initial_user_message(
                 initial_prompt.unwrap_or_default(),
                 initial_images,
@@ -1408,6 +1412,10 @@ impl ChatWidget {
         };
 
         widget.prefetch_rate_limits();
+        widget.bottom_pane.set_session_model(model_slug);
+        widget
+            .bottom_pane
+            .set_session_reasoning_effort(widget.effective_reasoning_effort());
 
         widget
     }
@@ -1457,7 +1465,7 @@ impl ChatWidget {
             model_family,
             auth_manager,
             models_manager,
-            session_header: SessionHeader::new(model_slug),
+            session_header: SessionHeader::new(model_slug.clone()),
             initial_user_message: create_initial_user_message(
                 initial_prompt.unwrap_or_default(),
                 initial_images,
@@ -1501,6 +1509,10 @@ impl ChatWidget {
         };
 
         widget.prefetch_rate_limits();
+        widget.bottom_pane.set_session_model(model_slug);
+        widget
+            .bottom_pane
+            .set_session_reasoning_effort(widget.effective_reasoning_effort());
 
         widget
     }
@@ -4199,15 +4211,27 @@ impl ChatWidget {
             .unwrap_or(false)
     }
 
+    fn effective_reasoning_effort(&self) -> Option<ReasoningEffortConfig> {
+        self.config
+            .model_reasoning_effort
+            .or(self.model_family.default_reasoning_effort)
+    }
+
     /// Set the reasoning effort in the widget's config copy.
     pub(crate) fn set_reasoning_effort(&mut self, effort: Option<ReasoningEffortConfig>) {
         self.config.model_reasoning_effort = effort;
+        self.bottom_pane
+            .set_session_reasoning_effort(self.effective_reasoning_effort());
     }
 
     /// Set the model in the widget's config copy.
     pub(crate) fn set_model(&mut self, model: &str, model_family: ModelFamily) {
+        self.config.model = Some(model.to_string());
         self.session_header.set_model(model);
         self.model_family = model_family;
+        self.bottom_pane.set_session_model(model.to_string());
+        self.bottom_pane
+            .set_session_reasoning_effort(self.effective_reasoning_effort());
     }
 
     pub(crate) fn add_info_message(&mut self, message: String, hint: Option<String>) {
