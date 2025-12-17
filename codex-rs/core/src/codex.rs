@@ -113,6 +113,7 @@ use crate::protocol::Submission;
 use crate::protocol::TokenCountEvent;
 use crate::protocol::TokenUsage;
 use crate::protocol::TokenUsageInfo;
+use crate::protocol::TurnContextUpdatedEvent;
 use crate::protocol::TurnDiffEvent;
 use crate::protocol::WarningEvent;
 use crate::rollout::RolloutRecorder;
@@ -681,6 +682,19 @@ impl Session {
             next_internal_sub_id: AtomicU64::new(0),
         });
 
+        let per_turn_config = Self::build_per_turn_config(&session_configuration);
+        let model_family = models_manager
+            .construct_model_family(session_configuration.model.as_str(), &per_turn_config)
+            .await;
+        let effective_reasoning_effort = model_family
+            .supports_reasoning_summaries
+            .then(|| {
+                session_configuration
+                    .model_reasoning_effort
+                    .or(model_family.default_reasoning_effort)
+            })
+            .flatten();
+
         // Dispatch the SessionConfiguredEvent first and then report any errors.
         // If resuming, include converted initial messages in the payload so UIs can render them immediately.
         let initial_messages = initial_history.get_event_msgs();
@@ -700,6 +714,13 @@ impl Session {
                 rollout_path,
             }),
         })
+        .chain(std::iter::once(Event {
+            id: INITIAL_SUBMIT_ID.to_owned(),
+            msg: EventMsg::TurnContextUpdated(TurnContextUpdatedEvent {
+                model: model_family.get_model_slug().to_string(),
+                reasoning_effort: effective_reasoning_effort,
+            }),
+        }))
         .chain(post_session_configured_events.into_iter());
         for event in events {
             sess.send_event_raw(event).await;
@@ -811,6 +832,13 @@ impl Session {
                         .await;
                 }
 
+                let rollout_items: Vec<RolloutItem> = rollout_items
+                    .into_iter()
+                    .filter(|item| {
+                        !matches!(item, RolloutItem::EventMsg(EventMsg::TurnContextUpdated(_)))
+                    })
+                    .collect();
+
                 // If persisting, persist all rollout items as-is (recorder filters)
                 if persist && !rollout_items.is_empty() {
                     self.persist_rollout_items(&rollout_items).await;
@@ -822,9 +850,35 @@ impl Session {
     }
 
     pub(crate) async fn update_settings(&self, updates: SessionSettingsUpdate) {
-        let mut state = self.state.lock().await;
+        let session_configuration = {
+            let mut state = self.state.lock().await;
+            state.session_configuration = state.session_configuration.apply(&updates);
+            state.session_configuration.clone()
+        };
 
-        state.session_configuration = state.session_configuration.apply(&updates);
+        let per_turn_config = Self::build_per_turn_config(&session_configuration);
+        let model_family = self
+            .services
+            .models_manager
+            .construct_model_family(session_configuration.model.as_str(), &per_turn_config)
+            .await;
+        let effective_reasoning_effort = model_family
+            .supports_reasoning_summaries
+            .then(|| {
+                session_configuration
+                    .model_reasoning_effort
+                    .or(model_family.default_reasoning_effort)
+            })
+            .flatten();
+
+        self.send_event_raw(Event {
+            id: String::new(),
+            msg: EventMsg::TurnContextUpdated(TurnContextUpdatedEvent {
+                model: model_family.get_model_slug().to_string(),
+                reasoning_effort: effective_reasoning_effort,
+            }),
+        })
+        .await;
     }
 
     pub(crate) async fn new_turn(&self, updates: SessionSettingsUpdate) -> Arc<TurnContext> {
