@@ -1608,19 +1608,6 @@ impl ChatWidget {
     }
 
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
-        #[cfg(feature = "debug-logs")]
-        if matches!(key_event.code, KeyCode::Left | KeyCode::Right)
-            && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-        {
-            tracing::info!(
-                ?key_event,
-                has_active_view = self.bottom_pane.has_active_view(),
-                composer_popup_active = self.bottom_pane.composer_popup_active(),
-                is_task_running = self.bottom_pane.is_task_running(),
-                "chatwidget key event"
-            );
-        }
-
         match key_event {
             KeyEvent {
                 code: KeyCode::Tab,
@@ -1658,9 +1645,6 @@ impl ChatWidget {
                 && !self.bottom_pane.has_active_view()
                 && !self.bottom_pane.composer_popup_active() =>
             {
-                #[cfg(feature = "debug-logs")]
-                tracing::info!("cycle_model next");
-
                 self.cycle_model(1);
                 return;
             }
@@ -1673,9 +1657,6 @@ impl ChatWidget {
                 && !self.bottom_pane.has_active_view()
                 && !self.bottom_pane.composer_popup_active() =>
             {
-                #[cfg(feature = "debug-logs")]
-                tracing::info!("cycle_model prev");
-
                 self.cycle_model(-1);
                 return;
             }
