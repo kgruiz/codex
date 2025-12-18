@@ -633,10 +633,13 @@ impl ChatWidget {
     fn on_task_started(&mut self) {
         self.bottom_pane.clear_ctrl_c_quit_hint();
         self.bottom_pane.set_task_running(true);
-        let active = self
+        let mut active = self
             .pending_active_turn_context
             .take()
             .unwrap_or_else(|| self.session_turn_context());
+        if active.model != self.model_family.get_model_slug() {
+            active.model_family = self.model_family.clone();
+        }
         self.active_turn_context = Some(active.clone());
         self.bottom_pane.set_active_model(Some(active.model));
         self.bottom_pane
@@ -3085,15 +3088,10 @@ impl ChatWidget {
             Some(effort) => effort,
             None => session.reasoning_effort,
         };
-        let effective_model_family = if effective_model == session.model.as_str() {
-            session.model_family.clone()
-        } else {
-            ModelsManager::construct_model_family_offline(effective_model, &self.config)
-        };
         self.pending_active_turn_context = Some(PendingTurnContext {
             model: effective_model.to_string(),
             reasoning_effort: effective_effort,
-            model_family: effective_model_family,
+            model_family: session.model_family.clone(),
         });
 
         let restore_model = apply_model.as_ref().map(|_| session.model.clone());
