@@ -1535,6 +1535,36 @@ impl ChatWidget {
                 return;
             }
             KeyEvent {
+                code: KeyCode::Char(']'),
+                modifiers: KeyModifiers::CONTROL,
+                kind: KeyEventKind::Press,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('\u{001d}'),
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view()
+                && !self.bottom_pane.composer_popup_active()
+                && !self.bottom_pane.is_task_running() =>
+            {
+                self.cycle_model(1);
+                return;
+            }
+            KeyEvent {
+                code: KeyCode::Char('['),
+                modifiers: KeyModifiers::CONTROL,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view()
+                && !self.bottom_pane.composer_popup_active()
+                && !self.bottom_pane.is_task_running() =>
+            {
+                self.cycle_model(-1);
+                return;
+            }
+            KeyEvent {
                 code: KeyCode::Char('p'),
                 modifiers: KeyModifiers::CONTROL,
                 kind: KeyEventKind::Press,
@@ -1685,6 +1715,66 @@ impl ChatWidget {
         }
 
         self.maybe_send_next_queued_input();
+    }
+
+    fn cycle_model(&mut self, direction: isize) {
+        let current_model = self.model_family.get_model_slug().to_string();
+        let presets: Vec<ModelPreset> =
+            // todo(aibrahim): make this async function
+            match self.models_manager.try_list_models() {
+                Ok(models) => models,
+                Err(_) => {
+                    self.add_info_message(
+                        "Models are being updated; please try again in a moment.".to_string(),
+                        None,
+                    );
+                    return;
+                }
+            };
+
+        let (mut auto_presets, other_presets): (Vec<ModelPreset>, Vec<ModelPreset>) = presets
+            .into_iter()
+            .partition(|preset| Self::is_auto_model(&preset.model));
+
+        let choices = if auto_presets.is_empty() {
+            let mut presets = other_presets;
+            presets.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+            presets
+        } else {
+            auto_presets.sort_by_key(|preset| Self::auto_model_order(&preset.model));
+            if auto_presets
+                .iter()
+                .any(|preset| preset.model == current_model)
+            {
+                auto_presets
+            } else {
+                let current_preset = other_presets
+                    .iter()
+                    .find(|preset| preset.model == current_model)
+                    .cloned();
+                if let Some(current_preset) = current_preset {
+                    auto_presets.insert(0, current_preset);
+                }
+                auto_presets
+            }
+        };
+
+        if choices.len() <= 1 {
+            return;
+        }
+
+        let current_idx = choices
+            .iter()
+            .position(|preset| preset.model == current_model)
+            .unwrap_or(0);
+
+        let len = choices.len() as isize;
+        let next_idx = (current_idx as isize + direction).rem_euclid(len) as usize;
+        let next = choices[next_idx].clone();
+        let next_model = next.model.to_string();
+        let next_effort = Some(next.default_reasoning_effort);
+
+        self.apply_model_and_effort(next_model, next_effort);
     }
 
     fn cycle_thinking_effort(&mut self, direction: isize) {
@@ -2451,8 +2541,8 @@ impl ChatWidget {
             ("Enter".to_string(), "save".to_string()),
             ("Esc".to_string(), "cancel".to_string()),
             ("Alt+↑/↓".to_string(), "switch".to_string()),
-            ("Ctrl+K".to_string(), "model".to_string()),
-            ("Tab".to_string(), "thinking".to_string()),
+            ("Alt+M".to_string(), "model".to_string()),
+            ("Alt+T".to_string(), "thinking".to_string()),
         ];
 
         self.bottom_pane

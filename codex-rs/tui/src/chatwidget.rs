@@ -1606,7 +1606,7 @@ impl ChatWidget {
                 && !self.bottom_pane.composer_popup_active()
                 && !self.bottom_pane.is_task_running() =>
             {
-                self.cycle_model(1);
+                self.cycle_thinking_effort(1);
                 return;
             }
             KeyEvent {
@@ -1623,7 +1623,7 @@ impl ChatWidget {
                 && !self.bottom_pane.composer_popup_active()
                 && !self.bottom_pane.is_task_running() =>
             {
-                self.cycle_model(-1);
+                self.cycle_thinking_effort(-1);
                 return;
             }
             KeyEvent {
@@ -1641,7 +1641,7 @@ impl ChatWidget {
                 && !self.bottom_pane.composer_popup_active()
                 && !self.bottom_pane.is_task_running() =>
             {
-                self.cycle_thinking_effort(1);
+                self.cycle_model(1);
                 return;
             }
             KeyEvent {
@@ -1653,7 +1653,7 @@ impl ChatWidget {
                 && !self.bottom_pane.composer_popup_active()
                 && !self.bottom_pane.is_task_running() =>
             {
-                self.cycle_thinking_effort(-1);
+                self.cycle_model(-1);
                 return;
             }
             KeyEvent {

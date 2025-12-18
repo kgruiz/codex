@@ -344,6 +344,12 @@ impl ShortcutDescriptor {
     fn overlay_entry(&self, state: ShortcutsState) -> Option<Line<'static>> {
         let binding = self.binding_for(state)?;
         let mut line = match self.id {
+            ShortcutId::Model => Line::from(vec![
+                self.prefix.into(),
+                key_hint::ctrl(KeyCode::Char('[')).into(),
+                " / ".into(),
+                key_hint::ctrl(KeyCode::Char(']')).into(),
+            ]),
             ShortcutId::Thinking => Line::from(vec![
                 self.prefix.into(),
                 key_hint::plain(KeyCode::Tab).into(),
@@ -383,7 +389,7 @@ const SHORTCUTS: &[ShortcutDescriptor] = &[
     ShortcutDescriptor {
         id: ShortcutId::Model,
         bindings: &[ShortcutBinding {
-            key: key_hint::ctrl(KeyCode::Char('k')),
+            key: key_hint::ctrl(KeyCode::Char(']')),
             condition: DisplayCondition::Always,
         }],
         prefix: "",

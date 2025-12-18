@@ -191,16 +191,16 @@ fn shortcut_overlay_lines(state: ShortcutsState<'_>) -> Vec<Line<'static>> {
     ]);
 
     let model = Line::from(vec![
-        key_hint::plain(KeyCode::Tab).into(),
+        key_hint::ctrl(KeyCode::Char('[')).into(),
         " / ".into(),
-        key_hint::shift(KeyCode::Tab).into(),
+        key_hint::ctrl(KeyCode::Char(']')).into(),
         " to change model".into(),
     ]);
 
     let thinking = Line::from(vec![
-        key_hint::ctrl(KeyCode::Char('[')).into(),
+        key_hint::plain(KeyCode::Tab).into(),
         " / ".into(),
-        key_hint::ctrl(KeyCode::Char(']')).into(),
+        key_hint::shift(KeyCode::Tab).into(),
         " to change thinking".into(),
     ]);
 
