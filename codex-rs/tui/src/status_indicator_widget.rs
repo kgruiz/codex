@@ -185,11 +185,14 @@ impl Renderable for StatusIndicatorWidget {
                         .then_some("default")
                 })
             {
-                spans.push(format!(" (think {label})").dim());
+                spans.push(format!(" (reasoning {label})").dim());
             }
+
+            spans.push(" · ".dim());
+        } else {
+            spans.push(" ".into());
         }
 
-        spans.push(" ".into());
         if self.show_interrupt_hint {
             spans.extend(vec![
                 format!("({pretty_elapsed} • ").dim(),

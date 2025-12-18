@@ -332,7 +332,7 @@ fn push_model_segment(
     line.push_span(model.to_string());
 
     if let Some(label) = thinking_label_for(model, effort) {
-        line.push_span(format!(" (think {label})").dim());
+        line.push_span(format!(" (reasoning {label})").dim());
     }
 }
 

@@ -3513,7 +3513,7 @@ impl ChatWidget {
                             .then_some("default")
                         })
                     {
-                        tag.push_str(&format!(" · think {label}"));
+                        tag.push_str(&format!(" · reasoning {label}"));
                     }
                     tag.push_str("] ");
                     tag
