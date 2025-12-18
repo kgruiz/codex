@@ -346,6 +346,9 @@ pub(crate) struct ChatWidget {
     feedback: codex_feedback::CodexFeedback,
     // Current session rollout path (if known)
     current_rollout_path: Option<PathBuf>,
+
+    pending_active_turn_context: Option<TurnContextSnapshot>,
+    active_turn_context: Option<TurnContextSnapshot>,
 }
 
 struct UserMessage {
@@ -359,6 +362,13 @@ struct QueuedUserMessage {
     attachments: Vec<ComposerAttachment>,
     model_override: Option<String>,
     effort_override: Option<Option<ReasoningEffortConfig>>,
+}
+
+#[derive(Clone, Debug)]
+struct TurnContextSnapshot {
+    model: String,
+    reasoning_effort: Option<ReasoningEffortConfig>,
+    model_family: ModelFamily,
 }
 
 #[derive(Clone)]
@@ -408,6 +418,20 @@ fn create_initial_user_message(text: String, image_paths: Vec<PathBuf>) -> Optio
 }
 
 impl ChatWidget {
+    fn effective_reasoning_effort(&self) -> Option<ReasoningEffortConfig> {
+        self.config
+            .model_reasoning_effort
+            .or(self.model_family.default_reasoning_effort)
+    }
+
+    fn session_turn_context(&self) -> TurnContextSnapshot {
+        TurnContextSnapshot {
+            model: self.model_family.get_model_slug().to_string(),
+            reasoning_effort: self.effective_reasoning_effort(),
+            model_family: self.model_family.clone(),
+        }
+    }
+
     fn flush_answer_stream_with_separator(&mut self) {
         if self.stream_paused {
             if self.stream_controller.is_some() || !self.paused_agent_deltas.is_empty() {
@@ -446,6 +470,8 @@ impl ChatWidget {
         let initial_messages = event.initial_messages.clone();
         let model_for_header = event.model.clone();
         self.session_header.set_model(&model_for_header);
+        self.pending_active_turn_context = None;
+        self.active_turn_context = None;
         self.add_to_history(history_cell::new_session_info(
             &self.config,
             &model_for_header,
@@ -579,6 +605,11 @@ impl ChatWidget {
     fn on_task_started(&mut self) {
         self.bottom_pane.clear_ctrl_c_quit_hint();
         self.bottom_pane.set_task_running(true);
+        let active = self
+            .pending_active_turn_context
+            .take()
+            .unwrap_or_else(|| self.session_turn_context());
+        self.active_turn_context = Some(active);
         self.retry_status_header = None;
         self.bottom_pane.set_interrupt_hint_visible(true);
         self.set_status_header(String::from("Working"));
@@ -595,6 +626,8 @@ impl ChatWidget {
         self.flush_answer_stream_with_separator();
         // Mark task stopped and request redraw now that all content is in history.
         self.bottom_pane.set_task_running(false);
+        self.pending_active_turn_context = None;
+        self.active_turn_context = None;
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
         self.last_unified_wait = None;
@@ -731,6 +764,8 @@ impl ChatWidget {
         self.finalize_active_cell_as_failed();
         // Reset running state and clear streaming buffers.
         self.bottom_pane.set_task_running(false);
+        self.pending_active_turn_context = None;
+        self.active_turn_context = None;
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
         self.last_unified_wait = None;
@@ -1403,6 +1438,8 @@ impl ChatWidget {
             last_rendered_width: std::cell::Cell::new(None),
             feedback,
             current_rollout_path: None,
+            pending_active_turn_context: None,
+            active_turn_context: None,
         };
 
         widget.prefetch_rate_limits();
@@ -1496,6 +1533,8 @@ impl ChatWidget {
             last_rendered_width: std::cell::Cell::new(None),
             feedback,
             current_rollout_path: None,
+            pending_active_turn_context: None,
+            active_turn_context: None,
         };
 
         widget.prefetch_rate_limits();
@@ -2927,6 +2966,10 @@ impl ChatWidget {
             }
         }
 
+        if self.pending_active_turn_context.is_none() {
+            self.pending_active_turn_context = Some(self.session_turn_context());
+        }
+
         self.codex_op_tx
             .send(Op::UserInput { items })
             .unwrap_or_else(|e| {
@@ -3266,6 +3309,29 @@ impl ChatWidget {
         } else {
             (&default_usage, Some(&default_usage))
         };
+
+        if self.bottom_pane.is_task_running()
+            && let Some(active) = self.active_turn_context.as_ref()
+        {
+            let mut status_config = self.config.clone();
+            status_config.model_reasoning_effort = active.reasoning_effort;
+
+            self.add_to_history(crate::status::new_status_output(
+                &status_config,
+                self.auth_manager.as_ref(),
+                &active.model_family,
+                total_usage,
+                context_usage,
+                &self.conversation_id,
+                self.rate_limit_snapshot.as_ref(),
+                self.plan_type,
+                Local::now(),
+                &active.model,
+            ));
+
+            return;
+        }
+
         self.add_to_history(crate::status::new_status_output(
             &self.config,
             self.auth_manager.as_ref(),

@@ -155,6 +155,31 @@ fn resumed_initial_messages_render_history() {
     );
 }
 
+#[test]
+fn status_uses_active_turn_model_and_effort_while_running() {
+    let (mut chat, mut rx, _ops) = make_chatwidget_manual(Some("gpt-5.1-codex-max"));
+
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
+
+    chat.submit_user_message(UserMessage::from("hello"));
+    drain_insert_history(&mut rx);
+
+    chat.on_task_started();
+
+    let new_model = "gpt-5.1-codex";
+    let new_family = ModelsManager::construct_model_family_offline(new_model, &chat.config);
+    chat.set_model(new_model, new_family);
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::Low));
+
+    chat.add_status_output();
+    let cells = drain_insert_history(&mut rx);
+    let rendered = lines_to_single_string(cells.last().expect("status output"));
+
+    assert!(rendered.contains("gpt-5.1-codex-max"));
+    assert!(rendered.contains("reasoning high"));
+    assert!(!rendered.contains("gpt-5.1-codex (reasoning"));
+}
+
 /// Entering review mode uses the hint provided by the review request.
 #[test]
 fn entered_review_mode_uses_request_hint() {
@@ -452,6 +477,8 @@ fn make_chatwidget_manual(
         last_rendered_width: std::cell::Cell::new(None),
         feedback: codex_feedback::CodexFeedback::new(),
         current_rollout_path: None,
+        pending_active_turn_context: None,
+        active_turn_context: None,
     };
     (widget, rx, op_rx)
 }

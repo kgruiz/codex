@@ -356,6 +356,7 @@ pub(crate) struct ChatWidget {
     current_rollout_path: Option<PathBuf>,
 
     pending_active_turn_context: Option<PendingTurnContext>,
+    active_turn_context: Option<PendingTurnContext>,
 }
 
 struct UserMessage {
@@ -375,6 +376,7 @@ struct QueuedUserMessage {
 struct PendingTurnContext {
     model: String,
     reasoning_effort: Option<ReasoningEffortConfig>,
+    model_family: ModelFamily,
 }
 
 #[derive(Clone)]
@@ -432,6 +434,7 @@ impl ChatWidget {
                 .clone()
                 .unwrap_or_else(|| self.model_family.get_model_slug().to_string()),
             reasoning_effort: self.effective_reasoning_effort(),
+            model_family: self.model_family.clone(),
         }
     }
 
@@ -481,6 +484,7 @@ impl ChatWidget {
         self.bottom_pane.set_active_model(None);
         self.bottom_pane.set_active_reasoning_effort(None);
         self.pending_active_turn_context = None;
+        self.active_turn_context = None;
         self.add_to_history(history_cell::new_session_info(
             &self.config,
             &model_for_header,
@@ -633,6 +637,7 @@ impl ChatWidget {
             .pending_active_turn_context
             .take()
             .unwrap_or_else(|| self.session_turn_context());
+        self.active_turn_context = Some(active.clone());
         self.bottom_pane.set_active_model(Some(active.model));
         self.bottom_pane
             .set_active_reasoning_effort(active.reasoning_effort);
@@ -655,6 +660,7 @@ impl ChatWidget {
         self.bottom_pane.set_active_model(None);
         self.bottom_pane.set_active_reasoning_effort(None);
         self.pending_active_turn_context = None;
+        self.active_turn_context = None;
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
         self.last_unified_wait = None;
@@ -794,6 +800,7 @@ impl ChatWidget {
         self.bottom_pane.set_active_model(None);
         self.bottom_pane.set_active_reasoning_effort(None);
         self.pending_active_turn_context = None;
+        self.active_turn_context = None;
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
         self.last_unified_wait = None;
@@ -1478,6 +1485,7 @@ impl ChatWidget {
             feedback,
             current_rollout_path: None,
             pending_active_turn_context: None,
+            active_turn_context: None,
         };
 
         widget.prefetch_rate_limits();
@@ -1585,6 +1593,7 @@ impl ChatWidget {
             feedback,
             current_rollout_path: None,
             pending_active_turn_context: None,
+            active_turn_context: None,
         };
 
         widget.prefetch_rate_limits();
@@ -3076,9 +3085,15 @@ impl ChatWidget {
             Some(effort) => effort,
             None => session.reasoning_effort,
         };
+        let effective_model_family = if effective_model == session.model.as_str() {
+            session.model_family.clone()
+        } else {
+            ModelsManager::construct_model_family_offline(effective_model, &self.config)
+        };
         self.pending_active_turn_context = Some(PendingTurnContext {
             model: effective_model.to_string(),
             reasoning_effort: effective_effort,
+            model_family: effective_model_family,
         });
 
         let restore_model = apply_model.as_ref().map(|_| session.model.clone());
@@ -3542,6 +3557,29 @@ impl ChatWidget {
         } else {
             (&default_usage, Some(&default_usage))
         };
+
+        if self.bottom_pane.is_task_running()
+            && let Some(active) = self.active_turn_context.as_ref()
+        {
+            let mut status_config = self.config.clone();
+            status_config.model_reasoning_effort = active.reasoning_effort;
+
+            self.add_to_history(crate::status::new_status_output(
+                &status_config,
+                self.auth_manager.as_ref(),
+                &active.model_family,
+                total_usage,
+                context_usage,
+                &self.conversation_id,
+                self.rate_limit_snapshot.as_ref(),
+                self.plan_type,
+                Local::now(),
+                &active.model,
+            ));
+
+            return;
+        }
+
         let model_slug = self
             .config
             .model
