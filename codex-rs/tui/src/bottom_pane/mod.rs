@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::queued_user_messages::QueuedUserMessages;
+use crate::bottom_pane::unified_exec_footer::UnifiedExecFooter;
 use crate::render::renderable::FlexRenderable;
 use crate::render::renderable::Renderable;
 use crate::render::renderable::RenderableItem;
@@ -27,6 +28,7 @@ mod chat_composer;
 mod chat_composer_history;
 mod command_popup;
 pub mod custom_prompt_view;
+mod experimental_features_view;
 mod file_search_popup;
 mod footer;
 mod list_selection_view;
@@ -43,6 +45,7 @@ mod queued_user_messages;
 mod scroll_state;
 mod selection_popup_common;
 mod textarea;
+mod unified_exec_footer;
 pub(crate) use feedback_view::FeedbackNoteView;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +63,8 @@ pub(crate) use queue_popup::QueuePopup;
 pub(crate) use queue_popup::QueuePopupItem;
 
 use crate::status_indicator_widget::StatusIndicatorWidget;
+pub(crate) use experimental_features_view::BetaFeatureItem;
+pub(crate) use experimental_features_view::ExperimentalFeaturesView;
 pub(crate) use list_selection_view::SelectionAction;
 pub(crate) use list_selection_view::SelectionItem;
 
@@ -83,6 +88,8 @@ pub(crate) struct BottomPane {
 
     /// Inline status indicator shown above the composer while a task is running.
     status: Option<StatusIndicatorWidget>,
+    /// Unified exec session summary shown above the composer.
+    unified_exec_footer: UnifiedExecFooter,
     /// Queued user messages to show above the composer while a turn is running.
     queued_user_messages: QueuedUserMessages,
     context_window_percent: Option<i64>,
@@ -133,6 +140,7 @@ impl BottomPane {
             is_task_running: false,
             ctrl_c_quit_hint: false,
             status: None,
+            unified_exec_footer: UnifiedExecFooter::new(),
             queued_user_messages: QueuedUserMessages::new(),
             esc_backtrack_hint: false,
             animations_enabled,
@@ -505,6 +513,12 @@ impl BottomPane {
         self.request_redraw();
     }
 
+    pub(crate) fn set_unified_exec_sessions(&mut self, sessions: Vec<String>) {
+        if self.unified_exec_footer.set_sessions(sessions) {
+            self.request_redraw();
+        }
+    }
+
     pub(crate) fn update_queue_popup_items(&mut self, items: Vec<QueuePopupItem>) {
         for view in self.view_stack.iter_mut().rev() {
             if let Some(popup) = (view.as_mut() as &mut dyn Any).downcast_mut::<QueuePopup>() {
@@ -658,8 +672,14 @@ impl BottomPane {
             if let Some(status) = &self.status {
                 flex.push(0, RenderableItem::Borrowed(status));
             }
+            if !self.unified_exec_footer.is_empty() {
+                flex.push(0, RenderableItem::Borrowed(&self.unified_exec_footer));
+            }
             flex.push(1, RenderableItem::Borrowed(&self.queued_user_messages));
-            if self.status.is_some() || !self.queued_user_messages.messages.is_empty() {
+            if self.status.is_some()
+                || !self.unified_exec_footer.is_empty()
+                || !self.queued_user_messages.messages.is_empty()
+            {
                 flex.push(0, RenderableItem::Owned("".into()));
             }
             let mut flex2 = FlexRenderable::new();

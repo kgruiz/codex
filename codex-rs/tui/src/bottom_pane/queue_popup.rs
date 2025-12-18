@@ -187,6 +187,7 @@ impl QueuePopup {
                     display_shortcut: None,
                     match_indices: None,
                     description: item.meta.clone(),
+                    disabled_reason: None,
                     wrap_indent: None,
                 }
             })
