@@ -47,6 +47,7 @@ use codex_core::protocol::PatchApplyBeginEvent;
 use codex_core::protocol::RateLimitSnapshot;
 use codex_core::protocol::ReviewRequest;
 use codex_core::protocol::ReviewTarget;
+use codex_core::protocol::SessionTitleUpdatedEvent;
 use codex_core::protocol::SkillsListEntry;
 use codex_core::protocol::StreamErrorEvent;
 use codex_core::protocol::TaskCompleteEvent;
@@ -379,6 +380,7 @@ pub(crate) struct ChatWidget {
     feedback: codex_feedback::CodexFeedback,
     // Current session rollout path (if known)
     current_rollout_path: Option<PathBuf>,
+    session_title: Option<String>,
 
     pending_active_turn_context: Option<PendingTurnContext>,
     active_turn_context: Option<PendingTurnContext>,
@@ -498,6 +500,7 @@ impl ChatWidget {
         self.set_skills(None);
         self.conversation_id = Some(event.session_id);
         self.current_rollout_path = Some(event.rollout_path.clone());
+        self.session_title = None;
         let initial_messages = event.initial_messages.clone();
         let model_for_header = event.model.clone();
         self.config.model = Some(model_for_header.clone());
@@ -548,6 +551,15 @@ impl ChatWidget {
             .send(AppEvent::UpdateReasoningEffort(event.reasoning_effort));
     }
 
+    fn on_session_title_updated(&mut self, event: SessionTitleUpdatedEvent) {
+        self.session_title = event.title.clone();
+        let message = match event.title.as_deref() {
+            Some(title) => format!("Renamed chat to \"{title}\"."),
+            None => "Cleared chat title.".to_string(),
+        };
+        self.add_info_message(message, None);
+    }
+
     fn set_skills(&mut self, skills: Option<Vec<SkillMetadata>>) {
         self.bottom_pane.set_skills(skills);
     }
@@ -588,6 +600,19 @@ impl ChatWidget {
         );
         self.bottom_pane.show_selection_view(params);
         self.request_redraw();
+    }
+
+    pub(crate) fn open_rename_chat_view(&mut self) {
+        let view = crate::bottom_pane::RenameChatView::new(
+            self.app_event_tx.clone(),
+            self.session_title.clone(),
+        );
+        self.bottom_pane.show_view(Box::new(view));
+        self.request_redraw();
+    }
+
+    pub(crate) fn rename_session(&mut self, title: Option<String>) {
+        self.submit_op(Op::UpdateSessionTitle { title });
     }
 
     fn on_agent_message(&mut self, message: String) {
@@ -1574,6 +1599,7 @@ impl ChatWidget {
             last_rendered_width: std::cell::Cell::new(None),
             feedback,
             current_rollout_path: None,
+            session_title: None,
             pending_active_turn_context: None,
             active_turn_context: None,
         };
@@ -1683,6 +1709,7 @@ impl ChatWidget {
             last_rendered_width: std::cell::Cell::new(None),
             feedback,
             current_rollout_path: None,
+            session_title: None,
             pending_active_turn_context: None,
             active_turn_context: None,
         };
@@ -2897,6 +2924,9 @@ impl ChatWidget {
             SlashCommand::Resume => {
                 self.app_event_tx.send(AppEvent::OpenResumePicker);
             }
+            SlashCommand::Rename => {
+                self.open_rename_chat_view();
+            }
             SlashCommand::Export => {
                 self.open_export_picker();
             }
@@ -3349,6 +3379,7 @@ impl ChatWidget {
 
         match msg {
             EventMsg::SessionConfigured(e) => self.on_session_configured(e),
+            EventMsg::SessionTitleUpdated(e) => self.on_session_title_updated(e),
             EventMsg::TurnContextUpdated(e) => self.on_turn_context_updated(e),
             EventMsg::AgentMessage(AgentMessageEvent { message }) => self.on_agent_message(message),
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {

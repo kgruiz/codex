@@ -508,6 +508,13 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 ts_msg!(self, "model: {}", model);
                 eprintln!();
             }
+            EventMsg::SessionTitleUpdated(session_title_updated_event) => {
+                let title = session_title_updated_event
+                    .title
+                    .as_deref()
+                    .unwrap_or("(cleared)");
+                ts_msg!(self, "{} {}", "chat title:".style(self.magenta), title);
+            }
             EventMsg::PlanUpdate(plan_update_event) => {
                 let UpdatePlanArgs { explanation, plan } = plan_update_event;
 

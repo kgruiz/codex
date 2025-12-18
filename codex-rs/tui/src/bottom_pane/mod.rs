@@ -42,11 +42,13 @@ mod paste_burst;
 pub mod popup_consts;
 mod queue_popup;
 mod queued_user_messages;
+mod rename_chat_view;
 mod scroll_state;
 mod selection_popup_common;
 mod textarea;
 mod unified_exec_footer;
 pub(crate) use feedback_view::FeedbackNoteView;
+pub(crate) use rename_chat_view::RenameChatView;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CancellationEvent {

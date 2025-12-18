@@ -643,10 +643,18 @@ fn head_to_row(item: &ConversationItem) -> Row {
         .and_then(parse_timestamp_str)
         .or(created_at);
 
-    let (cwd, git_branch) = extract_session_meta_from_head(&item.head);
-    let preview = preview_from_head(&item.head)
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+    let meta_summary = extract_session_meta_from_head(&item.head);
+    let preview = meta_summary
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            preview_from_head(&item.head)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
         .unwrap_or_else(|| String::from("(no message yet)"));
 
     Row {
@@ -654,20 +662,35 @@ fn head_to_row(item: &ConversationItem) -> Row {
         preview,
         created_at,
         updated_at,
-        cwd,
-        git_branch,
+        cwd: meta_summary.cwd,
+        git_branch: meta_summary.git_branch,
     }
 }
 
-fn extract_session_meta_from_head(head: &[serde_json::Value]) -> (Option<PathBuf>, Option<String>) {
+struct SessionMetaSummary {
+    cwd: Option<PathBuf>,
+    git_branch: Option<String>,
+    title: Option<String>,
+}
+
+fn extract_session_meta_from_head(head: &[serde_json::Value]) -> SessionMetaSummary {
     for value in head {
         if let Ok(meta_line) = serde_json::from_value::<SessionMetaLine>(value.clone()) {
             let cwd = Some(meta_line.meta.cwd);
             let git_branch = meta_line.git.and_then(|git| git.branch);
-            return (cwd, git_branch);
+            let title = meta_line.meta.title;
+            return SessionMetaSummary {
+                cwd,
+                git_branch,
+                title,
+            };
         }
     }
-    (None, None)
+    SessionMetaSummary {
+        cwd: None,
+        git_branch: None,
+        title: None,
+    }
 }
 
 fn paths_match(a: &Path, b: &Path) -> bool {
@@ -1054,6 +1077,10 @@ fn calculate_column_metrics(rows: &[Row], include_cwd: bool) -> ColumnMetrics {
 mod tests {
     use super::*;
     use chrono::Duration;
+    use codex_protocol::ConversationId;
+    use codex_protocol::protocol::SessionMeta;
+    use codex_protocol::protocol::SessionMetaLine;
+    use codex_protocol::protocol::SessionSource;
     use crossterm::event::KeyCode;
     use crossterm::event::KeyEvent;
     use crossterm::event::KeyModifiers;
@@ -1074,6 +1101,29 @@ mod tests {
                     .iter()
                     .map(|t| json!({ "type": "input_text", "text": *t }))
                     .collect::<Vec<_>>()
+            }),
+        ]
+    }
+
+    fn head_with_title_and_user_text(ts: &str, title: &str, text: &str) -> Vec<serde_json::Value> {
+        let meta = SessionMeta {
+            id: ConversationId::new(),
+            timestamp: ts.to_string(),
+            cwd: PathBuf::from("/tmp"),
+            originator: "test".to_string(),
+            cli_version: "0.0.0".to_string(),
+            instructions: None,
+            title: Some(title.to_string()),
+            source: SessionSource::Cli,
+            model_provider: None,
+        };
+        let meta_line = SessionMetaLine { meta, git: None };
+        vec![
+            serde_json::to_value(meta_line).expect("session meta"),
+            json!({
+                "type": "message",
+                "role": "user",
+                "content": vec![json!({ "type": "input_text", "text": text })]
             }),
         ]
     }
@@ -1170,6 +1220,20 @@ mod tests {
         // Preserve the given order even if timestamps differ; backend already provides newest-first.
         assert!(rows[0].preview.contains('A'));
         assert!(rows[1].preview.contains('B'));
+    }
+
+    #[test]
+    fn row_prefers_title_over_user_preview() {
+        let head = head_with_title_and_user_text("2025-01-01T00:00:00Z", "New title", "Hello");
+        let item = ConversationItem {
+            path: PathBuf::from("/tmp/a.jsonl"),
+            head,
+            created_at: Some("2025-01-01T00:00:00Z".into()),
+            updated_at: Some("2025-01-01T00:00:00Z".into()),
+        };
+
+        let row = head_to_row(&item);
+        assert_eq!(row.preview, "New title");
     }
 
     #[test]

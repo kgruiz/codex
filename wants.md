@@ -13,7 +13,7 @@ Add new items below as you think of them.
 5. [x] Add current model name to the status line (<https://github.com/openai/codex/issues/2920>)
    - Show the active model/thinking setting in the status bar so it is obvious what will be used on submit.
 6. [ ] Syntax highlighting (code blocks)
-7. [ ] Rename chats
+7. [x] Rename chats
 8. [ ] Show tokens/sec (and other live stats like latency, cost, tool time)
 9. [ ] Support handing off long prompts to external editor via `Ctrl+G`
 10. [ ] Edit last message without branching

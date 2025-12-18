@@ -70,6 +70,11 @@ pub(crate) enum AppEvent {
         error: Option<String>,
     },
 
+    /// Rename the current session.
+    RenameSession {
+        title: Option<String>,
+    },
+
     InsertHistoryCell(Box<dyn HistoryCell>),
 
     StartCommitAnimation,

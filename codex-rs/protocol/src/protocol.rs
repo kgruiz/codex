@@ -141,6 +141,14 @@ pub enum Op {
         summary: Option<ReasoningSummaryConfig>,
     },
 
+    /// Update the session title stored alongside the rollout metadata.
+    ///
+    /// Use `None` or an empty string to clear the title.
+    UpdateSessionTitle {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+    },
+
     /// Approve a command execution
     ExecApproval {
         /// The id of the submission we are approving
@@ -543,6 +551,9 @@ pub enum EventMsg {
 
     /// Ack the client's configure message.
     SessionConfigured(SessionConfiguredEvent),
+
+    /// Session title updated via `Op::UpdateSessionTitle`.
+    SessionTitleUpdated(SessionTitleUpdatedEvent),
 
     /// Server-confirmed updates to the session's effective model settings.
     ///
@@ -1238,6 +1249,8 @@ pub struct SessionMeta {
     pub originator: String,
     pub cli_version: String,
     pub instructions: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     #[serde(default)]
     pub source: SessionSource,
     pub model_provider: Option<String>,
@@ -1252,6 +1265,7 @@ impl Default for SessionMeta {
             originator: String::new(),
             cli_version: String::new(),
             instructions: None,
+            title: None,
             source: SessionSource::default(),
             model_provider: None,
         }
@@ -1757,6 +1771,12 @@ pub struct SessionConfiguredEvent {
     pub initial_messages: Option<Vec<EventMsg>>,
 
     pub rollout_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
+pub struct SessionTitleUpdatedEvent {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]

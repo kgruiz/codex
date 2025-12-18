@@ -3,7 +3,7 @@ source: tui/src/chatwidget/tests.rs
 expression: terminal.backend()
 ---
 "                                                                                "
-"• Analyzing · gpt-5.1-codex-max (reasoning default) · (0s • esc to interrupt)   "
+"• Analyzing · gpt-5.2-codex (reasoning default) · (0s • esc to interrupt)       "
 "                                                                                "
 "                                                                                "
 "› Ask Codex to do anything                                                      "

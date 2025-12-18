@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::io::Error as IoError;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -771,6 +772,17 @@ impl Session {
         {
             warn!("failed to flush rollout recorder: {e}");
         }
+    }
+
+    pub(crate) async fn update_session_title(&self, title: Option<String>) -> std::io::Result<()> {
+        let recorder = {
+            let guard = self.services.rollout.lock().await;
+            guard.clone()
+        };
+        let Some(rec) = recorder else {
+            return Err(IoError::other("rollout recorder is not available"));
+        };
+        rec.update_session_title(title).await
     }
 
     fn next_internal_sub_id(&self) -> String {
@@ -1721,6 +1733,9 @@ async fn submission_loop(sess: Arc<Session>, config: Arc<Config>, rx_sub: Receiv
                 )
                 .await;
             }
+            Op::UpdateSessionTitle { title } => {
+                handlers::update_session_title(&sess, sub.id.clone(), title).await;
+            }
             Op::ResolveElicitation {
                 server_name,
                 request_id,
@@ -1768,6 +1783,7 @@ mod handlers {
     use codex_protocol::protocol::Op;
     use codex_protocol::protocol::ReviewDecision;
     use codex_protocol::protocol::ReviewRequest;
+    use codex_protocol::protocol::SessionTitleUpdatedEvent;
     use codex_protocol::protocol::SkillsListEntry;
     use codex_protocol::protocol::TurnAbortReason;
     use codex_protocol::protocol::WarningEvent;
@@ -1872,6 +1888,32 @@ mod handlers {
         )
         .await;
         *previous_context = Some(turn_context);
+    }
+
+    pub async fn update_session_title(sess: &Session, sub_id: String, title: Option<String>) {
+        let title = title
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let result = sess.update_session_title(title.clone()).await;
+        match result {
+            Ok(()) => {
+                sess.send_event_raw(Event {
+                    id: sub_id,
+                    msg: EventMsg::SessionTitleUpdated(SessionTitleUpdatedEvent { title }),
+                })
+                .await;
+            }
+            Err(err) => {
+                sess.send_event_raw(Event {
+                    id: sub_id,
+                    msg: EventMsg::Error(ErrorEvent {
+                        message: format!("Failed to rename chat: {err}"),
+                        codex_error_info: Some(CodexErrorInfo::Other),
+                    }),
+                })
+                .await;
+            }
+        }
     }
 
     pub async fn resolve_elicitation(

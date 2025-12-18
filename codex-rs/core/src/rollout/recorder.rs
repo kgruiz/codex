@@ -3,6 +3,7 @@
 use std::fs::File;
 use std::fs::{self};
 use std::io::Error as IoError;
+use std::io::SeekFrom;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -11,6 +12,7 @@ use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::FormatItem;
 use time::macros::format_description;
+use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::{self};
@@ -66,6 +68,10 @@ enum RolloutCmd {
     /// Ensure all prior writes are processed; respond when flushed.
     Flush {
         ack: oneshot::Sender<()>,
+    },
+    UpdateSessionTitle {
+        title: Option<String>,
+        ack: oneshot::Sender<std::io::Result<()>>,
     },
     Shutdown {
         ack: oneshot::Sender<()>,
@@ -146,6 +152,7 @@ impl RolloutRecorder {
                         originator: originator().value.clone(),
                         cli_version: env!("CARGO_PKG_VERSION").to_string(),
                         instructions,
+                        title: None,
                         source,
                         model_provider: Some(config.model_provider_id.clone()),
                     }),
@@ -172,7 +179,7 @@ impl RolloutRecorder {
         // Spawn a Tokio task that owns the file handle and performs async
         // writes. Using `tokio::fs::File` keeps everything on the async I/O
         // driver instead of blocking the runtime.
-        tokio::task::spawn(rollout_writer(file, rx, meta, cwd));
+        tokio::task::spawn(rollout_writer(file, rx, meta, cwd, rollout_path.clone()));
 
         Ok(Self { tx, rollout_path })
     }
@@ -205,6 +212,16 @@ impl RolloutRecorder {
             .map_err(|e| IoError::other(format!("failed to queue rollout flush: {e}")))?;
         rx.await
             .map_err(|e| IoError::other(format!("failed waiting for rollout flush: {e}")))
+    }
+
+    pub async fn update_session_title(&self, title: Option<String>) -> std::io::Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(RolloutCmd::UpdateSessionTitle { title, ack: tx })
+            .await
+            .map_err(|e| IoError::other(format!("failed to queue session title update: {e}")))?;
+        rx.await
+            .map_err(|e| IoError::other(format!("failed waiting for title update: {e}")))?
     }
 
     pub async fn get_rollout_history(path: &Path) -> std::io::Result<InitialHistory> {
@@ -351,6 +368,7 @@ async fn rollout_writer(
     mut rx: mpsc::Receiver<RolloutCmd>,
     mut meta: Option<SessionMeta>,
     cwd: std::path::PathBuf,
+    rollout_path: PathBuf,
 ) -> std::io::Result<()> {
     let mut writer = JsonlWriter { file };
 
@@ -385,6 +403,10 @@ async fn rollout_writer(
                     return Err(e);
                 }
                 let _ = ack.send(());
+            }
+            RolloutCmd::UpdateSessionTitle { title, ack } => {
+                let result = update_session_title(&mut writer, &rollout_path, title).await;
+                let _ = ack.send(result);
             }
             RolloutCmd::Shutdown { ack } => {
                 let _ = ack.send(());
@@ -421,4 +443,53 @@ impl JsonlWriter {
         self.file.flush().await?;
         Ok(())
     }
+}
+
+async fn update_session_title(
+    writer: &mut JsonlWriter,
+    rollout_path: &Path,
+    title: Option<String>,
+) -> std::io::Result<()> {
+    writer.file.flush().await?;
+    let text = tokio::fs::read_to_string(rollout_path).await?;
+    if text.trim().is_empty() {
+        return Err(IoError::other("empty session file"));
+    }
+
+    let normalized_title = title
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    let mut updated = String::with_capacity(text.len());
+    let mut updated_meta = false;
+
+    for line in text.lines() {
+        if !updated_meta {
+            let parsed: Result<RolloutLine, _> = serde_json::from_str(line);
+            if let Ok(mut rollout_line) = parsed
+                && let RolloutItem::SessionMeta(mut meta_line) = rollout_line.item
+            {
+                meta_line.meta.title = normalized_title.clone();
+                rollout_line.item = RolloutItem::SessionMeta(meta_line);
+                let mut json = serde_json::to_string(&rollout_line)?;
+                json.push('\n');
+                updated.push_str(&json);
+                updated_meta = true;
+                continue;
+            }
+        }
+
+        updated.push_str(line);
+        updated.push('\n');
+    }
+
+    if !updated_meta {
+        return Err(IoError::other("session meta not found"));
+    }
+
+    writer.file.set_len(0).await?;
+    writer.file.seek(SeekFrom::Start(0)).await?;
+    writer.file.write_all(updated.as_bytes()).await?;
+    writer.file.flush().await?;
+    Ok(())
 }

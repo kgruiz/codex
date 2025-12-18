@@ -760,6 +760,9 @@ impl App {
                     );
                 }
             }
+            AppEvent::RenameSession { title } => {
+                self.chat_widget.rename_session(title);
+            }
             AppEvent::StartFileSearch(query) => {
                 if !query.is_empty() {
                     self.file_search.on_user_query(query);

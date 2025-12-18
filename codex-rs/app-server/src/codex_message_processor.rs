@@ -3416,17 +3416,27 @@ fn extract_conversation_summary(
     git: Option<&CoreGitInfo>,
     fallback_provider: &str,
 ) -> Option<ConversationSummary> {
-    let preview = head
-        .iter()
-        .filter_map(|value| serde_json::from_value::<ResponseItem>(value.clone()).ok())
-        .find_map(|item| match codex_core::parse_turn_item(&item) {
-            Some(TurnItem::UserMessage(user)) => Some(user.message()),
-            _ => None,
-        })?;
+    let title = session_meta
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let preview = if let Some(title) = title {
+        title.to_string()
+    } else {
+        let preview = head
+            .iter()
+            .filter_map(|value| serde_json::from_value::<ResponseItem>(value.clone()).ok())
+            .find_map(|item| match codex_core::parse_turn_item(&item) {
+                Some(TurnItem::UserMessage(user)) => Some(user.message()),
+                _ => None,
+            })?;
 
-    let preview = match preview.find(USER_MESSAGE_BEGIN) {
-        Some(idx) => preview[idx + USER_MESSAGE_BEGIN.len()..].trim(),
-        None => preview.as_str(),
+        let preview = match preview.find(USER_MESSAGE_BEGIN) {
+            Some(idx) => preview[idx + USER_MESSAGE_BEGIN.len()..].trim(),
+            None => preview.as_str(),
+        };
+        preview.to_string()
     };
 
     let timestamp = if session_meta.timestamp.is_empty() {
@@ -3445,7 +3455,7 @@ fn extract_conversation_summary(
         conversation_id,
         timestamp,
         path,
-        preview: preview.to_string(),
+        preview,
         model_provider,
         cwd: session_meta.cwd.clone(),
         cli_version: session_meta.cli_version.clone(),
@@ -3566,6 +3576,41 @@ mod tests {
         };
 
         assert_eq!(summary, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn extract_conversation_summary_prefers_title() -> Result<()> {
+        let conversation_id = ConversationId::from_string("1e1edc5b-5c24-4b61-b0e3-2b3d6c4541f9")?;
+        let timestamp = "2025-09-05T16:53:11.850Z".to_string();
+        let path = PathBuf::from("rollout.jsonl");
+
+        let head = vec![json!({
+            "type": "message",
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": format!("<prior context> {USER_MESSAGE_BEGIN}Count to 5"),
+            }],
+        })];
+
+        let session_meta = SessionMeta {
+            id: conversation_id,
+            timestamp,
+            cwd: PathBuf::from("/"),
+            originator: "codex".to_string(),
+            cli_version: "0.0.0".to_string(),
+            instructions: None,
+            title: Some("My renamed chat".to_string()),
+            source: SessionSource::VSCode,
+            model_provider: Some("test-provider".to_string()),
+        };
+
+        let summary =
+            extract_conversation_summary(path, &head, &session_meta, None, "test-provider")
+                .expect("summary");
+
+        assert_eq!(summary.preview, "My renamed chat");
         Ok(())
     }
 

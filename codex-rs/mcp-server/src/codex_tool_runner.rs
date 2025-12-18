@@ -310,6 +310,7 @@ async fn run_codex_tool_session_inner(
                     | EventMsg::ExitedReviewMode(_)
                     | EventMsg::ContextCompacted(_)
                     | EventMsg::TurnContextUpdated(_)
+                    | EventMsg::SessionTitleUpdated(_)
                     | EventMsg::DeprecationNotice(_) => {
                         // For now, we do not do anything extra for these
                         // events. Note that
