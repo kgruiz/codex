@@ -4640,6 +4640,8 @@ impl ChatWidget {
         self.config.model_reasoning_effort = effort;
         self.bottom_pane
             .set_session_reasoning_effort(self.effective_reasoning_effort());
+
+        self.request_redraw();
     }
 
     /// Set the model in the widget's config copy.
@@ -4650,6 +4652,8 @@ impl ChatWidget {
         self.bottom_pane.set_session_model(model.to_string());
         self.bottom_pane
             .set_session_reasoning_effort(self.effective_reasoning_effort());
+
+        self.request_redraw();
     }
 
     pub(crate) fn add_info_message(&mut self, message: String, hint: Option<String>) {
