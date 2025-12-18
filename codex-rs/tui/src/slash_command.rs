@@ -19,6 +19,7 @@ pub enum SlashCommand {
     Review,
     New,
     Resume,
+    Session,
     Rename,
     Export,
     Init,
@@ -47,6 +48,7 @@ impl SlashCommand {
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",
             SlashCommand::Review => "review my current changes and find issues",
             SlashCommand::Resume => "resume a saved chat",
+            SlashCommand::Session => "manage saved chats",
             SlashCommand::Rename => "rename this chat",
             SlashCommand::Export => "export this chat as Markdown",
             SlashCommand::Undo => "ask Codex to undo a turn",
@@ -77,6 +79,7 @@ impl SlashCommand {
         match self {
             SlashCommand::New
             | SlashCommand::Resume
+            | SlashCommand::Session
             | SlashCommand::Rename
             | SlashCommand::Export
             | SlashCommand::Init

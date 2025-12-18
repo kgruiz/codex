@@ -1,5 +1,6 @@
 //! Bottom pane: shows the ChatComposer or a BottomPaneView, if one is active.
 use std::any::Any;
+use std::path::Path;
 use std::path::PathBuf;
 
 use crate::app_event_sender::AppEventSender;
@@ -8,6 +9,7 @@ use crate::bottom_pane::unified_exec_footer::UnifiedExecFooter;
 use crate::render::renderable::FlexRenderable;
 use crate::render::renderable::Renderable;
 use crate::render::renderable::RenderableItem;
+use crate::session_manager::SessionManagerEntry;
 use crate::tui::FrameRequester;
 use bottom_pane_view::BottomPaneView;
 pub(crate) use bottom_pane_view::ViewCompletionBehavior;
@@ -45,10 +47,13 @@ mod queued_user_messages;
 mod rename_chat_view;
 mod scroll_state;
 mod selection_popup_common;
+mod session_manager_view;
 mod textarea;
 mod unified_exec_footer;
 pub(crate) use feedback_view::FeedbackNoteView;
 pub(crate) use rename_chat_view::RenameChatView;
+pub(crate) use rename_chat_view::RenameTarget;
+pub(crate) use session_manager_view::SessionManagerView;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CancellationEvent {
@@ -526,6 +531,56 @@ impl BottomPane {
             if let Some(popup) = (view.as_mut() as &mut dyn Any).downcast_mut::<QueuePopup>() {
                 popup.set_items(items);
                 self.request_redraw();
+                return;
+            }
+        }
+    }
+
+    pub(crate) fn update_session_manager_sessions(&mut self, sessions: Vec<SessionManagerEntry>) {
+        for view in self.view_stack.iter_mut().rev() {
+            if let Some(manager) =
+                (view.as_mut() as &mut dyn Any).downcast_mut::<SessionManagerView>()
+            {
+                manager.set_sessions(sessions);
+                self.request_redraw();
+                return;
+            }
+        }
+    }
+
+    pub(crate) fn set_session_manager_error(&mut self, message: String) {
+        for view in self.view_stack.iter_mut().rev() {
+            if let Some(manager) =
+                (view.as_mut() as &mut dyn Any).downcast_mut::<SessionManagerView>()
+            {
+                manager.set_error(message);
+                self.request_redraw();
+                return;
+            }
+        }
+    }
+
+    pub(crate) fn apply_session_manager_rename(&mut self, path: &Path, title: Option<String>) {
+        for view in self.view_stack.iter_mut().rev() {
+            if let Some(manager) =
+                (view.as_mut() as &mut dyn Any).downcast_mut::<SessionManagerView>()
+            {
+                if manager.apply_rename(path, title) {
+                    self.request_redraw();
+                }
+                return;
+            }
+        }
+    }
+
+    pub(crate) fn apply_session_manager_delete(&mut self, path: &Path) {
+        for view in self.view_stack.iter_mut().rev() {
+            if let Some(manager) =
+                (view.as_mut() as &mut dyn Any).downcast_mut::<SessionManagerView>()
+            {
+                if manager.apply_delete(path) {
+                    self.request_redraw();
+                }
                 return;
             }
         }

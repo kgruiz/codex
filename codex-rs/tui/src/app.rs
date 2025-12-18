@@ -20,6 +20,7 @@ use crate::update_action::UpdateAction;
 use codex_ansi_escape::ansi_escape_line;
 use codex_core::AuthManager;
 use codex_core::ConversationManager;
+use codex_core::RolloutRecorder;
 use codex_core::config::Config;
 use codex_core::config::edit::ConfigEdit;
 use codex_core::config::edit::ConfigEditsBuilder;
@@ -58,6 +59,8 @@ use std::thread;
 use std::time::Duration;
 use tokio::select;
 use tokio::sync::mpsc::unbounded_channel;
+
+use crate::session_manager::paths_match;
 
 #[cfg(not(debug_assertions))]
 use crate::history_cell::UpdateAvailableHistoryCell;
@@ -324,6 +327,64 @@ impl App {
             self.suppress_shutdown_complete = true;
             self.chat_widget.submit_op(Op::Shutdown);
             self.server.remove_conversation(&conversation_id).await;
+        }
+    }
+
+    async fn resume_from_rollout(
+        &mut self,
+        model_family: &codex_core::openai_models::model_family::ModelFamily,
+        frame_requester: crate::tui::FrameRequester,
+        path: PathBuf,
+    ) {
+        let summary = session_summary(
+            self.chat_widget.token_usage(),
+            self.chat_widget.conversation_id(),
+        );
+        match self
+            .server
+            .resume_conversation_from_rollout(
+                self.config.clone(),
+                path.clone(),
+                self.auth_manager.clone(),
+            )
+            .await
+        {
+            Ok(resumed) => {
+                self.shutdown_current_conversation().await;
+                let init = crate::chatwidget::ChatWidgetInit {
+                    config: self.config.clone(),
+                    frame_requester,
+                    app_event_tx: self.app_event_tx.clone(),
+                    initial_prompt: None,
+                    initial_images: Vec::new(),
+                    enhanced_keys_supported: self.enhanced_keys_supported,
+                    auth_manager: self.auth_manager.clone(),
+                    models_manager: self.server.get_models_manager(),
+                    feedback: self.feedback.clone(),
+                    is_first_run: false,
+                    model_family: model_family.clone(),
+                };
+                self.chat_widget = ChatWidget::new_from_existing(
+                    init,
+                    resumed.conversation,
+                    resumed.session_configured,
+                );
+                self.current_model = model_family.get_model_slug().to_string();
+                if let Some(summary) = summary {
+                    let mut lines: Vec<Line<'static>> = vec![summary.usage_line.clone().into()];
+                    if let Some(command) = summary.resume_command {
+                        let spans = vec!["To continue this session, run ".into(), command.cyan()];
+                        lines.push(spans.into());
+                    }
+                    self.chat_widget.add_plain_history_lines(lines);
+                }
+            }
+            Err(err) => {
+                self.chat_widget.add_error_message(format!(
+                    "Failed to resume session from {path}: {err}",
+                    path = path.display()
+                ));
+            }
         }
     }
 
@@ -596,60 +657,8 @@ impl App {
                 .await?
                 {
                     ResumeSelection::Resume(path) => {
-                        let summary = session_summary(
-                            self.chat_widget.token_usage(),
-                            self.chat_widget.conversation_id(),
-                        );
-                        match self
-                            .server
-                            .resume_conversation_from_rollout(
-                                self.config.clone(),
-                                path.clone(),
-                                self.auth_manager.clone(),
-                            )
-                            .await
-                        {
-                            Ok(resumed) => {
-                                self.shutdown_current_conversation().await;
-                                let init = crate::chatwidget::ChatWidgetInit {
-                                    config: self.config.clone(),
-                                    frame_requester: tui.frame_requester(),
-                                    app_event_tx: self.app_event_tx.clone(),
-                                    initial_prompt: None,
-                                    initial_images: Vec::new(),
-                                    enhanced_keys_supported: self.enhanced_keys_supported,
-                                    auth_manager: self.auth_manager.clone(),
-                                    models_manager: self.server.get_models_manager(),
-                                    feedback: self.feedback.clone(),
-                                    is_first_run: false,
-                                    model_family: model_family.clone(),
-                                };
-                                self.chat_widget = ChatWidget::new_from_existing(
-                                    init,
-                                    resumed.conversation,
-                                    resumed.session_configured,
-                                );
-                                self.current_model = model_family.get_model_slug().to_string();
-                                if let Some(summary) = summary {
-                                    let mut lines: Vec<Line<'static>> =
-                                        vec![summary.usage_line.clone().into()];
-                                    if let Some(command) = summary.resume_command {
-                                        let spans = vec![
-                                            "To continue this session, run ".into(),
-                                            command.cyan(),
-                                        ];
-                                        lines.push(spans.into());
-                                    }
-                                    self.chat_widget.add_plain_history_lines(lines);
-                                }
-                            }
-                            Err(err) => {
-                                self.chat_widget.add_error_message(format!(
-                                    "Failed to resume session from {}: {err}",
-                                    path.display()
-                                ));
-                            }
-                        }
+                        self.resume_from_rollout(&model_family, tui.frame_requester(), path)
+                            .await;
                     }
                     ResumeSelection::Exit | ResumeSelection::StartFresh => {}
                 }
@@ -762,6 +771,67 @@ impl App {
             }
             AppEvent::RenameSession { title } => {
                 self.chat_widget.rename_session(title);
+            }
+            AppEvent::RenameSessionPath { path, title } => {
+                if let Some(current_path) = self.chat_widget.rollout_path()
+                    && paths_match(&current_path, &path)
+                {
+                    self.chat_widget.rename_session(title);
+                } else {
+                    let tx = self.app_event_tx.clone();
+                    let title_clone = title.clone();
+                    let path_clone = path;
+                    tokio::spawn(async move {
+                        let result =
+                            RolloutRecorder::update_session_title_for_path(&path_clone, title)
+                                .await;
+                        let error = result.err().map(|err| err.to_string());
+                        tx.send(AppEvent::SessionManagerRenameResult {
+                            path: path_clone,
+                            title: title_clone,
+                            error,
+                        });
+                    });
+                }
+            }
+            AppEvent::OpenRenameSessionView {
+                target,
+                current_title,
+            } => {
+                self.chat_widget
+                    .open_rename_session_view(target, current_title);
+            }
+            AppEvent::SessionManagerLoaded { sessions } => {
+                self.chat_widget.set_session_manager_sessions(sessions);
+            }
+            AppEvent::SessionManagerLoadFailed { message } => {
+                self.chat_widget.set_session_manager_error(message);
+            }
+            AppEvent::SessionManagerSwitch { path } => {
+                self.resume_from_rollout(&model_family, tui.frame_requester(), path)
+                    .await;
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::SessionManagerDelete { path, label } => {
+                let tx = self.app_event_tx.clone();
+                let path_clone = path;
+                tokio::spawn(async move {
+                    let result = tokio::fs::remove_file(&path_clone).await;
+                    let error = result.err().map(|err| err.to_string());
+                    tx.send(AppEvent::SessionManagerDeleteResult {
+                        path: path_clone,
+                        label,
+                        error,
+                    });
+                });
+            }
+            AppEvent::SessionManagerRenameResult { path, title, error } => {
+                self.chat_widget
+                    .handle_session_manager_rename_result(path, title, error);
+            }
+            AppEvent::SessionManagerDeleteResult { path, label, error } => {
+                self.chat_widget
+                    .handle_session_manager_delete_result(path, label, error);
             }
             AppEvent::StartFileSearch(query) => {
                 if !query.is_empty() {

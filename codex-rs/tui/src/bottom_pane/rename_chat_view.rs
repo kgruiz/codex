@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::path::PathBuf;
 
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -19,6 +20,7 @@ use crate::render::renderable::Renderable;
 
 use super::CancellationEvent;
 use super::bottom_pane_view::BottomPaneView;
+use super::bottom_pane_view::ViewCompletionBehavior;
 use super::popup_consts::standard_popup_hint_line;
 use super::textarea::TextArea;
 use super::textarea::TextAreaState;
@@ -28,10 +30,15 @@ pub(crate) struct RenameChatView {
     textarea: TextArea,
     textarea_state: RefCell<TextAreaState>,
     complete: bool,
+    target: RenameTarget,
 }
 
 impl RenameChatView {
-    pub(crate) fn new(app_event_tx: AppEventSender, current_title: Option<String>) -> Self {
+    pub(crate) fn new(
+        app_event_tx: AppEventSender,
+        current_title: Option<String>,
+        target: RenameTarget,
+    ) -> Self {
         let mut textarea = TextArea::new();
         if let Some(title) = current_title {
             textarea.set_text(&title);
@@ -42,18 +49,33 @@ impl RenameChatView {
             textarea,
             textarea_state: RefCell::new(TextAreaState::default()),
             complete: false,
+            target,
         }
     }
 
     fn submit(&mut self) {
         let text = self.textarea.text().trim().to_string();
         let title = if text.is_empty() { None } else { Some(text) };
-        self.app_event_tx.send(AppEvent::RenameSession { title });
+        match &self.target {
+            RenameTarget::CurrentSession => {
+                self.app_event_tx.send(AppEvent::RenameSession { title });
+            }
+            RenameTarget::SessionPath(path) => {
+                self.app_event_tx.send(AppEvent::RenameSessionPath {
+                    path: path.clone(),
+                    title,
+                });
+            }
+        }
         self.complete = true;
     }
 }
 
 impl BottomPaneView for RenameChatView {
+    fn completion_behavior(&self) -> ViewCompletionBehavior {
+        ViewCompletionBehavior::Pop
+    }
+
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event {
             KeyEvent {
@@ -200,6 +222,12 @@ impl RenameChatView {
         let text_height = self.textarea.desired_height(usable_width).clamp(1, 3);
         text_height.saturating_add(1).min(4)
     }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum RenameTarget {
+    CurrentSession,
+    SessionPath(PathBuf),
 }
 
 fn gutter() -> Span<'static> {

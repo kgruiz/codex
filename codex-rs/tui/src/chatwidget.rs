@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -129,6 +130,8 @@ use crate::render::renderable::FlexRenderable;
 use crate::render::renderable::Renderable;
 use crate::render::renderable::RenderableExt;
 use crate::render::renderable::RenderableItem;
+use crate::session_manager::SessionManagerEntry;
+use crate::session_manager::paths_match;
 use crate::slash_command::SlashCommand;
 use crate::status::RateLimitSnapshotDisplay;
 use crate::text_formatting::truncate_text;
@@ -141,7 +144,6 @@ use self::agent::spawn_agent_from_existing;
 mod session_header;
 use self::session_header::SessionHeader;
 use crate::streaming::controller::StreamController;
-use std::path::Path;
 
 use chrono::Local;
 use codex_common::approval_presets::ApprovalPreset;
@@ -553,6 +555,10 @@ impl ChatWidget {
 
     fn on_session_title_updated(&mut self, event: SessionTitleUpdatedEvent) {
         self.session_title = event.title.clone();
+        if let Some(path) = self.current_rollout_path.as_ref() {
+            self.bottom_pane
+                .apply_session_manager_rename(path, event.title.clone());
+        }
         let message = match event.title.as_deref() {
             Some(title) => format!("Renamed chat to \"{title}\"."),
             None => "Cleared chat title.".to_string(),
@@ -606,9 +612,116 @@ impl ChatWidget {
         let view = crate::bottom_pane::RenameChatView::new(
             self.app_event_tx.clone(),
             self.session_title.clone(),
+            crate::bottom_pane::RenameTarget::CurrentSession,
         );
         self.bottom_pane.show_view(Box::new(view));
         self.request_redraw();
+    }
+
+    pub(crate) fn open_rename_session_view(
+        &mut self,
+        target: crate::bottom_pane::RenameTarget,
+        current_title: Option<String>,
+    ) {
+        let view = crate::bottom_pane::RenameChatView::new(
+            self.app_event_tx.clone(),
+            current_title,
+            target,
+        );
+        self.bottom_pane.show_view(Box::new(view));
+        self.request_redraw();
+    }
+
+    pub(crate) fn open_session_manager(&mut self) {
+        let view = crate::bottom_pane::SessionManagerView::new(
+            self.app_event_tx.clone(),
+            self.config.cwd.clone(),
+        );
+        self.bottom_pane.show_view(Box::new(view));
+        self.request_redraw();
+
+        let codex_home = self.config.codex_home.clone();
+        let default_provider = self.config.model_provider_id.clone();
+        let current_path = self.current_rollout_path.clone();
+        let tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            match crate::session_manager::load_session_entries(
+                &codex_home,
+                &default_provider,
+                current_path.as_deref(),
+            )
+            .await
+            {
+                Ok(sessions) => {
+                    tx.send(AppEvent::SessionManagerLoaded { sessions });
+                }
+                Err(err) => {
+                    tx.send(AppEvent::SessionManagerLoadFailed {
+                        message: err.to_string(),
+                    });
+                }
+            }
+        });
+    }
+
+    pub(crate) fn set_session_manager_sessions(&mut self, sessions: Vec<SessionManagerEntry>) {
+        self.bottom_pane.update_session_manager_sessions(sessions);
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_session_manager_error(&mut self, message: String) {
+        self.bottom_pane.set_session_manager_error(message);
+        self.request_redraw();
+    }
+
+    pub(crate) fn handle_session_manager_rename_result(
+        &mut self,
+        path: PathBuf,
+        title: Option<String>,
+        error: Option<String>,
+    ) {
+        if let Some(error) = error {
+            self.add_error_message(format!("Failed to rename chat: {error}"));
+            return;
+        }
+
+        if self.is_current_session_path(&path) {
+            return;
+        }
+
+        self.bottom_pane
+            .apply_session_manager_rename(&path, title.clone());
+
+        let message = match title.as_deref() {
+            Some(title) => format!("Renamed saved chat to \"{title}\"."),
+            None => "Cleared saved chat title.".to_string(),
+        };
+        self.add_info_message(message, None);
+    }
+
+    pub(crate) fn handle_session_manager_delete_result(
+        &mut self,
+        path: PathBuf,
+        label: String,
+        error: Option<String>,
+    ) {
+        if let Some(error) = error {
+            self.add_error_message(format!("Failed to delete chat: {error}"));
+            return;
+        }
+
+        if self.is_current_session_path(&path) {
+            return;
+        }
+
+        self.bottom_pane.apply_session_manager_delete(&path);
+        self.add_info_message(format!("Deleted saved chat \"{label}\"."), None);
+    }
+
+    fn is_current_session_path(&self, path: &Path) -> bool {
+        self.current_rollout_path
+            .as_ref()
+            .is_some_and(|current| paths_match(current, path))
     }
 
     pub(crate) fn rename_session(&mut self, title: Option<String>) {
@@ -2923,6 +3036,9 @@ impl ChatWidget {
             }
             SlashCommand::Resume => {
                 self.app_event_tx.send(AppEvent::OpenResumePicker);
+            }
+            SlashCommand::Session => {
+                self.open_session_manager();
             }
             SlashCommand::Rename => {
                 self.open_rename_chat_view();

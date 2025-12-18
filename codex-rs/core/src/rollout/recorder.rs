@@ -224,6 +224,19 @@ impl RolloutRecorder {
             .map_err(|e| IoError::other(format!("failed waiting for title update: {e}")))?
     }
 
+    pub async fn update_session_title_for_path(
+        rollout_path: &Path,
+        title: Option<String>,
+    ) -> std::io::Result<()> {
+        let file = tokio::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(rollout_path)
+            .await?;
+        let mut writer = JsonlWriter { file };
+        update_session_title(&mut writer, rollout_path, title).await
+    }
+
     pub async fn get_rollout_history(path: &Path) -> std::io::Result<InitialHistory> {
         info!("Resuming rollout from {path:?}");
         let text = tokio::fs::read_to_string(path).await?;

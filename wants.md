@@ -37,7 +37,7 @@ Add new items below as you think of them.
 12. [ ] Render images inline in terminal output when supported (iTerm image protocol, Kitty graphics, etc.) (<https://github.com/openai/codex/issues/6123>)
     - Render pasted images or image links/previews directly in the terminal when the terminal supports it.
     - Fall back gracefully (e.g. show URL/alt text) when inline rendering is unavailable.
-13. [ ] In-TUI session management (list/switch/rename/delete sessions) (<https://github.com/openai/codex/issues/6500>)
+13. [x] In-TUI session management (list/switch/rename/delete sessions) (<https://github.com/openai/codex/issues/6500>)
     - Add an interactive `/session` view to list and switch sessions with metadata (name, ID, last activity, directory).
     - Support `/session rename …` and `/session delete …`, plus optional non-TUI subcommands (`codex session …`).
 14. [ ] TUI appearance settings (hide startup tips, session header, placeholder title) (<https://github.com/openai/codex/issues/6089>)

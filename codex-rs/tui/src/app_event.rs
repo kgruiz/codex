@@ -8,7 +8,9 @@ use codex_file_search::FileMatch;
 use codex_protocol::openai_models::ModelPreset;
 
 use crate::bottom_pane::ApprovalRequest;
+use crate::bottom_pane::RenameTarget;
 use crate::history_cell::HistoryCell;
+use crate::session_manager::SessionManagerEntry;
 
 use codex_core::features::Feature;
 use codex_core::protocol::AskForApproval;
@@ -73,6 +75,53 @@ pub(crate) enum AppEvent {
     /// Rename the current session.
     RenameSession {
         title: Option<String>,
+    },
+
+    /// Rename a saved session at a specific rollout path.
+    RenameSessionPath {
+        path: PathBuf,
+        title: Option<String>,
+    },
+
+    /// Open the rename view for the selected session.
+    OpenRenameSessionView {
+        target: RenameTarget,
+        current_title: Option<String>,
+    },
+
+    /// Session manager list loaded in the background.
+    SessionManagerLoaded {
+        sessions: Vec<SessionManagerEntry>,
+    },
+
+    /// Session manager list failed to load.
+    SessionManagerLoadFailed {
+        message: String,
+    },
+
+    /// Switch to a saved session from the session manager.
+    SessionManagerSwitch {
+        path: PathBuf,
+    },
+
+    /// Delete a saved session from the session manager.
+    SessionManagerDelete {
+        path: PathBuf,
+        label: String,
+    },
+
+    /// Session manager rename result for a saved session.
+    SessionManagerRenameResult {
+        path: PathBuf,
+        title: Option<String>,
+        error: Option<String>,
+    },
+
+    /// Session manager delete result for a saved session.
+    SessionManagerDeleteResult {
+        path: PathBuf,
+        label: String,
+        error: Option<String>,
     },
 
     InsertHistoryCell(Box<dyn HistoryCell>),
