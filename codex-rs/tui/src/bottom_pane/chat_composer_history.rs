@@ -30,6 +30,12 @@ pub(crate) struct ChatComposerHistory {
     last_history_text: Option<String>,
 }
 
+pub(crate) enum HistoryLookup {
+    Ready(String),
+    Pending,
+    Missing,
+}
+
 impl ChatComposerHistory {
     pub fn new() -> Self {
         Self {
@@ -74,6 +80,10 @@ impl ChatComposerHistory {
     pub fn reset_navigation(&mut self) {
         self.history_cursor = None;
         self.last_history_text = None;
+    }
+
+    pub fn total_entries(&self) -> usize {
+        self.history_entry_count + self.local_history.len()
     }
 
     /// Should Up/Down key presses be interpreted as history navigation given
@@ -160,6 +170,45 @@ impl ChatComposerHistory {
             return Some(text);
         }
         None
+    }
+
+    pub fn lookup_entry(
+        &mut self,
+        global_idx: usize,
+        app_event_tx: &AppEventSender,
+    ) -> HistoryLookup {
+        let total_entries = self.total_entries();
+        if global_idx >= total_entries {
+            return HistoryLookup::Missing;
+        }
+
+        if global_idx >= self.history_entry_count {
+            let local_idx = global_idx - self.history_entry_count;
+            if let Some(text) = self.local_history.get(local_idx) {
+                return HistoryLookup::Ready(text.clone());
+            }
+            return HistoryLookup::Missing;
+        }
+
+        if let Some(text) = self.fetched_history.get(&global_idx) {
+            return HistoryLookup::Ready(text.clone());
+        }
+
+        if let Some(log_id) = self.history_log_id {
+            let op = Op::GetHistoryEntryRequest {
+                offset: global_idx,
+                log_id,
+            };
+            app_event_tx.send(AppEvent::CodexOp(op));
+            return HistoryLookup::Pending;
+        }
+
+        HistoryLookup::Missing
+    }
+
+    pub fn set_navigation_anchor(&mut self, global_idx: usize, text: String) {
+        self.history_cursor = Some(global_idx as isize);
+        self.last_history_text = Some(text);
     }
 
     // ---------------------------------------------------------------------

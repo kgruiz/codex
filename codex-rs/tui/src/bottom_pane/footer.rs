@@ -187,6 +187,11 @@ fn shortcut_overlay_lines(state: ShortcutsState<'_>) -> Vec<Line<'static>> {
         .copied()
         .unwrap_or_else(|| key_hint::alt(KeyCode::Char('c')));
 
+    let history_search = Line::from(vec![
+        key_hint::ctrl(KeyCode::Char('r')).into(),
+        " to search history".into(),
+    ]);
+
     let commands = Line::from(vec![
         key_hint::plain(KeyCode::Char('/')).into(),
         " for commands".into(),
@@ -251,6 +256,7 @@ fn shortcut_overlay_lines(state: ShortcutsState<'_>) -> Vec<Line<'static>> {
         file_paths,
         Line::from(vec![paste.into(), " to paste from clipboard".into()]),
         Line::from(vec![copy_prompt.into(), " to copy prompt".into()]),
+        history_search,
         edit_previous,
         quit,
         Line::from(""),

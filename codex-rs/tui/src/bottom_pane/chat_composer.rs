@@ -17,6 +17,7 @@ use ratatui::widgets::StatefulWidgetRef;
 use ratatui::widgets::WidgetRef;
 
 use super::chat_composer_history::ChatComposerHistory;
+use super::chat_composer_history::HistoryLookup;
 use super::command_popup::CommandItem;
 use super::command_popup::CommandPopup;
 use super::file_search_popup::FileSearchPopup;
@@ -43,6 +44,7 @@ use crate::render::renderable::Renderable;
 use crate::slash_command::SlashCommand;
 use crate::slash_command::built_in_slash_commands;
 use crate::style::user_message_style;
+use crate::text_formatting::truncate_text;
 use codex_common::fuzzy_match::fuzzy_match;
 use codex_protocol::custom_prompts::CustomPrompt;
 use codex_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
@@ -118,6 +120,26 @@ enum PromptSelectionAction {
     Submit { text: String },
 }
 
+#[derive(Clone)]
+struct ReverseSearchSnapshot {
+    text: String,
+    cursor: usize,
+    attachments: Vec<AttachedImage>,
+    pending_pastes: Vec<(String, String)>,
+    large_paste_counters: HashMap<usize, usize>,
+}
+
+struct ReverseSearchState {
+    query: String,
+    search_cursor: isize,
+    current_index: Option<usize>,
+    current_match: Option<String>,
+    pending_index: Option<usize>,
+    preview_text: String,
+    snapshot: ReverseSearchSnapshot,
+    saved_footer_hint_override: Option<Vec<(String, String)>>,
+}
+
 pub(crate) struct ChatComposer {
     textarea: TextArea,
     textarea_state: RefCell<TextAreaState>,
@@ -149,6 +171,7 @@ pub(crate) struct ChatComposer {
     skills: Option<Vec<SkillMetadata>>,
     dismissed_skill_popup_token: Option<String>,
     keybindings: Keybindings,
+    reverse_search: Option<ReverseSearchState>,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -199,6 +222,7 @@ impl ChatComposer {
             skills: None,
             dismissed_skill_popup_token: None,
             keybindings,
+            reverse_search: None,
         };
         // Apply configuration via the setter to keep side-effects centralized.
         this.set_disable_paste_burst(disable_paste_burst);
@@ -260,11 +284,19 @@ impl ChatComposer {
         offset: usize,
         entry: Option<String>,
     ) -> bool {
-        let Some(text) = self.history.on_entry_response(log_id, offset, entry) else {
-            return false;
-        };
-        self.set_text_content(text);
-        true
+        let navigation_text = self
+            .history
+            .on_entry_response(log_id, offset, entry.clone());
+        let mut updated = false;
+
+        if self.reverse_search_active() {
+            updated |= self.on_reverse_search_entry_response(offset, entry);
+        } else if let Some(text) = navigation_text {
+            self.set_text_content(text);
+            updated = true;
+        }
+
+        updated
     }
 
     pub fn handle_paste(&mut self, pasted: String) -> bool {
@@ -378,6 +410,261 @@ impl ChatComposer {
             .cloned()
             .map(Into::into)
             .collect()
+    }
+
+    fn reverse_search_active(&self) -> bool {
+        self.reverse_search.is_some()
+    }
+
+    fn begin_reverse_search(&mut self) {
+        if self.reverse_search_active() {
+            return;
+        }
+
+        let snapshot = ReverseSearchSnapshot {
+            text: self.current_text(),
+            cursor: self.textarea.cursor(),
+            attachments: self.attached_images.clone(),
+            pending_pastes: self.pending_pastes.clone(),
+            large_paste_counters: self.large_paste_counters.clone(),
+        };
+        let saved_footer_hint_override = self.footer_hint_override.take();
+        let total_entries = self.history.total_entries();
+        let search_cursor = (total_entries as isize) - 1;
+
+        self.reverse_search = Some(ReverseSearchState {
+            query: String::new(),
+            search_cursor,
+            current_index: None,
+            current_match: None,
+            pending_index: None,
+            preview_text: snapshot.text.clone(),
+            snapshot,
+            saved_footer_hint_override,
+        });
+
+        self.refresh_reverse_search(true);
+    }
+
+    fn reverse_search_next(&mut self) {
+        let Some(state) = self.reverse_search.as_mut() else {
+            return;
+        };
+
+        let total_entries = self.history.total_entries();
+        let next_cursor = match state.current_index {
+            Some(idx) if idx > 0 => (idx as isize) - 1,
+            Some(_) => -1,
+            None => (total_entries as isize) - 1,
+        };
+
+        state.search_cursor = next_cursor;
+        state.current_index = None;
+        state.current_match = None;
+        state.pending_index = None;
+
+        self.advance_reverse_search();
+    }
+
+    fn reverse_search_matches(text: &str, query: &str) -> bool {
+        if query.is_empty() {
+            return true;
+        }
+
+        text.contains(query)
+    }
+
+    fn refresh_reverse_search(&mut self, restart_from_latest: bool) {
+        let Some(state) = self.reverse_search.as_mut() else {
+            return;
+        };
+
+        let total_entries = self.history.total_entries();
+        if total_entries == 0 {
+            state.search_cursor = -1;
+            state.current_index = None;
+            state.current_match = None;
+            state.pending_index = None;
+            self.apply_reverse_search_preview();
+            return;
+        }
+
+        if restart_from_latest {
+            state.search_cursor = (total_entries as isize) - 1;
+        }
+
+        state.current_index = None;
+        state.current_match = None;
+        state.pending_index = None;
+
+        self.advance_reverse_search();
+    }
+
+    fn advance_reverse_search(&mut self) {
+        let Some(state) = self.reverse_search.as_mut() else {
+            return;
+        };
+
+        let total_entries = self.history.total_entries();
+        if total_entries == 0 {
+            state.search_cursor = -1;
+            state.current_index = None;
+            state.current_match = None;
+            state.pending_index = None;
+            self.apply_reverse_search_preview();
+            return;
+        }
+
+        let mut idx = state.search_cursor;
+        while idx >= 0 {
+            match self.history.lookup_entry(idx as usize, &self.app_event_tx) {
+                HistoryLookup::Ready(text) => {
+                    if Self::reverse_search_matches(&text, &state.query) {
+                        state.current_index = Some(idx as usize);
+                        state.current_match = Some(text);
+                        state.pending_index = None;
+                        state.search_cursor = idx - 1;
+                        self.apply_reverse_search_preview();
+                        return;
+                    }
+                }
+                HistoryLookup::Pending => {
+                    state.current_index = None;
+                    state.current_match = None;
+                    state.pending_index = Some(idx as usize);
+                    self.apply_reverse_search_preview();
+                    return;
+                }
+                HistoryLookup::Missing => {}
+            }
+            idx -= 1;
+        }
+
+        state.current_index = None;
+        state.current_match = None;
+        state.pending_index = None;
+        state.search_cursor = -1;
+        self.apply_reverse_search_preview();
+    }
+
+    fn apply_reverse_search_preview(&mut self) {
+        let Some(state) = self.reverse_search.as_mut() else {
+            return;
+        };
+
+        let preview = if let Some(text) = state.current_match.clone() {
+            text
+        } else if state.pending_index.is_some() {
+            state.preview_text.clone()
+        } else {
+            state.snapshot.text.clone()
+        };
+
+        if preview != state.preview_text {
+            state.preview_text = preview.clone();
+            self.set_text_content(preview);
+        }
+
+        self.update_reverse_search_hints();
+    }
+
+    fn update_reverse_search_hints(&mut self) {
+        let Some(state) = self.reverse_search.as_ref() else {
+            return;
+        };
+
+        let query = if state.query.is_empty() {
+            "type to search".to_string()
+        } else {
+            truncate_text(&state.query, 24)
+        };
+
+        let match_label = if self.history.total_entries() == 0 {
+            "no history".to_string()
+        } else if state.pending_index.is_some() {
+            "searching...".to_string()
+        } else if let Some(text) = &state.current_match {
+            let sanitized = text.replace('\n', " ");
+            truncate_text(&sanitized, 32)
+        } else {
+            "no match".to_string()
+        };
+
+        let hints = vec![
+            ("Search".to_string(), query),
+            ("Match".to_string(), match_label),
+            ("Ctrl+R".to_string(), "next".to_string()),
+            ("Enter".to_string(), "accept".to_string()),
+            ("Esc".to_string(), "cancel".to_string()),
+        ];
+
+        self.footer_hint_override = Some(hints);
+    }
+
+    fn exit_reverse_search(&mut self, accept: bool) {
+        let Some(state) = self.reverse_search.take() else {
+            return;
+        };
+
+        if accept {
+            if let (Some(index), Some(text)) = (state.current_index, state.current_match.clone()) {
+                self.history.set_navigation_anchor(index, text);
+            } else {
+                self.restore_reverse_search_snapshot(state.snapshot);
+            }
+        } else {
+            self.restore_reverse_search_snapshot(state.snapshot);
+        }
+
+        self.footer_hint_override = state.saved_footer_hint_override;
+        self.sync_popups();
+    }
+
+    fn restore_reverse_search_snapshot(&mut self, snapshot: ReverseSearchSnapshot) {
+        self.textarea.set_text("");
+        self.pending_pastes = snapshot
+            .pending_pastes
+            .into_iter()
+            .filter(|(placeholder, _)| snapshot.text.contains(placeholder))
+            .collect();
+        self.large_paste_counters = snapshot.large_paste_counters;
+        self.attached_images = snapshot
+            .attachments
+            .into_iter()
+            .filter(|img| snapshot.text.contains(&img.placeholder))
+            .collect();
+        self.textarea.set_text(&snapshot.text);
+        self.textarea.set_cursor(snapshot.cursor);
+    }
+
+    fn on_reverse_search_entry_response(&mut self, offset: usize, entry: Option<String>) -> bool {
+        let Some(state) = self.reverse_search.as_mut() else {
+            return false;
+        };
+
+        if state.pending_index != Some(offset) {
+            return false;
+        }
+
+        state.pending_index = None;
+
+        let Some(text) = entry else {
+            state.search_cursor = (offset as isize) - 1;
+            self.advance_reverse_search();
+            return true;
+        };
+
+        if Self::reverse_search_matches(&text, &state.query) {
+            state.current_index = Some(offset);
+            state.current_match = Some(text);
+            state.search_cursor = (offset as isize) - 1;
+            self.apply_reverse_search_preview();
+            return true;
+        }
+
+        state.search_cursor = (offset as isize) - 1;
+        self.advance_reverse_search();
+        true
     }
 
     /// Attempt to start a burst by retro-capturing recent chars before the cursor.
@@ -1085,6 +1372,10 @@ impl ChatComposer {
 
     /// Handle key event when no popup is visible.
     fn handle_key_event_without_popup(&mut self, key_event: KeyEvent) -> (InputResult, bool) {
+        if let Some(result) = self.handle_reverse_search_key_event(&key_event) {
+            return result;
+        }
+
         if self.handle_shortcut_overlay_key(&key_event) {
             return (InputResult::None, true);
         }
@@ -1694,6 +1985,93 @@ impl ChatComposer {
         changed
     }
 
+    fn handle_reverse_search_key_event(
+        &mut self,
+        key_event: &KeyEvent,
+    ) -> Option<(InputResult, bool)> {
+        if self.reverse_search_active() {
+            if key_event.kind != KeyEventKind::Press {
+                return Some((InputResult::None, false));
+            }
+
+            if Self::is_reverse_search_trigger(key_event) {
+                self.reverse_search_next();
+                return Some((InputResult::None, true));
+            }
+
+            if Self::is_reverse_search_cancel(key_event) || matches!(key_event.code, KeyCode::Esc) {
+                self.exit_reverse_search(false);
+                return Some((InputResult::None, true));
+            }
+
+            if matches!(key_event.code, KeyCode::Enter) {
+                self.exit_reverse_search(true);
+                return Some((InputResult::None, true));
+            }
+
+            if matches!(key_event.code, KeyCode::Backspace) {
+                let mut refresh = false;
+                let mut should_cancel = false;
+                if let Some(state) = self.reverse_search.as_mut() {
+                    if state.query.pop().is_some() {
+                        refresh = true;
+                    } else {
+                        should_cancel = true;
+                    }
+                }
+
+                if should_cancel {
+                    self.exit_reverse_search(false);
+                    return Some((InputResult::None, true));
+                }
+
+                if refresh {
+                    self.refresh_reverse_search(true);
+                }
+                return Some((InputResult::None, true));
+            }
+
+            if let KeyCode::Char(ch) = key_event.code
+                && matches!(
+                    key_event.modifiers,
+                    KeyModifiers::NONE | KeyModifiers::SHIFT
+                )
+            {
+                if let Some(state) = self.reverse_search.as_mut() {
+                    state.query.push(ch);
+                }
+                self.refresh_reverse_search(true);
+                return Some((InputResult::None, true));
+            }
+
+            self.exit_reverse_search(true);
+            return None;
+        }
+
+        if key_event.kind == KeyEventKind::Press && Self::is_reverse_search_trigger(key_event) {
+            self.begin_reverse_search();
+            return Some((InputResult::None, true));
+        }
+
+        None
+    }
+
+    fn is_reverse_search_trigger(key_event: &KeyEvent) -> bool {
+        matches!(
+            (key_event.code, key_event.modifiers),
+            (KeyCode::Char('r'), KeyModifiers::CONTROL)
+                | (KeyCode::Char('\u{0012}'), KeyModifiers::NONE)
+        )
+    }
+
+    fn is_reverse_search_cancel(key_event: &KeyEvent) -> bool {
+        matches!(
+            (key_event.code, key_event.modifiers),
+            (KeyCode::Char('g'), KeyModifiers::CONTROL)
+                | (KeyCode::Char('\u{0007}'), KeyModifiers::NONE)
+        )
+    }
+
     fn footer_props(&self) -> FooterProps<'_> {
         FooterProps {
             mode: self.footer_mode(),
@@ -1725,6 +2103,11 @@ impl ChatComposer {
     }
 
     fn sync_popups(&mut self) {
+        if self.reverse_search_active() {
+            self.active_popup = ActivePopup::None;
+            return;
+        }
+
         let file_token = Self::current_at_token(&self.textarea);
         let skill_token = self.current_skill_token();
 
@@ -2333,6 +2716,67 @@ mod tests {
             composer.history.navigate_up(&composer.app_event_tx),
             Some("draft text".to_string())
         );
+    }
+
+    #[test]
+    fn ctrl_r_reverse_search_finds_latest_and_accepts_match() {
+        use crossterm::event::KeyCode;
+        use crossterm::event::KeyEvent;
+        use crossterm::event::KeyModifiers;
+
+        let (tx, _rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            true,
+            sender,
+            false,
+            "Ask Codex to do anything".to_string(),
+            false,
+            default_keybindings(false),
+        );
+
+        composer.set_text_content("draft".to_string());
+        composer.history.record_local_submission("first");
+        composer.history.record_local_submission("second");
+
+        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        assert!(composer.reverse_search_active());
+        assert_eq!(composer.current_text(), "second");
+
+        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE));
+        assert_eq!(composer.current_text(), "first");
+
+        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!composer.reverse_search_active());
+        assert_eq!(composer.current_text(), "first");
+    }
+
+    #[test]
+    fn reverse_search_escape_restores_original_text() {
+        use crossterm::event::KeyCode;
+        use crossterm::event::KeyEvent;
+        use crossterm::event::KeyModifiers;
+
+        let (tx, _rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            true,
+            sender,
+            false,
+            "Ask Codex to do anything".to_string(),
+            false,
+            default_keybindings(false),
+        );
+
+        composer.set_text_content("draft".to_string());
+        composer.history.record_local_submission("older");
+
+        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        assert_eq!(composer.current_text(), "older");
+
+        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!composer.reverse_search_active());
+        assert_eq!(composer.current_text(), "draft");
     }
 
     #[test]

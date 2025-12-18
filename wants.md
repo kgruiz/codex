@@ -51,7 +51,7 @@ Add new items below as you think of them.
 17. [ ] Add colors/highlighting for emphasis (thinking vs final, headers) (<https://github.com/openai/codex/issues/2711>)
     - Add configurable color settings to distinguish thinking vs final output.
     - Highlight headers/sections like next steps/recommendations for better scanability.
-18. [ ] Interactive history reverse search (Ctrl+R) (<https://github.com/openai/codex/issues/2622>)
+18. [x] Interactive history reverse search (Ctrl+R) (<https://github.com/openai/codex/issues/2622>)
     - `Ctrl+R` enters reverse-i-search with fuzzy/substring matching; repeated `Ctrl+R` cycles matches (`Ctrl+S` forward).
     - Enter accepts, Escape cancels, and editing the selected prompt should be easy (exit search and edit in place).
     - Persist history with configurable size limits and optional frecency ordering.
