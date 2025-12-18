@@ -1651,10 +1651,11 @@ impl ChatWidget {
             }
             KeyEvent {
                 code: KeyCode::Right,
-                modifiers: KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+                modifiers,
                 kind: KeyEventKind::Press | KeyEventKind::Repeat,
                 ..
-            } if !self.bottom_pane.has_active_view()
+            } if modifiers == (KeyModifiers::CONTROL | KeyModifiers::SHIFT)
+                && !self.bottom_pane.has_active_view()
                 && !self.bottom_pane.composer_popup_active() =>
             {
                 #[cfg(feature = "debug-logs")]
@@ -1665,10 +1666,11 @@ impl ChatWidget {
             }
             KeyEvent {
                 code: KeyCode::Left,
-                modifiers: KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+                modifiers,
                 kind: KeyEventKind::Press | KeyEventKind::Repeat,
                 ..
-            } if !self.bottom_pane.has_active_view()
+            } if modifiers == (KeyModifiers::CONTROL | KeyModifiers::SHIFT)
+                && !self.bottom_pane.has_active_view()
                 && !self.bottom_pane.composer_popup_active() =>
             {
                 #[cfg(feature = "debug-logs")]
