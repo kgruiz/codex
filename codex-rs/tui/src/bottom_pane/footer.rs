@@ -318,7 +318,7 @@ fn status_line_prefix(model: &str, effort: Option<ReasoningEffort>) -> Line<'sta
     }
 
     let mut line = Line::default();
-    push_model_segment(&mut line, "Model", model, effort);
+    push_model_segment(&mut line, "", model, effort);
     line
 }
 
@@ -328,7 +328,10 @@ fn push_model_segment(
     model: &str,
     effort: Option<ReasoningEffort>,
 ) {
-    line.push_span(format!("{label}: ").dim());
+    if !label.is_empty() {
+        line.push_span(format!("{label}: ").dim());
+    }
+
     line.push_span(model.to_string());
 
     if let Some(label) = thinking_label_for(model, effort) {
