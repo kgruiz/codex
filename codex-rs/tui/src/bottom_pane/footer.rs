@@ -1,10 +1,12 @@
 use crate::key_hint;
+use crate::key_hint::KeyBinding;
 use crate::keybindings::Keybindings;
 use crate::render::line_utils::prefix_lines;
 use crate::status::format_tokens_compact;
 use crate::ui_consts::FOOTER_INDENT_COLS;
 use codex_protocol::openai_models::ReasoningEffort;
 use crossterm::event::KeyCode;
+use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
@@ -191,9 +193,17 @@ fn shortcut_overlay_lines(state: ShortcutsState<'_>) -> Vec<Line<'static>> {
     ]);
 
     let model = Line::from(vec![
-        key_hint::ctrl(KeyCode::Char('[')).into(),
+        KeyBinding::new(
+            KeyCode::Left,
+            KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
+        )
+        .into(),
         " / ".into(),
-        key_hint::ctrl(KeyCode::Char(']')).into(),
+        KeyBinding::new(
+            KeyCode::Right,
+            KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
+        )
+        .into(),
         " to change model".into(),
     ]);
 

@@ -1637,14 +1637,8 @@ impl ChatWidget {
                 return;
             }
             KeyEvent {
-                code: KeyCode::Char(']'),
-                modifiers: KeyModifiers::CONTROL,
-                kind: KeyEventKind::Press,
-                ..
-            }
-            | KeyEvent {
-                code: KeyCode::Char('\u{001d}'),
-                modifiers: KeyModifiers::NONE,
+                code: KeyCode::Right,
+                modifiers: KeyModifiers::CONTROL | KeyModifiers::SHIFT,
                 kind: KeyEventKind::Press,
                 ..
             } if !self.bottom_pane.has_active_view()
@@ -1654,8 +1648,8 @@ impl ChatWidget {
                 return;
             }
             KeyEvent {
-                code: KeyCode::Char('['),
-                modifiers: KeyModifiers::CONTROL,
+                code: KeyCode::Left,
+                modifiers: KeyModifiers::CONTROL | KeyModifiers::SHIFT,
                 kind: KeyEventKind::Press,
                 ..
             } if !self.bottom_pane.has_active_view()
