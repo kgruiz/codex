@@ -1147,6 +1147,18 @@ impl App {
     }
 
     async fn handle_key_event(&mut self, tui: &mut tui::Tui, key_event: KeyEvent) {
+        #[cfg(feature = "debug-logs")]
+        if matches!(key_event.code, KeyCode::Left | KeyCode::Right)
+            && key_event.modifiers != crossterm::event::KeyModifiers::NONE
+        {
+            tracing::debug!(
+                ?key_event,
+                overlay_active = self.overlay.is_some(),
+                backtrack_primed = self.backtrack.primed,
+                "app key event"
+            );
+        }
+
         match key_event {
             KeyEvent {
                 code: KeyCode::Char('t'),
