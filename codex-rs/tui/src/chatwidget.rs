@@ -1915,25 +1915,33 @@ impl ChatWidget {
             return;
         };
 
-        let mut choices: Vec<Option<ReasoningEffortConfig>> = vec![None];
-        for option in preset.supported_reasoning_efforts {
-            let effort = option.effort;
-            if !choices.contains(&Some(effort)) {
-                choices.push(Some(effort));
-            }
-        }
+        let default_effort = preset.default_reasoning_effort;
+        let mut supported: HashSet<ReasoningEffortConfig> = preset
+            .supported_reasoning_efforts
+            .into_iter()
+            .map(|option| option.effort)
+            .collect();
+        supported.insert(default_effort);
+
+        // Note: codex-core always normalizes "unset" effort to an explicit
+        // effective effort (usually the model default), so cycling must avoid
+        // a `None` slot or it will become unreachable and break wrap-around.
+        let choices: Vec<ReasoningEffortConfig> = ReasoningEffortConfig::iter()
+            .filter(|effort| *effort != ReasoningEffortConfig::None && supported.contains(effort))
+            .collect();
 
         if choices.len() <= 1 {
             return;
         }
 
         let current_idx = current_effort
-            .and_then(|effort| choices.iter().position(|choice| *choice == Some(effort)))
+            .and_then(|effort| choices.iter().position(|choice| *choice == effort))
+            .or_else(|| choices.iter().position(|choice| *choice == default_effort))
             .unwrap_or(0);
 
         let len = choices.len() as isize;
         let next_idx = (current_idx as isize + direction).rem_euclid(len) as usize;
-        let next_effort = choices[next_idx];
+        let next_effort = Some(choices[next_idx]);
 
         self.app_event_tx
             .send(AppEvent::CodexOp(Op::OverrideTurnContext {

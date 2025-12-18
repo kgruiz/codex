@@ -2244,6 +2244,32 @@ fn feedback_upload_consent_popup_snapshot() {
 }
 
 #[test]
+fn tab_cycles_thinking_effort_through_supported_options() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2"));
+
+    fn next_update(
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+    ) -> Option<ReasoningEffortConfig> {
+        loop {
+            match rx.try_recv() {
+                Ok(AppEvent::UpdateReasoningEffort(effort)) => return effort,
+                Ok(_) => {}
+                Err(TryRecvError::Empty) => panic!("expected UpdateReasoningEffort event"),
+                Err(TryRecvError::Disconnected) => panic!("event channel disconnected"),
+            }
+        }
+    }
+
+    chat.config.model_reasoning_effort = Some(ReasoningEffortConfig::XHigh);
+    chat.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert_eq!(next_update(&mut rx), Some(ReasoningEffortConfig::Low));
+
+    chat.config.model_reasoning_effort = Some(ReasoningEffortConfig::Low);
+    chat.handle_key_event(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
+    assert_eq!(next_update(&mut rx), Some(ReasoningEffortConfig::XHigh));
+}
+
+#[test]
 fn reasoning_popup_escape_returns_to_model_popup() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1"));
     chat.open_model_popup();
