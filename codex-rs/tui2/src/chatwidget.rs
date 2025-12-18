@@ -1511,8 +1511,7 @@ impl ChatWidget {
                 kind: KeyEventKind::Press,
                 ..
             } if !self.bottom_pane.has_active_view()
-                && !self.bottom_pane.composer_popup_active()
-                && !self.bottom_pane.is_task_running() =>
+                && !self.bottom_pane.composer_popup_active() =>
             {
                 self.cycle_thinking_effort(1);
                 return;
@@ -1528,8 +1527,7 @@ impl ChatWidget {
                 kind: KeyEventKind::Press,
                 ..
             } if !self.bottom_pane.has_active_view()
-                && !self.bottom_pane.composer_popup_active()
-                && !self.bottom_pane.is_task_running() =>
+                && !self.bottom_pane.composer_popup_active() =>
             {
                 self.cycle_thinking_effort(-1);
                 return;
@@ -1546,8 +1544,7 @@ impl ChatWidget {
                 kind: KeyEventKind::Press,
                 ..
             } if !self.bottom_pane.has_active_view()
-                && !self.bottom_pane.composer_popup_active()
-                && !self.bottom_pane.is_task_running() =>
+                && !self.bottom_pane.composer_popup_active() =>
             {
                 self.cycle_model(1);
                 return;
@@ -1558,8 +1555,7 @@ impl ChatWidget {
                 kind: KeyEventKind::Press,
                 ..
             } if !self.bottom_pane.has_active_view()
-                && !self.bottom_pane.composer_popup_active()
-                && !self.bottom_pane.is_task_running() =>
+                && !self.bottom_pane.composer_popup_active() =>
             {
                 self.cycle_model(-1);
                 return;
