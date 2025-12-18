@@ -43,7 +43,7 @@ Add new items below as you think of them.
 14. [ ] TUI appearance settings (hide startup tips, session header, placeholder title) (<https://github.com/openai/codex/issues/6089>)
     - Add toggles to hide startup tips and session header, and to hide/replace the placeholder title.
     - Support a minimal “prompt + output” startup layout.
-15. [ ] `/status` should list global `~/.codex/AGENTS.md` / `$CODEX_HOME/AGENTS.md` (<https://github.com/openai/codex/issues/3793>)
+15. [x] `/status` should list global `~/.codex/AGENTS.md` / `$CODEX_HOME/AGENTS.md` (<https://github.com/openai/codex/issues/3793>)
     - `/status` should include the global AGENTS file in the “AGENTS files” list when present (expected vs actual).
 16. [ ] Customizable status line (show cwd, git branch, etc.) (<https://github.com/openai/codex/issues/2926>)
     - Show project context like current working directory and git branch in the status line.

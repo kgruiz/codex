@@ -5,15 +5,41 @@ use chrono::Local;
 use codex_app_server_protocol::AuthMode;
 use codex_core::AuthManager;
 use codex_core::config::Config;
+use codex_core::project_doc::DEFAULT_PROJECT_DOC_FILENAME;
 use codex_core::project_doc::discover_project_doc_paths;
 use codex_protocol::account::PlanType;
 use std::path::Path;
+use std::path::PathBuf;
 use unicode_width::UnicodeWidthStr;
 
 use super::account::StatusAccountDisplay;
 
-fn normalize_agents_display_path(path: &Path) -> String {
+fn format_agents_display_path(path: &Path) -> String {
+    if let Some(rel) = relativize_to_home(path) {
+        if rel.as_os_str().is_empty() {
+            return "~".to_string();
+        }
+
+        return format!("~{}{}", std::path::MAIN_SEPARATOR, rel.display());
+    }
+
     dunce::simplified(path).display().to_string()
+}
+
+fn global_agents_path(config: &Config) -> Option<PathBuf> {
+    let candidate = config.codex_home.join(DEFAULT_PROJECT_DOC_FILENAME);
+    match std::fs::symlink_metadata(&candidate) {
+        Ok(md) => {
+            let ft = md.file_type();
+            if ft.is_file() || ft.is_symlink() {
+                Some(candidate)
+            } else {
+                None
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => None,
+    }
 }
 
 pub(crate) fn compose_model_display(
@@ -38,7 +64,13 @@ pub(crate) fn compose_model_display(
 
 pub(crate) fn compose_agents_summary(config: &Config) -> String {
     match discover_project_doc_paths(config) {
-        Ok(paths) => {
+        Ok(mut paths) => {
+            if let Some(global_path) = global_agents_path(config)
+                && !paths.iter().any(|path| path == &global_path)
+            {
+                paths.push(global_path);
+            }
+
             let mut rels: Vec<String> = Vec::new();
             for p in paths {
                 let file_name = p
@@ -64,13 +96,13 @@ pub(crate) fn compose_agents_summary(config: &Config) -> String {
                             let up = format!("..{}", std::path::MAIN_SEPARATOR);
                             format!("{}{}", up.repeat(ups), file_name)
                         } else if let Ok(stripped) = p.strip_prefix(&config.cwd) {
-                            normalize_agents_display_path(stripped)
+                            format_agents_display_path(stripped)
                         } else {
-                            normalize_agents_display_path(&p)
+                            format_agents_display_path(&p)
                         }
                     }
                 } else {
-                    normalize_agents_display_path(&p)
+                    format_agents_display_path(&p)
                 };
                 rels.push(display);
             }

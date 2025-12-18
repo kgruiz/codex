@@ -1,3 +1,4 @@
+use super::helpers::compose_agents_summary;
 use super::new_status_output;
 use super::rate_limit_snapshot_display;
 use crate::history_cell::HistoryCell;
@@ -19,6 +20,7 @@ use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::openai_models::ReasoningEffort;
 use insta::assert_snapshot;
 use ratatui::prelude::*;
+use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -82,6 +84,22 @@ fn reset_at_from(captured_at: &chrono::DateTime<chrono::Local>, seconds: i64) ->
     (*captured_at + ChronoDuration::seconds(seconds))
         .with_timezone(&Utc)
         .timestamp()
+}
+
+#[test]
+fn status_includes_global_agents_file() {
+    let temp_home = TempDir::new().expect("temp home");
+    let global_agents = temp_home.path().join("AGENTS.md");
+
+    fs::write(&global_agents, "global instructions").expect("write global agents");
+
+    let mut config = test_config(&temp_home);
+    let workspace = TempDir::new().expect("workspace");
+    config.cwd = workspace.path().to_path_buf();
+
+    let summary = compose_agents_summary(&config);
+    let expected = dunce::simplified(&global_agents).display().to_string();
+    assert!(summary.contains(&expected));
 }
 
 #[test]
