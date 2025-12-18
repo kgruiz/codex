@@ -1610,9 +1610,9 @@ impl ChatWidget {
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
         #[cfg(feature = "debug-logs")]
         if matches!(key_event.code, KeyCode::Left | KeyCode::Right)
-            && key_event.modifiers != KeyModifiers::NONE
+            && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
         {
-            tracing::debug!(
+            tracing::info!(
                 ?key_event,
                 has_active_view = self.bottom_pane.has_active_view(),
                 composer_popup_active = self.bottom_pane.composer_popup_active(),
@@ -1658,7 +1658,7 @@ impl ChatWidget {
                 && !self.bottom_pane.composer_popup_active() =>
             {
                 #[cfg(feature = "debug-logs")]
-                tracing::debug!("cycle_model next");
+                tracing::info!("cycle_model next");
 
                 self.cycle_model(1);
                 return;
@@ -1672,7 +1672,7 @@ impl ChatWidget {
                 && !self.bottom_pane.composer_popup_active() =>
             {
                 #[cfg(feature = "debug-logs")]
-                tracing::debug!("cycle_model prev");
+                tracing::info!("cycle_model prev");
 
                 self.cycle_model(-1);
                 return;
