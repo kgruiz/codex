@@ -192,6 +192,11 @@ fn shortcut_overlay_lines(state: ShortcutsState<'_>) -> Vec<Line<'static>> {
         " to search history".into(),
     ]);
 
+    let external_editor = Line::from(vec![
+        key_hint::ctrl(KeyCode::Char('g')).into(),
+        " to edit in external editor".into(),
+    ]);
+
     let commands = Line::from(vec![
         key_hint::plain(KeyCode::Char('/')).into(),
         " for commands".into(),
@@ -256,6 +261,7 @@ fn shortcut_overlay_lines(state: ShortcutsState<'_>) -> Vec<Line<'static>> {
         file_paths,
         Line::from(vec![paste.into(), " to paste from clipboard".into()]),
         Line::from(vec![copy_prompt.into(), " to copy prompt".into()]),
+        external_editor,
         history_search,
         edit_previous,
         quit,

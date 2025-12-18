@@ -412,6 +412,20 @@ impl ChatComposer {
             .collect()
     }
 
+    fn expand_pending_pastes_in_text(&self, text: &str) -> String {
+        if self.pending_pastes.is_empty() {
+            return text.to_string();
+        }
+
+        let mut expanded = text.to_string();
+        for (placeholder, actual) in &self.pending_pastes {
+            if expanded.contains(placeholder) {
+                expanded = expanded.replace(placeholder, actual);
+            }
+        }
+        expanded
+    }
+
     fn reverse_search_active(&self) -> bool {
         self.reverse_search.is_some()
     }
@@ -1390,6 +1404,15 @@ impl ChatComposer {
         } else {
             self.footer_mode = reset_mode_after_activity(self.footer_mode);
         }
+
+        if Self::is_external_editor_trigger(&key_event) {
+            let text = self.expand_pending_pastes_in_text(self.textarea.text());
+            let attachments = self.current_attachments();
+            self.app_event_tx
+                .send(AppEvent::OpenExternalEditor { text, attachments });
+            return (InputResult::None, true);
+        }
+
         match key_event {
             KeyEvent {
                 code: KeyCode::Char('d'),
@@ -2065,6 +2088,18 @@ impl ChatComposer {
     }
 
     fn is_reverse_search_cancel(key_event: &KeyEvent) -> bool {
+        matches!(
+            (key_event.code, key_event.modifiers),
+            (KeyCode::Char('g'), KeyModifiers::CONTROL)
+                | (KeyCode::Char('\u{0007}'), KeyModifiers::NONE)
+        )
+    }
+
+    fn is_external_editor_trigger(key_event: &KeyEvent) -> bool {
+        if key_event.kind != KeyEventKind::Press {
+            return false;
+        }
+
         matches!(
             (key_event.code, key_event.modifiers),
             (KeyCode::Char('g'), KeyModifiers::CONTROL)
@@ -2777,6 +2812,42 @@ mod tests {
         let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(!composer.reverse_search_active());
         assert_eq!(composer.current_text(), "draft");
+    }
+
+    #[test]
+    fn ctrl_g_opens_external_editor_with_expanded_paste() {
+        use crossterm::event::KeyCode;
+        use crossterm::event::KeyEvent;
+        use crossterm::event::KeyModifiers;
+
+        let (tx, mut rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            true,
+            sender,
+            false,
+            "Ask Codex to do anything".to_string(),
+            false,
+            default_keybindings(false),
+        );
+
+        let large = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 5);
+        let _ = composer.handle_paste(large.clone());
+        assert!(composer.textarea.text().contains("[Pasted Content"));
+
+        let (result, needs_redraw) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
+        assert_eq!(result, InputResult::None);
+        assert!(needs_redraw);
+
+        match rx.try_recv() {
+            Ok(AppEvent::OpenExternalEditor { text, attachments }) => {
+                assert_eq!(text, large);
+                assert!(attachments.is_empty());
+            }
+            Ok(event) => panic!("unexpected event: {event:?}"),
+            Err(err) => panic!("expected external editor event: {err:?}"),
+        }
     }
 
     #[test]

@@ -2,9 +2,11 @@ use crate::app_backtrack::BacktrackState;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::ApprovalRequest;
+use crate::bottom_pane::ComposerAttachment;
 use crate::chatwidget::ChatWidget;
 use crate::diff_render::DiffSummary;
 use crate::exec_command::strip_bash_lc_and_escape;
+use crate::external_editor;
 use crate::file_search::FileSearchManager;
 use crate::history_cell::HistoryCell;
 use crate::model_migration::ModelMigrationOutcome;
@@ -769,6 +771,9 @@ impl App {
                     );
                 }
             }
+            AppEvent::OpenExternalEditor { text, attachments } => {
+                self.open_external_editor(tui, text, attachments).await;
+            }
             AppEvent::RenameSession { title } => {
                 self.chat_widget.rename_session(title);
             }
@@ -1256,6 +1261,68 @@ impl App {
     fn on_update_reasoning_effort(&mut self, effort: Option<ReasoningEffortConfig>) {
         self.chat_widget.set_reasoning_effort(effort);
         self.config.model_reasoning_effort = effort;
+    }
+
+    async fn open_external_editor(
+        &mut self,
+        tui: &mut tui::Tui,
+        text: String,
+        attachments: Vec<ComposerAttachment>,
+    ) {
+        let cwd = self.chat_widget.config_ref().cwd.clone();
+        let was_alt_screen = tui.is_alt_screen_active();
+
+        tui.pause_events();
+
+        if was_alt_screen {
+            let _ = tui.leave_alt_screen();
+        }
+
+        if let Err(err) = tui::restore() {
+            if was_alt_screen {
+                let _ = tui.enter_alt_screen();
+            }
+            tui.resume_events();
+            self.chat_widget.add_error_message(format!(
+                "Failed to prepare terminal for external editor: {err}"
+            ));
+            tui.frame_requester().schedule_frame();
+            return;
+        }
+
+        let edit_result = tokio::task::spawn_blocking(move || {
+            external_editor::edit_text_in_external_editor(&text, &cwd)
+        })
+        .await;
+
+        if let Err(err) = tui::set_modes() {
+            self.chat_widget.add_error_message(format!(
+                "Failed to restore terminal after external editor: {err}"
+            ));
+        }
+
+        if was_alt_screen {
+            let _ = tui.enter_alt_screen();
+        }
+
+        tui.resume_events();
+
+        match edit_result {
+            Ok(Ok(edited)) => {
+                self.chat_widget
+                    .set_composer_text_with_attachments(edited, attachments);
+            }
+            Ok(Err(err)) => {
+                self.chat_widget
+                    .add_error_message(format!("External editor failed: {err}"));
+            }
+            Err(err) => {
+                self.chat_widget
+                    .add_error_message(format!("External editor task failed: {err}"));
+            }
+        }
+
+        tui.frame_requester().schedule_frame();
     }
 
     async fn handle_key_event(&mut self, tui: &mut tui::Tui, key_event: KeyEvent) {

@@ -115,6 +115,10 @@ codex -i screenshot.png "Explain this error"
 codex --image img1.png,img2.jpg "Summarize these diagrams"
 ```
 
+#### Edit long prompts in your editor
+
+Press Ctrl+G to open your `$VISUAL` (or `$EDITOR`) with the current composer text. Save and exit the editor to return to Codex with the updated prompt.
+
 #### Environment variables and executables
 
 Make sure your environment is already set up before launching Codex so it does not spend tokens probing what to activate. For example, source your Python virtualenv (or other language runtimes), start any required daemons, and export the env vars you expect to use ahead of time.

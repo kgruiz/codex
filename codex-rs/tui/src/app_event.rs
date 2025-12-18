@@ -8,6 +8,7 @@ use codex_file_search::FileMatch;
 use codex_protocol::openai_models::ModelPreset;
 
 use crate::bottom_pane::ApprovalRequest;
+use crate::bottom_pane::ComposerAttachment;
 use crate::bottom_pane::RenameTarget;
 use crate::history_cell::HistoryCell;
 use crate::session_manager::SessionManagerEntry;
@@ -70,6 +71,12 @@ pub(crate) enum AppEvent {
         path: PathBuf,
         messages: usize,
         error: Option<String>,
+    },
+
+    /// Open the external editor for the current composer contents.
+    OpenExternalEditor {
+        text: String,
+        attachments: Vec<ComposerAttachment>,
     },
 
     /// Rename the current session.

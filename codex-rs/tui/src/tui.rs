@@ -215,16 +215,16 @@ impl Tui {
         self.enhanced_keys_supported
     }
 
-    // todo(sayan) unused for now; intend to use to enable opening external editors
-    #[allow(unused)]
     pub fn pause_events(&mut self) {
         self.event_broker.pause_events();
     }
 
-    // todo(sayan) unused for now; intend to use to enable opening external editors
-    #[allow(unused)]
     pub fn resume_events(&mut self) {
         self.event_broker.resume_events();
+    }
+
+    pub fn is_alt_screen_active(&self) -> bool {
+        self.alt_screen_active.load(Ordering::Relaxed)
     }
 
     /// Emit a desktop notification now if the terminal is unfocused.

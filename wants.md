@@ -15,7 +15,7 @@ Add new items below as you think of them.
 6. [ ] Syntax highlighting (code blocks)
 7. [x] Rename chats
 8. [ ] Show tokens/sec (and other live stats like latency, cost, tool time)
-9. [ ] Support handing off long prompts to external editor via `Ctrl+G`
+9. [x] Support handing off long prompts to external editor via `Ctrl+G`
 10. [ ] Edit last message without branching
 11. [x] Input shortcuts & editor behavior
     - [x] Paste images from clipboard via `Cmd+V` when clipboard contains an image (toggleable)
