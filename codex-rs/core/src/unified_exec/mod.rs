@@ -152,6 +152,9 @@ struct SessionEntry {
     call_id: String,
     process_id: String,
     command: Vec<String>,
+    cwd: PathBuf,
+    transcript: Arc<Mutex<CommandTranscript>>,
+    started_at: tokio::time::Instant,
     last_used: tokio::time::Instant,
 }
 

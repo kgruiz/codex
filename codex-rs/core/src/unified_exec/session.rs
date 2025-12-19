@@ -2,6 +2,8 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
 use tokio::sync::mpsc;
@@ -82,6 +84,7 @@ pub(crate) struct UnifiedExecSession {
     output_drained: Arc<Notify>,
     output_task: JoinHandle<()>,
     sandbox_type: SandboxType,
+    end_event_emitted: AtomicBool,
 }
 
 impl UnifiedExecSession {
@@ -120,6 +123,7 @@ impl UnifiedExecSession {
             output_drained,
             output_task,
             sandbox_type,
+            end_event_emitted: AtomicBool::new(false),
         }
     }
 
@@ -145,6 +149,10 @@ impl UnifiedExecSession {
 
     pub(super) fn output_drained_notify(&self) -> Arc<Notify> {
         Arc::clone(&self.output_drained)
+    }
+
+    pub(super) fn mark_end_event_emitted(&self) -> bool {
+        !self.end_event_emitted.swap(true, Ordering::SeqCst)
     }
 
     pub(super) fn has_exited(&self) -> bool {

@@ -111,6 +111,10 @@ pub(crate) fn spawn_exit_watcher(
         exit_token.cancelled().await;
         output_drained.notified().await;
 
+        if !session.mark_end_event_emitted() {
+            return;
+        }
+
         let exit_code = session.exit_code().unwrap_or(-1);
         let duration = Instant::now().saturating_duration_since(started_at);
         emit_exec_end_for_unified_exec(
