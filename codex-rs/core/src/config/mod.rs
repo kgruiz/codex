@@ -182,6 +182,9 @@ pub struct Config {
     /// Ordered list of status line items to render in the TUI footer.
     pub status_line_items: Vec<StatusLineItem>,
 
+    /// Keep queued messages when branching from Esc backtrack.
+    pub keep_queue_on_branch: bool,
+
     /// Keybinding overrides loaded from `[keybindings]` in `config.toml`.
     pub keybindings: HashMap<String, Vec<String>>,
 
@@ -1344,6 +1347,11 @@ impl Config {
                 .as_ref()
                 .and_then(|t| t.status_line.clone())
                 .unwrap_or_else(Self::default_status_line_items),
+            keep_queue_on_branch: cfg
+                .tui
+                .as_ref()
+                .map(|t| t.keep_queue_on_branch)
+                .unwrap_or(false),
             keybindings: cfg
                 .keybindings
                 .into_iter()
@@ -3128,6 +3136,7 @@ model_verbosity = "high"
                 animations: true,
                 show_tooltips: true,
                 status_line_items: Config::default_status_line_items(),
+                keep_queue_on_branch: false,
                 keybindings: HashMap::new(),
                 otel: OtelConfig::default(),
             },
@@ -3205,6 +3214,7 @@ model_verbosity = "high"
             animations: true,
             show_tooltips: true,
             status_line_items: Config::default_status_line_items(),
+            keep_queue_on_branch: false,
             keybindings: HashMap::new(),
             otel: OtelConfig::default(),
         };
@@ -3297,6 +3307,7 @@ model_verbosity = "high"
             animations: true,
             show_tooltips: true,
             status_line_items: Config::default_status_line_items(),
+            keep_queue_on_branch: false,
             keybindings: HashMap::new(),
             otel: OtelConfig::default(),
         };
@@ -3375,6 +3386,7 @@ model_verbosity = "high"
             animations: true,
             show_tooltips: true,
             status_line_items: Config::default_status_line_items(),
+            keep_queue_on_branch: false,
             keybindings: HashMap::new(),
             otel: OtelConfig::default(),
         };

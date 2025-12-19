@@ -19,7 +19,7 @@ Add new items below as you think of them.
    - Show project context like current working directory and git branch in the status line.
    - Consider making the status line user-configurable (similar to Claude Code).
 9. [x] Support handing off long prompts to external editor via `Ctrl+G`
-10. [ ] Edit last message without branching
+10. [x] Edit last message without branching
 11. [x] Input shortcuts & editor behavior
     - [x] Paste images from clipboard via `Cmd+V` when clipboard contains an image (toggleable)
     - [x] Use `Shift+Enter` for newline instead of `Option+Enter` (toggleable)

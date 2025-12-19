@@ -151,13 +151,17 @@ fn ctrl_c_reminder_line(state: CtrlCReminderState) -> Line<'static> {
 fn esc_hint_line(esc_backtrack_hint: bool) -> Line<'static> {
     let esc = key_hint::plain(KeyCode::Esc);
     if esc_backtrack_hint {
-        Line::from(vec![esc.into(), " again to edit previous message".into()]).dim()
+        Line::from(vec![
+            esc.into(),
+            " again to edit or branch previous message".into(),
+        ])
+        .dim()
     } else {
         Line::from(vec![
             esc.into(),
             " ".into(),
             esc.into(),
-            " to edit previous message".into(),
+            " to edit or branch previous message".into(),
         ])
         .dim()
     }
@@ -230,14 +234,14 @@ fn shortcut_overlay_lines(state: ShortcutsState<'_>) -> Vec<Line<'static>> {
     let edit_previous = if state.esc_backtrack_hint {
         Line::from(vec![
             key_hint::plain(KeyCode::Esc).into(),
-            " again to edit previous message".into(),
+            " again to edit or branch previous message".into(),
         ])
     } else {
         Line::from(vec![
             key_hint::plain(KeyCode::Esc).into(),
             " ".into(),
             key_hint::plain(KeyCode::Esc).into(),
-            " to edit previous message".into(),
+            " to edit or branch previous message".into(),
         ])
     };
 

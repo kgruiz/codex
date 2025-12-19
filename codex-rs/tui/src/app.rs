@@ -1,4 +1,5 @@
 use crate::app_backtrack::BacktrackState;
+use crate::app_backtrack::EditVersionState;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::ApprovalRequest;
@@ -298,11 +299,13 @@ pub(crate) struct App {
     pub(crate) file_search: FileSearchManager,
 
     pub(crate) transcript_cells: Vec<Arc<dyn HistoryCell>>,
+    pub(crate) current_session_user_index: usize,
+    pub(crate) edit_versions: EditVersionState,
 
     // Pager overlay state (Transcript or Static like Diff)
     pub(crate) overlay: Option<Overlay>,
     pub(crate) deferred_history_lines: Vec<Line<'static>>,
-    has_emitted_history_lines: bool,
+    pub(crate) has_emitted_history_lines: bool,
 
     pub(crate) enhanced_keys_supported: bool,
 
@@ -324,7 +327,7 @@ pub(crate) struct App {
 }
 
 impl App {
-    async fn shutdown_current_conversation(&mut self) {
+    pub(crate) async fn shutdown_current_conversation(&mut self) {
         if let Some(conversation_id) = self.chat_widget.conversation_id() {
             self.suppress_shutdown_complete = true;
             self.chat_widget.submit_op(Op::Shutdown);
@@ -372,6 +375,8 @@ impl App {
                     resumed.session_configured,
                 );
                 self.current_model = model_family.get_model_slug().to_string();
+                self.edit_versions = EditVersionState::default();
+                self.current_session_user_index = 0;
                 if let Some(summary) = summary {
                     let mut lines: Vec<Line<'static>> = vec![summary.usage_line.clone().into()];
                     if let Some(command) = summary.resume_command {
@@ -500,6 +505,8 @@ impl App {
             file_search,
             enhanced_keys_supported,
             transcript_cells: Vec::new(),
+            current_session_user_index: 0,
+            edit_versions: EditVersionState::default(),
             overlay: None,
             deferred_history_lines: Vec::new(),
             has_emitted_history_lines: false,
@@ -611,6 +618,35 @@ impl App {
         Ok(true)
     }
 
+    fn insert_history_cell(&mut self, tui: &mut tui::Tui, cell: Arc<dyn HistoryCell>) {
+        if let Some(Overlay::Transcript(t)) = &mut self.overlay {
+            t.insert_cell(cell.clone());
+            tui.frame_requester().schedule_frame();
+        }
+
+        self.transcript_cells.push(cell.clone());
+        let mut display = cell.display_lines(tui.terminal.last_known_screen_size.width);
+
+        if !display.is_empty() {
+            // Only insert a separating blank line for new cells that are not
+            // part of an ongoing stream. Streaming continuations should not
+            // accrue extra blank lines between chunks.
+            if !cell.is_stream_continuation() {
+                if self.has_emitted_history_lines {
+                    display.insert(0, Line::from(""));
+                } else {
+                    self.has_emitted_history_lines = true;
+                }
+            }
+
+            if self.overlay.is_some() {
+                self.deferred_history_lines.extend(display);
+            } else {
+                tui.insert_history_lines(display);
+            }
+        }
+    }
+
     async fn handle_event(&mut self, tui: &mut tui::Tui, event: AppEvent) -> Result<bool> {
         let model_family = self
             .server
@@ -639,6 +675,8 @@ impl App {
                 };
                 self.chat_widget = ChatWidget::new(init, self.server.clone());
                 self.current_model = model_family.get_model_slug().to_string();
+                self.edit_versions = EditVersionState::default();
+                self.current_session_user_index = 0;
                 if let Some(summary) = summary {
                     let mut lines: Vec<Line<'static>> = vec![summary.usage_line.clone().into()];
                     if let Some(command) = summary.resume_command {
@@ -670,28 +708,32 @@ impl App {
             }
             AppEvent::InsertHistoryCell(cell) => {
                 let cell: Arc<dyn HistoryCell> = cell.into();
-                if let Some(Overlay::Transcript(t)) = &mut self.overlay {
-                    t.insert_cell(cell.clone());
-                    tui.frame_requester().schedule_frame();
-                }
-                self.transcript_cells.push(cell.clone());
-                let mut display = cell.display_lines(tui.terminal.last_known_screen_size.width);
-                if !display.is_empty() {
-                    // Only insert a separating blank line for new cells that are not
-                    // part of an ongoing stream. Streaming continuations should not
-                    // accrue extra blank lines between chunks.
-                    if !cell.is_stream_continuation() {
-                        if self.has_emitted_history_lines {
-                            display.insert(0, Line::from(""));
-                        } else {
-                            self.has_emitted_history_lines = true;
-                        }
+                let is_session_info = cell.as_any().is::<crate::history_cell::SessionInfoCell>();
+                let is_user_message = cell.as_any().is::<crate::history_cell::UserHistoryCell>();
+                let nth_user_message = if is_user_message {
+                    self.current_session_user_index
+                } else {
+                    0
+                };
+
+                self.insert_history_cell(tui, cell);
+
+                if is_session_info {
+                    self.current_session_user_index = 0;
+                } else if is_user_message {
+                    if let Some(conversation_id) = self.chat_widget.conversation_id()
+                        && let Some((current, total)) = self
+                            .edit_versions
+                            .version_marker_for(&conversation_id, nth_user_message)
+                        && total > 1
+                    {
+                        let indicator = Arc::new(crate::history_cell::new_edit_version_indicator(
+                            current, total,
+                        )) as Arc<dyn HistoryCell>;
+                        self.insert_history_cell(tui, indicator);
                     }
-                    if self.overlay.is_some() {
-                        self.deferred_history_lines.extend(display);
-                    } else {
-                        tui.insert_history_lines(display);
-                    }
+                    self.current_session_user_index =
+                        self.current_session_user_index.saturating_add(1);
                 }
             }
             AppEvent::StartCommitAnimation => {
@@ -732,6 +774,9 @@ impl App {
             }
             AppEvent::ConversationHistory(ev) => {
                 self.on_conversation_history_for_backtrack(tui, ev).await?;
+            }
+            AppEvent::BacktrackActionSelected { action } => {
+                self.handle_backtrack_action_selected(action);
             }
             AppEvent::ExitRequest => {
                 return Ok(false);
@@ -1341,6 +1386,36 @@ impl App {
                 self.overlay = Some(Overlay::new_transcript(self.transcript_cells.clone()));
                 tui.frame_requester().schedule_frame();
             }
+            KeyEvent {
+                code: KeyCode::Left,
+                modifiers: crossterm::event::KeyModifiers::ALT,
+                kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                ..
+            } => {
+                if self.chat_widget.is_normal_backtrack_mode()
+                    && self.chat_widget.composer_is_empty()
+                    && self.switch_edit_version(tui, -1).await
+                {
+                    return;
+                }
+
+                self.chat_widget.handle_key_event(key_event);
+            }
+            KeyEvent {
+                code: KeyCode::Right,
+                modifiers: crossterm::event::KeyModifiers::ALT,
+                kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                ..
+            } => {
+                if self.chat_widget.is_normal_backtrack_mode()
+                    && self.chat_widget.composer_is_empty()
+                    && self.switch_edit_version(tui, 1).await
+                {
+                    return;
+                }
+
+                self.chat_widget.handle_key_event(key_event);
+            }
             // Esc primes/advances backtracking only in normal (not working) mode
             // with the composer focused and empty. In any other state, forward
             // Esc so the active UI (e.g. status indicator, modals, popups)
@@ -1464,6 +1539,8 @@ mod tests {
             active_profile: None,
             file_search,
             transcript_cells: Vec::new(),
+            current_session_user_index: 0,
+            edit_versions: EditVersionState::default(),
             overlay: None,
             deferred_history_lines: Vec::new(),
             has_emitted_history_lines: false,
@@ -1504,6 +1581,8 @@ mod tests {
                 active_profile: None,
                 file_search,
                 transcript_cells: Vec::new(),
+                current_session_user_index: 0,
+                edit_versions: EditVersionState::default(),
                 overlay: None,
                 deferred_history_lines: Vec::new(),
                 has_emitted_history_lines: false,
@@ -1683,12 +1762,36 @@ mod tests {
         app.backtrack.base_id = Some(ConversationId::new());
         app.backtrack.primed = true;
         app.backtrack.nth_user_message = user_count(&app.transcript_cells).saturating_sub(1);
+        app.chat_widget.handle_codex_event(Event {
+            id: String::new(),
+            msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
+                session_id: ConversationId::new(),
+                model: "gpt-test".to_string(),
+                model_provider_id: "test-provider".to_string(),
+                approval_policy: AskForApproval::Never,
+                sandbox_policy: SandboxPolicy::ReadOnly,
+                cwd: PathBuf::from("/home/user/project"),
+                reasoning_effort: None,
+                history_log_id: 0,
+                history_entry_count: 0,
+                initial_messages: None,
+                rollout_path: PathBuf::from("/tmp/backtrack-test.jsonl"),
+            }),
+        });
 
         app.confirm_backtrack_from_main();
 
-        let (_, nth, prefill) = app.backtrack.pending.clone().expect("pending backtrack");
-        assert_eq!(nth, 1);
-        assert_eq!(prefill, "follow-up (edited)");
+        let selection = app
+            .backtrack
+            .pending_selection
+            .clone()
+            .expect("pending selection");
+        assert_eq!(selection.nth_user_message, 1);
+        assert_eq!(selection.prefill, "follow-up (edited)");
+        assert_eq!(
+            selection.rollout_path,
+            PathBuf::from("/tmp/backtrack-test.jsonl")
+        );
     }
 
     #[tokio::test]

@@ -7,6 +7,7 @@ use crate::exec_cell::output_lines;
 use crate::exec_cell::spinner;
 use crate::exec_command::relativize_to_home;
 use crate::exec_command::strip_bash_lc_and_escape;
+use crate::key_hint;
 use crate::markdown::append_markdown;
 use crate::render::line_utils::line_to_static;
 use crate::render::line_utils::prefix_lines;
@@ -35,6 +36,7 @@ use codex_protocol::openai_models::ReasoningSummaryFormat;
 use codex_protocol::plan_tool::PlanItemArg;
 use codex_protocol::plan_tool::StepStatus;
 use codex_protocol::plan_tool::UpdatePlanArgs;
+use crossterm::event::KeyCode;
 use image::DynamicImage;
 use image::ImageReader;
 use mcp_types::EmbeddedResourceResource;
@@ -157,6 +159,46 @@ impl HistoryCell for UserHistoryCell {
         lines.push(Line::from("").style(style));
         lines
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct EditVersionHistoryCell {
+    current: usize,
+    total: usize,
+}
+
+impl EditVersionHistoryCell {
+    pub(crate) fn new(current: usize, total: usize) -> Self {
+        Self { current, total }
+    }
+}
+
+impl HistoryCell for EditVersionHistoryCell {
+    fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
+        let count = format!("{}/{}", self.current, self.total);
+        let line = Line::from(vec![
+            "  ".into(),
+            "<".dim(),
+            " ".into(),
+            count.dim(),
+            " ".into(),
+            ">".dim(),
+            "  ".into(),
+            key_hint::alt(KeyCode::Left).into(),
+            " / ".into(),
+            key_hint::alt(KeyCode::Right).into(),
+            " to switch".dim(),
+        ]);
+        vec![line]
+    }
+
+    fn is_stream_continuation(&self) -> bool {
+        true
+    }
+}
+
+pub(crate) fn new_edit_version_indicator(current: usize, total: usize) -> EditVersionHistoryCell {
+    EditVersionHistoryCell::new(current, total)
 }
 
 #[derive(Debug)]

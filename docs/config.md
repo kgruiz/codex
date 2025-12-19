@@ -888,6 +888,10 @@ animations = false
 # Configure the status line segments shown in the TUI footer.
 # Defaults to: ["model", "context", "tokens-per-sec", "latency", "tool-time", "cost"]
 status_line = ["model", "context", "tokens-per-sec", "latency", "tool-time", "cost"]
+
+# Keep queued messages when branching from Esc backtrack.
+# Defaults to false.
+keep_queue_on_branch = true
 ```
 
 Status line values are `model`, `context`, `cwd`, `git-branch`, `tokens-per-sec`, `latency`, `tool-time`, and `cost`.
@@ -1052,6 +1056,7 @@ Valid values:
 | `tui`                                            | table                                                             | TUI‑specific options.                                                                                                           |
 | `tui.notifications`                              | boolean \| array<string>                                          | Enable desktop notifications in the tui (default: true).                                                                        |
 | `tui.status_line`                                | array<string>                                                     | Ordered status line segments in the footer (default: model, context, tokens-per-sec, latency, tool-time, cost).                  |
+| `tui.keep_queue_on_branch`                       | boolean                                                           | Keep queued messages when branching from Esc backtrack (default: false).                                                         |
 | `keybindings`                                    | table<string,string \| array<string>>                             | Customize common TUI shortcuts (see `keybindings`).                                                                             |
 | `hide_agent_reasoning`                           | boolean                                                           | Hide model reasoning events.                                                                                                    |
 | `check_for_update_on_startup`                    | boolean                                                           | Check for Codex updates on startup (default: true). Set to `false` only if updates are centrally managed.                       |

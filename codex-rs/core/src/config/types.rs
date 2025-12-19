@@ -385,6 +385,11 @@ pub struct Tui {
     /// When unset, Codex uses the default list.
     #[serde(default)]
     pub status_line: Option<Vec<StatusLineItem>>,
+
+    /// Keep queued messages when branching from Esc backtrack.
+    /// Defaults to `false` (queue clears).
+    #[serde(default)]
+    pub keep_queue_on_branch: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]

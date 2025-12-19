@@ -146,6 +146,9 @@ animations = true
 # Default: ["model", "context", "tokens-per-sec", "latency", "tool-time", "cost"]
 status_line = ["model", "context", "tokens-per-sec", "latency", "tool-time", "cost"]
 
+# Keep queued messages when branching from Esc backtrack. Default: false
+keep_queue_on_branch = false
+
 # Suppress internal reasoning events from output. Default: false
 hide_agent_reasoning = false
 

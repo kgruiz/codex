@@ -78,9 +78,9 @@ Typing `@` triggers a fuzzy-filename search over the workspace root. Use up/down
 
 #### Esc–Esc to edit a previous message
 
-When the chat composer is empty, press Esc to prime “backtrack” mode. Press Esc again to open a transcript preview highlighting the last user message; press Esc repeatedly to step to older user messages. Press Enter to confirm and Codex will fork the conversation from that point, trim the visible transcript accordingly, and pre‑fill the composer with the selected user message so you can edit and resubmit it.
+When the chat composer is empty, press Esc to prime “backtrack” mode. Press Esc again to open a transcript preview highlighting the last user message; press Esc repeatedly to step to older user messages. Press Enter to choose how to apply the edit: branch into a new chat or edit in place. Editing in place keeps the current chat and creates editable versions of that message; branching creates a new chat from that point and trims the visible transcript accordingly.
 
-In the transcript preview, the footer shows an `Esc edit prev` hint while editing is active.
+In the transcript preview, the footer shows an `Esc edit/branch prev` hint while editing is active.
 
 #### `--cd`/`-C` flag
 

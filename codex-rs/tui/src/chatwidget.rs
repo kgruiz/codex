@@ -88,6 +88,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tracing::debug;
 
+use crate::app_backtrack::BacktrackAction;
 use crate::app_event::AppEvent;
 use crate::app_event::ChatExportFormat;
 use crate::app_event_sender::AppEventSender;
@@ -452,12 +453,19 @@ struct UserMessage {
     image_paths: Vec<PathBuf>,
 }
 
+#[derive(Clone, Debug)]
 struct QueuedUserMessage {
     id: u64,
     text: String,
     attachments: Vec<ComposerAttachment>,
     model_override: Option<String>,
     effort_override: Option<Option<ReasoningEffortConfig>>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct QueueSnapshot {
+    messages: VecDeque<QueuedUserMessage>,
+    next_id: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -3919,6 +3927,25 @@ impl ChatWidget {
         self.bottom_pane.set_queued_user_messages(messages);
     }
 
+    pub(crate) fn queue_snapshot(&self) -> Option<QueueSnapshot> {
+        if self.queued_user_messages.is_empty() {
+            return None;
+        }
+
+        Some(QueueSnapshot {
+            messages: self.queued_user_messages.clone(),
+            next_id: self.next_queued_user_message_id,
+        })
+    }
+
+    pub(crate) fn apply_queue_snapshot(&mut self, snapshot: QueueSnapshot) {
+        self.queued_user_messages = snapshot.messages;
+        self.next_queued_user_message_id = snapshot.next_id;
+        self.queued_edit_state = None;
+        self.queued_auto_send_pending = false;
+        self.refresh_queued_user_messages();
+    }
+
     pub(crate) fn add_diff_in_progress(&mut self) {
         self.request_redraw();
     }
@@ -5242,6 +5269,43 @@ impl ChatWidget {
 
         self.bottom_pane.show_selection_view(SelectionViewParams {
             title: Some("Select a review preset".into()),
+            footer_hint: Some(standard_popup_hint_line()),
+            items,
+            ..Default::default()
+        });
+    }
+
+    pub(crate) fn open_backtrack_action_picker(&mut self) {
+        let mut items: Vec<SelectionItem> = Vec::new();
+
+        items.push(SelectionItem {
+            name: "Edit in place".to_string(),
+            description: Some("Keep this chat and add edit versions.".into()),
+            actions: vec![Box::new(|tx| {
+                tx.send(AppEvent::BacktrackActionSelected {
+                    action: BacktrackAction::EditInPlace,
+                });
+            })],
+            dismiss_on_select: true,
+            is_default: true,
+            ..Default::default()
+        });
+
+        items.push(SelectionItem {
+            name: "Branch to new chat".to_string(),
+            description: Some("Start a new chat from this message.".into()),
+            actions: vec![Box::new(|tx| {
+                tx.send(AppEvent::BacktrackActionSelected {
+                    action: BacktrackAction::Branch,
+                });
+            })],
+            dismiss_on_select: true,
+            ..Default::default()
+        });
+
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some("Edit previous message".into()),
+            subtitle: Some("Choose how to apply the edit.".into()),
             footer_hint: Some(standard_popup_hint_line()),
             items,
             ..Default::default()

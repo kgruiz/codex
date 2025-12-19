@@ -480,9 +480,9 @@ impl TranscriptOverlay {
         render_key_hints(line1, buf, PAGER_KEY_HINTS);
 
         let mut pairs: Vec<(&[KeyBinding], &str)> =
-            vec![(&[KEY_Q], "to quit"), (&[KEY_ESC], "to edit prev")];
+            vec![(&[KEY_Q], "to quit"), (&[KEY_ESC], "to edit/branch prev")];
         if self.highlight_cell.is_some() {
-            pairs.push((&[KEY_ENTER], "to edit message"));
+            pairs.push((&[KEY_ENTER], "to choose edit action"));
         }
         render_key_hints(line2, buf, &pairs);
     }
@@ -671,8 +671,8 @@ mod tests {
             s.push('\n');
         }
         assert!(
-            s.contains("edit prev"),
-            "expected 'edit prev' hint in overlay footer, got: {s:?}"
+            s.contains("edit/branch prev"),
+            "expected 'edit/branch prev' hint in overlay footer, got: {s:?}"
         );
     }
 
