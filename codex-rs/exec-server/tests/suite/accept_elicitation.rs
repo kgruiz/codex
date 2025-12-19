@@ -12,6 +12,7 @@ use codex_exec_server::ExecResult;
 use exec_server_test_support::InteractiveClient;
 use exec_server_test_support::create_transport;
 use exec_server_test_support::notify_readable_sandbox;
+use exec_server_test_support::shared_dotslash_cache;
 use exec_server_test_support::write_default_execpolicy;
 use maplit::hashset;
 use pretty_assertions::assert_eq;
@@ -24,7 +25,6 @@ use serde_json::json;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::fs::symlink;
 use tempfile::TempDir;
-use tokio::process::Command;
 
 /// Verify that when using a read-only sandbox and an execpolicy that prompts,
 /// the proper elicitation is sent. Upon auto-approving the elicitation, the
@@ -48,9 +48,8 @@ prefix_rule(
         codex_home.as_ref(),
     )
     .await?;
-    let dotslash_cache_temp_dir = TempDir::new()?;
-    let dotslash_cache = dotslash_cache_temp_dir.path();
-    let transport = create_transport(codex_home.as_ref(), dotslash_cache).await?;
+    let dotslash_cache = shared_dotslash_cache();
+    let transport = create_transport(codex_home.as_ref(), &dotslash_cache).await?;
 
     // Create an MCP client that approves expected elicitation messages.
     let project_root = TempDir::new()?;
@@ -178,21 +177,17 @@ fn ensure_codex_cli() -> Result<PathBuf> {
 }
 
 async fn resolve_git_path() -> Result<String> {
-    let git = Command::new("bash")
-        .arg("-lc")
-        .arg("command -v git")
-        .output()
-        .await
-        .context("failed to resolve git via login shell")?;
-    ensure!(
-        git.status.success(),
-        "failed to resolve git via login shell: {}",
-        String::from_utf8_lossy(&git.stderr)
-    );
-    let git_path = String::from_utf8(git.stdout)
-        .context("git path was not valid utf8")?
-        .trim()
-        .to_string();
-    ensure!(!git_path.is_empty(), "git path should not be empty");
-    Ok(git_path)
+    let path_var = std::env::var_os("PATH").context("PATH env var not set")?;
+
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join("git");
+
+        if let Ok(metadata) = candidate.metadata() {
+            if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0 {
+                return Ok(candidate.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    anyhow::bail!("git not found in PATH");
 }

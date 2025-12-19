@@ -4,7 +4,7 @@ use std::fs;
 use std::sync::Arc;
 
 use anyhow::Result;
-use exec_server_test_support::create_transport;
+use exec_server_test_support::create_transport_without_dotslash_fetch;
 use pretty_assertions::assert_eq;
 use rmcp::ServiceExt;
 use rmcp::model::Tool;
@@ -24,7 +24,8 @@ async fn list_tools() -> Result<()> {
     )?;
     let dotslash_cache_temp_dir = TempDir::new()?;
     let dotslash_cache = dotslash_cache_temp_dir.path();
-    let transport = create_transport(codex_home.path(), dotslash_cache).await?;
+    let transport =
+        create_transport_without_dotslash_fetch(codex_home.path(), dotslash_cache).await?;
 
     let service = ().serve(transport).await?;
     let tools = service.list_tools(Default::default()).await?.tools;
