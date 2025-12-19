@@ -182,10 +182,11 @@ async fn resolve_git_path() -> Result<String> {
     for dir in std::env::split_paths(&path_var) {
         let candidate = dir.join("git");
 
-        if let Ok(metadata) = candidate.metadata() {
-            if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0 {
-                return Ok(candidate.to_string_lossy().to_string());
-            }
+        if let Ok(metadata) = candidate.metadata()
+            && metadata.is_file()
+            && metadata.permissions().mode() & 0o111 != 0
+        {
+            return Ok(candidate.to_string_lossy().to_string());
         }
     }
 

@@ -280,17 +280,15 @@ impl UnifiedExecSessionManager {
         // appropriate process_id and exit_code.
         let mut status = self.refresh_session_state(process_id.as_str()).await;
 
-        if let SessionStatus::Alive { .. } = status {
-            if request.input.is_empty() {
-                let cancelled = tokio::time::timeout(
-                    Duration::from_millis(250),
-                    cancellation_token.cancelled(),
-                )
-                .await;
+        if let SessionStatus::Alive { .. } = status
+            && request.input.is_empty()
+        {
+            let cancelled =
+                tokio::time::timeout(Duration::from_millis(250), cancellation_token.cancelled())
+                    .await;
 
-                if cancelled.is_ok() {
-                    status = self.refresh_session_state(process_id.as_str()).await;
-                }
+            if cancelled.is_ok() {
+                status = self.refresh_session_state(process_id.as_str()).await;
             }
         }
 
