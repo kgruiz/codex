@@ -2368,7 +2368,7 @@ fn reasoning_selection_dismisses_model_popup() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1"));
     chat.open_model_popup();
 
-    let preset = get_available_model(&chat, "gpt-5.1-codex");
+    let preset = get_available_model(&chat, "gpt-5.1-codex-max");
     chat.open_reasoning_popup(preset);
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
