@@ -2080,8 +2080,14 @@ impl ChatWidget {
                 return;
             }
             KeyEvent {
-                code: KeyCode::Enter,
-                modifiers: KeyModifiers::ALT,
+                code: KeyCode::Char('y' | 'Y'),
+                modifiers: KeyModifiers::CONTROL,
+                kind: KeyEventKind::Press,
+                ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('\u{0019}'),
+                modifiers: KeyModifiers::NONE,
                 kind: KeyEventKind::Press,
                 ..
             } if !self.bottom_pane.has_active_view()

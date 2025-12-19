@@ -55,7 +55,7 @@ impl QueuedUserMessages {
 
         if self.show_send_next_hint {
             hint.push(" · ".into());
-            hint.push(key_hint::alt(KeyCode::Enter).into());
+            hint.push(key_hint::ctrl(KeyCode::Char('y')).into());
             hint.push(" send next".into());
         }
 

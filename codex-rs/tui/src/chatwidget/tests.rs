@@ -1045,7 +1045,7 @@ fn alt_up_edits_most_recent_queued_message() {
 }
 
 #[test]
-fn alt_enter_sends_next_queued_message_when_idle() {
+fn ctrl_y_sends_next_queued_message_when_idle() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(None);
 
     chat.queued_user_messages.push_back(QueuedUserMessage {
@@ -1064,7 +1064,7 @@ fn alt_enter_sends_next_queued_message_when_idle() {
     });
     chat.refresh_queued_user_messages();
 
-    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT));
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL));
 
     assert_matches!(op_rx.try_recv(), Ok(Op::UserInput { .. }));
     assert_eq!(chat.queued_user_messages.len(), 1);
