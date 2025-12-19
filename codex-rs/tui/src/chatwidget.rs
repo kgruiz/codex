@@ -5,6 +5,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use codex_app_server_protocol::AuthMode;
 use codex_backend_client::Client as BackendClient;
@@ -103,6 +104,7 @@ use crate::bottom_pane::QueuePopupItem;
 use crate::bottom_pane::SelectionAction;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
+use crate::bottom_pane::StatusLineMetrics;
 use crate::bottom_pane::ViewCompletionBehavior;
 use crate::bottom_pane::custom_prompt_view::CustomPromptView;
 use crate::bottom_pane::popup_consts::standard_popup_hint_line;
@@ -166,6 +168,61 @@ struct RunningCommand {
     command: Vec<String>,
     parsed_cmd: Vec<ParsedCommand>,
     source: ExecCommandSource,
+}
+
+#[derive(Clone, Debug, Default)]
+struct TurnMetrics {
+    started_at: Option<Instant>,
+    first_response_at: Option<Instant>,
+    tool_time: Duration,
+    last_turn_duration: Option<Duration>,
+    last_token_usage: Option<TokenUsage>,
+}
+
+impl TurnMetrics {
+    fn reset(&mut self, now: Instant) {
+        self.started_at = Some(now);
+        self.first_response_at = None;
+        self.tool_time = Duration::ZERO;
+        self.last_turn_duration = None;
+    }
+
+    fn record_first_response(&mut self, now: Instant) -> Option<Duration> {
+        let start = self.started_at?;
+        if self.first_response_at.is_some() {
+            return None;
+        }
+        self.first_response_at = Some(now);
+        Some(now.saturating_duration_since(start))
+    }
+
+    fn finish(&mut self, now: Instant) {
+        if let Some(start) = self.started_at {
+            self.last_turn_duration = Some(now.saturating_duration_since(start));
+        }
+        self.started_at = None;
+    }
+
+    fn tokens_per_sec(&self, now: Instant) -> Option<f64> {
+        let usage = self.last_token_usage.as_ref()?;
+        let output_tokens = usage
+            .output_tokens
+            .saturating_add(usage.reasoning_output_tokens);
+        if output_tokens <= 0 {
+            return None;
+        }
+        let duration = if let Some(duration) = self.last_turn_duration {
+            duration
+        } else {
+            let start = self.started_at?;
+            now.saturating_duration_since(start)
+        };
+        let seconds = duration.as_secs_f64();
+        if seconds <= 0.0 {
+            return None;
+        }
+        Some(output_tokens as f64 / seconds)
+    }
 }
 
 struct UnifiedExecSessionSummary {
@@ -356,6 +413,8 @@ pub(crate) struct ChatWidget {
     current_status_header: String,
     // Previous status header to restore after a transient stream retry.
     retry_status_header: Option<String>,
+    status_line_metrics: StatusLineMetrics,
+    turn_metrics: TurnMetrics,
     conversation_id: Option<ConversationId>,
     frame_requester: FrameRequester,
     // Whether to include the initial welcome banner on session configured
@@ -455,6 +514,13 @@ fn create_initial_user_message(text: String, image_paths: Vec<PathBuf>) -> Optio
 }
 
 impl ChatWidget {
+    fn refresh_status_line_git_branch(app_event_tx: AppEventSender, cwd: PathBuf) {
+        tokio::spawn(async move {
+            let branch = current_branch_name(&cwd).await;
+            app_event_tx.send(AppEvent::UpdateStatusLineGitBranch { branch });
+        });
+    }
+
     fn session_turn_context(&self) -> PendingTurnContext {
         PendingTurnContext {
             model: self
@@ -485,6 +551,35 @@ impl ChatWidget {
     fn set_status_header(&mut self, header: String) {
         self.current_status_header = header.clone();
         self.bottom_pane.update_status_header(header);
+    }
+
+    fn sync_status_line_metrics(&mut self) {
+        self.bottom_pane
+            .set_status_line_metrics(self.status_line_metrics.clone());
+    }
+
+    fn reset_turn_metrics(&mut self) {
+        self.turn_metrics.reset(Instant::now());
+        self.status_line_metrics = StatusLineMetrics::default();
+        self.sync_status_line_metrics();
+    }
+
+    fn record_first_response(&mut self) {
+        if let Some(latency) = self.turn_metrics.record_first_response(Instant::now()) {
+            self.status_line_metrics.latency = Some(latency);
+            self.sync_status_line_metrics();
+        }
+    }
+
+    fn record_tool_time(&mut self, duration: Duration) {
+        self.turn_metrics.tool_time += duration;
+        self.status_line_metrics.tool_time = Some(self.turn_metrics.tool_time);
+        self.sync_status_line_metrics();
+    }
+
+    fn refresh_tokens_per_sec(&mut self) {
+        self.status_line_metrics.tokens_per_sec = self.turn_metrics.tokens_per_sec(Instant::now());
+        self.sync_status_line_metrics();
     }
 
     fn restore_retry_status_header_if_present(&mut self) {
@@ -747,6 +842,7 @@ impl ChatWidget {
         // For reasoning deltas, do not stream to history. Accumulate the
         // current reasoning block and extract the first bold element
         // (between **/**) as the chunk header. Show this header as status.
+        self.record_first_response();
         self.reasoning_buffer.push_str(&delta);
 
         if self.stream_paused {
@@ -799,6 +895,7 @@ impl ChatWidget {
     fn on_task_started(&mut self) {
         self.bottom_pane.clear_ctrl_c_quit_hint();
         self.bottom_pane.set_task_running(true);
+        self.reset_turn_metrics();
         let mut active = self
             .pending_active_turn_context
             .take()
@@ -824,6 +921,8 @@ impl ChatWidget {
     fn on_task_complete(&mut self, last_agent_message: Option<String>) {
         // If a stream is currently active, finalize it.
         self.flush_answer_stream_with_separator();
+        self.turn_metrics.finish(Instant::now());
+        self.refresh_tokens_per_sec();
         // Mark task stopped and request redraw now that all content is in history.
         self.bottom_pane.set_task_running(false);
         self.bottom_pane.set_active_model(None);
@@ -861,7 +960,9 @@ impl ChatWidget {
         let percent = self.context_remaining_percent(&info);
         let used_tokens = self.context_used_tokens(&info, percent.is_some());
         self.bottom_pane.set_context_window(percent, used_tokens);
+        self.turn_metrics.last_token_usage = Some(info.last_token_usage.clone());
         self.token_info = Some(info);
+        self.refresh_tokens_per_sec();
     }
 
     fn context_remaining_percent(&self, info: &TokenUsageInfo) -> Option<i64> {
@@ -1360,6 +1461,7 @@ impl ChatWidget {
 
     #[inline]
     fn handle_streaming_delta(&mut self, delta: String) {
+        self.record_first_response();
         if self.stream_paused {
             self.paused_agent_deltas.push_str(&delta);
             return;
@@ -1400,6 +1502,16 @@ impl ChatWidget {
         };
         let is_unified_exec_interaction =
             matches!(source, ExecCommandSource::UnifiedExecInteraction);
+        if self.bottom_pane.is_task_running()
+            && matches!(
+                source,
+                ExecCommandSource::Agent
+                    | ExecCommandSource::UnifiedExecStartup
+                    | ExecCommandSource::UnifiedExecInteraction
+            )
+        {
+            self.record_tool_time(ev.duration);
+        }
 
         let needs_new = self
             .active_cell
@@ -1591,6 +1703,10 @@ impl ChatWidget {
             result,
         } = ev;
 
+        if self.bottom_pane.is_task_running() {
+            self.record_tool_time(duration);
+        }
+
         let extra_cell = match self
             .active_cell
             .as_mut()
@@ -1663,6 +1779,8 @@ impl ChatWidget {
                 animations_enabled: config.animations,
                 skills: None,
                 keybindings: keybindings.clone(),
+                status_line_items: config.status_line_items.clone(),
+                status_line_cwd: config.cwd.clone(),
             }),
             active_cell: None,
             config,
@@ -1698,6 +1816,8 @@ impl ChatWidget {
             full_reasoning_buffer: String::new(),
             current_status_header: String::from("Working"),
             retry_status_header: None,
+            status_line_metrics: StatusLineMetrics::default(),
+            turn_metrics: TurnMetrics::default(),
             conversation_id: None,
             queued_user_messages: VecDeque::new(),
             next_queued_user_message_id: 1,
@@ -1722,6 +1842,10 @@ impl ChatWidget {
         widget
             .bottom_pane
             .set_session_reasoning_effort(widget.effective_reasoning_effort());
+        Self::refresh_status_line_git_branch(
+            widget.app_event_tx.clone(),
+            widget.config.cwd.clone(),
+        );
         widget
     }
 
@@ -1773,6 +1897,8 @@ impl ChatWidget {
                 animations_enabled: config.animations,
                 skills: None,
                 keybindings: keybindings.clone(),
+                status_line_items: config.status_line_items.clone(),
+                status_line_cwd: config.cwd.clone(),
             }),
             active_cell: None,
             config,
@@ -1808,6 +1934,8 @@ impl ChatWidget {
             full_reasoning_buffer: String::new(),
             current_status_header: String::from("Working"),
             retry_status_header: None,
+            status_line_metrics: StatusLineMetrics::default(),
+            turn_metrics: TurnMetrics::default(),
             conversation_id: None,
             queued_user_messages: VecDeque::new(),
             next_queued_user_message_id: 1,
@@ -1832,6 +1960,10 @@ impl ChatWidget {
         widget
             .bottom_pane
             .set_session_reasoning_effort(widget.effective_reasoning_effort());
+        Self::refresh_status_line_git_branch(
+            widget.app_event_tx.clone(),
+            widget.config.cwd.clone(),
+        );
         widget
     }
 
@@ -4934,6 +5066,10 @@ impl ChatWidget {
             .set_session_reasoning_effort(self.effective_reasoning_effort());
 
         self.request_redraw();
+    }
+
+    pub(crate) fn set_status_line_git_branch(&mut self, branch: Option<String>) {
+        self.bottom_pane.set_status_line_git_branch(branch);
     }
 
     pub(crate) fn add_info_message(&mut self, message: String, hint: Option<String>) {

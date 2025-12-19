@@ -1,0 +1,5 @@
+---
+source: tui/src/bottom_pane/footer.rs
+expression: terminal.backend()
+---
+"  12.3 tok/s · latency 450ms · tool 2.00s · cost $0.0042                        "

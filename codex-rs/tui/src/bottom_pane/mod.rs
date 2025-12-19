@@ -70,8 +70,10 @@ pub(crate) use queue_popup::QueuePopup;
 pub(crate) use queue_popup::QueuePopupItem;
 
 use crate::status_indicator_widget::StatusIndicatorWidget;
+use codex_core::config::StatusLineItem;
 pub(crate) use experimental_features_view::BetaFeatureItem;
 pub(crate) use experimental_features_view::ExperimentalFeaturesView;
+pub(crate) use footer::StatusLineMetrics;
 pub(crate) use list_selection_view::SelectionAction;
 pub(crate) use list_selection_view::SelectionItem;
 
@@ -113,6 +115,8 @@ pub(crate) struct BottomPaneParams {
     pub(crate) animations_enabled: bool,
     pub(crate) skills: Option<Vec<SkillMetadata>>,
     pub(crate) keybindings: crate::keybindings::Keybindings,
+    pub(crate) status_line_items: Vec<StatusLineItem>,
+    pub(crate) status_line_cwd: PathBuf,
 }
 
 impl BottomPane {
@@ -127,6 +131,8 @@ impl BottomPane {
             animations_enabled,
             skills,
             keybindings,
+            status_line_items,
+            status_line_cwd,
         } = params;
         let mut composer = ChatComposer::new(
             has_input_focus,
@@ -137,6 +143,8 @@ impl BottomPane {
             keybindings,
         );
         composer.set_skill_mentions(skills);
+        composer.set_status_line_items(status_line_items);
+        composer.set_status_line_cwd(Some(status_line_cwd));
 
         Self {
             composer,
@@ -347,6 +355,16 @@ impl BottomPane {
         items: Option<Vec<(String, String)>>,
     ) {
         self.composer.set_footer_hint_override(items);
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_status_line_git_branch(&mut self, branch: Option<String>) {
+        self.composer.set_status_line_git_branch(branch);
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_status_line_metrics(&mut self, metrics: StatusLineMetrics) {
+        self.composer.set_status_line_metrics(metrics);
         self.request_redraw();
     }
 
@@ -763,10 +781,12 @@ impl Renderable for BottomPane {
 mod tests {
     use super::*;
     use crate::app_event::AppEvent;
+    use codex_core::config::StatusLineItem;
     use insta::assert_snapshot;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
     use std::collections::HashMap;
+    use std::path::PathBuf;
     use tokio::sync::mpsc::unbounded_channel;
 
     fn default_keybindings(enhanced_keys_supported: bool) -> crate::keybindings::Keybindings {
@@ -775,6 +795,21 @@ mod tests {
             enhanced_keys_supported,
             false,
         )
+    }
+
+    fn default_status_line_items() -> Vec<StatusLineItem> {
+        vec![
+            StatusLineItem::Model,
+            StatusLineItem::Context,
+            StatusLineItem::TokensPerSec,
+            StatusLineItem::Latency,
+            StatusLineItem::ToolTime,
+            StatusLineItem::Cost,
+        ]
+    }
+
+    fn default_status_line_cwd() -> PathBuf {
+        PathBuf::from("/test")
     }
 
     fn snapshot_buffer(buf: &Buffer) -> String {
@@ -819,6 +854,8 @@ mod tests {
             animations_enabled: true,
             skills: Some(Vec::new()),
             keybindings: default_keybindings(false),
+            status_line_items: default_status_line_items(),
+            status_line_cwd: default_status_line_cwd(),
         });
         pane.push_approval_request(exec_request(), &features);
         assert_eq!(CancellationEvent::Handled, pane.on_ctrl_c());
@@ -843,6 +880,8 @@ mod tests {
             animations_enabled: true,
             skills: Some(Vec::new()),
             keybindings: default_keybindings(false),
+            status_line_items: default_status_line_items(),
+            status_line_cwd: default_status_line_cwd(),
         });
 
         // Create an approval modal (active view).
@@ -878,6 +917,8 @@ mod tests {
             animations_enabled: true,
             skills: Some(Vec::new()),
             keybindings: default_keybindings(false),
+            status_line_items: default_status_line_items(),
+            status_line_cwd: default_status_line_cwd(),
         });
 
         // Start a running task so the status indicator is active above the composer.
@@ -946,6 +987,8 @@ mod tests {
             animations_enabled: true,
             skills: Some(Vec::new()),
             keybindings: default_keybindings(false),
+            status_line_items: default_status_line_items(),
+            status_line_cwd: default_status_line_cwd(),
         });
 
         // Begin a task: show initial status.
@@ -974,6 +1017,8 @@ mod tests {
             animations_enabled: true,
             skills: Some(Vec::new()),
             keybindings: default_keybindings(false),
+            status_line_items: default_status_line_items(),
+            status_line_cwd: default_status_line_cwd(),
         });
 
         // Activate spinner (status view replaces composer) with no live ring.
@@ -1006,6 +1051,8 @@ mod tests {
             animations_enabled: true,
             skills: Some(Vec::new()),
             keybindings: default_keybindings(false),
+            status_line_items: default_status_line_items(),
+            status_line_cwd: default_status_line_cwd(),
         });
 
         pane.set_task_running(true);
@@ -1035,6 +1082,8 @@ mod tests {
             animations_enabled: true,
             skills: Some(Vec::new()),
             keybindings: default_keybindings(false),
+            status_line_items: default_status_line_items(),
+            status_line_cwd: default_status_line_cwd(),
         });
 
         pane.set_task_running(true);

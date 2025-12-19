@@ -380,6 +380,24 @@ pub struct Tui {
     /// Defaults to `true`.
     #[serde(default = "default_true")]
     pub show_tooltips: bool,
+
+    /// Ordered list of status line items to render in the TUI footer.
+    /// When unset, Codex uses the default list.
+    #[serde(default)]
+    pub status_line: Option<Vec<StatusLineItem>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum StatusLineItem {
+    Model,
+    Context,
+    Cwd,
+    GitBranch,
+    TokensPerSec,
+    Latency,
+    ToolTime,
+    Cost,
 }
 
 const fn default_true() -> bool {

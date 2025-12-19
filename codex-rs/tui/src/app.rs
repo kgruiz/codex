@@ -861,6 +861,9 @@ impl App {
                 self.chat_widget.set_model(&model, model_family);
                 self.current_model = model;
             }
+            AppEvent::UpdateStatusLineGitBranch { branch } => {
+                self.chat_widget.set_status_line_git_branch(branch);
+            }
             AppEvent::OpenReasoningPopup { model } => {
                 self.chat_widget.open_reasoning_popup(model);
             }

@@ -398,6 +398,8 @@ fn make_chatwidget_manual(
         animations_enabled: cfg.animations,
         skills: None,
         keybindings: keybindings.clone(),
+        status_line_items: cfg.status_line_items.clone(),
+        status_line_cwd: cfg.cwd.clone(),
     });
     let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("test"));
     let widget = ChatWidget {
@@ -435,6 +437,8 @@ fn make_chatwidget_manual(
         full_reasoning_buffer: String::new(),
         current_status_header: String::from("Working"),
         retry_status_header: None,
+        status_line_metrics: StatusLineMetrics::default(),
+        turn_metrics: TurnMetrics::default(),
         conversation_id: None,
         frame_requester: FrameRequester::test_dummy(),
         show_welcome_banner: true,

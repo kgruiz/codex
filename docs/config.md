@@ -884,7 +884,13 @@ notifications = [ "agent-turn-complete", "approval-requested" ]
 # Disable terminal animations (welcome screen, status shimmer, spinner).
 # Defaults to true.
 animations = false
+
+# Configure the status line segments shown in the TUI footer.
+# Defaults to: ["model", "context", "tokens-per-sec", "latency", "tool-time", "cost"]
+status_line = ["model", "context", "tokens-per-sec", "latency", "tool-time", "cost"]
 ```
+
+Status line values are `model`, `context`, `cwd`, `git-branch`, `tokens-per-sec`, `latency`, `tool-time`, and `cost`.
 
 > [!NOTE]
 > Codex emits desktop notifications using terminal escape codes. Not all terminals support these (notably, macOS Terminal.app and VS Code's terminal do not support custom notifications. iTerm2, Ghostty and WezTerm do support these notifications).
@@ -1045,6 +1051,7 @@ Valid values:
 | `file_opener`                                    | `vscode` \| `vscode-insiders` \| `windsurf` \| `cursor` \| `none` | URI scheme for clickable citations (default: `vscode`).                                                                         |
 | `tui`                                            | table                                                             | TUI‑specific options.                                                                                                           |
 | `tui.notifications`                              | boolean \| array<string>                                          | Enable desktop notifications in the tui (default: true).                                                                        |
+| `tui.status_line`                                | array<string>                                                     | Ordered status line segments in the footer (default: model, context, tokens-per-sec, latency, tool-time, cost).                  |
 | `keybindings`                                    | table<string,string \| array<string>>                             | Customize common TUI shortcuts (see `keybindings`).                                                                             |
 | `hide_agent_reasoning`                           | boolean                                                           | Hide model reasoning events.                                                                                                    |
 | `check_for_update_on_startup`                    | boolean                                                           | Check for Codex updates on startup (default: true). Set to `false` only if updates are centrally managed.                       |

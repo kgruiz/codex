@@ -14,7 +14,10 @@ Add new items below as you think of them.
    - Show the active model/thinking setting in the status bar so it is obvious what will be used on submit.
 6. [ ] Syntax highlighting (code blocks)
 7. [x] Rename chats
-8. [ ] Show tokens/sec (and other live stats like latency, cost, tool time)
+8. [x] Customizable status line + live stats (tokens/sec, latency, cost, tool time) (<https://github.com/openai/codex/issues/2926>)
+   - Show tokens/sec (and other live stats like latency, cost, tool time).
+   - Show project context like current working directory and git branch in the status line.
+   - Consider making the status line user-configurable (similar to Claude Code).
 9. [x] Support handing off long prompts to external editor via `Ctrl+G`
 10. [ ] Edit last message without branching
 11. [x] Input shortcuts & editor behavior
@@ -45,9 +48,6 @@ Add new items below as you think of them.
     - Support a minimal “prompt + output” startup layout.
 15. [x] `/status` should list global `~/.codex/AGENTS.md` / `$CODEX_HOME/AGENTS.md` (<https://github.com/openai/codex/issues/3793>)
     - `/status` should include the global AGENTS file in the “AGENTS files” list when present (expected vs actual).
-16. [ ] Customizable status line (show cwd, git branch, etc.) (<https://github.com/openai/codex/issues/2926>)
-    - Show project context like current working directory and git branch in the status line.
-    - Consider making the status line user-configurable (similar to Claude Code).
 17. [ ] Add colors/highlighting for emphasis (thinking vs final, headers) (<https://github.com/openai/codex/issues/2711>)
     - Add configurable color settings to distinguish thinking vs final output.
     - Highlight headers/sections like next steps/recommendations for better scanability.

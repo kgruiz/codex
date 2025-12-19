@@ -1,9 +1,12 @@
+use crate::exec_command::relativize_to_home;
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
 use crate::keybindings::Keybindings;
 use crate::render::line_utils::prefix_lines;
 use crate::status::format_tokens_compact;
 use crate::ui_consts::FOOTER_INDENT_COLS;
+use codex_common::elapsed::format_duration;
+use codex_core::config::StatusLineItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
@@ -25,6 +28,18 @@ pub(crate) struct FooterProps<'a> {
     pub(crate) model: &'a str,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
     pub(crate) keybindings: &'a Keybindings,
+    pub(crate) status_line_items: &'a [StatusLineItem],
+    pub(crate) status_line_cwd: Option<&'a std::path::Path>,
+    pub(crate) status_line_git_branch: Option<&'a str>,
+    pub(crate) status_line_metrics: &'a StatusLineMetrics,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct StatusLineMetrics {
+    pub(crate) tokens_per_sec: Option<f64>,
+    pub(crate) latency: Option<std::time::Duration>,
+    pub(crate) tool_time: Option<std::time::Duration>,
+    pub(crate) cost: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -88,17 +103,10 @@ fn footer_lines(props: FooterProps<'_>) -> Vec<Line<'static>> {
             is_task_running: props.is_task_running,
         })],
         FooterMode::ShortcutSummary => {
-            let mut line = status_line_prefix(props.model, props.reasoning_effort);
+            let mut line = status_line_line(props);
             if !line.spans.is_empty() {
                 line.push_span(" · ".dim());
             }
-
-            let mut context = context_window_line(
-                props.context_window_percent,
-                props.context_window_used_tokens,
-            );
-            line.spans.append(&mut context.spans);
-            line.push_span(" · ".dim());
             line.extend(vec![
                 key_hint::plain(KeyCode::Char('?')).into(),
                 " for shortcuts".dim(),
@@ -111,17 +119,7 @@ fn footer_lines(props: FooterProps<'_>) -> Vec<Line<'static>> {
         }),
         FooterMode::EscHint => vec![esc_hint_line(props.esc_backtrack_hint)],
         FooterMode::ContextOnly => {
-            let mut line = status_line_prefix(props.model, props.reasoning_effort);
-            if !line.spans.is_empty() {
-                line.push_span(" · ".dim());
-            }
-
-            let mut context = context_window_line(
-                props.context_window_percent,
-                props.context_window_used_tokens,
-            );
-            line.spans.append(&mut context.spans);
-            vec![line]
+            vec![status_line_line(props)]
         }
     }
 }
@@ -334,14 +332,82 @@ fn context_window_line(percent: Option<i64>, used_tokens: Option<i64>) -> Line<'
     Line::from(vec![Span::from("100% context left").dim()])
 }
 
-fn status_line_prefix(model: &str, effort: Option<ReasoningEffort>) -> Line<'static> {
-    if model.trim().is_empty() {
-        return Line::from("");
+fn status_line_line(props: FooterProps<'_>) -> Line<'static> {
+    let mut line = Line::default();
+    for item in props.status_line_items {
+        let segment = match item {
+            StatusLineItem::Model => {
+                if props.model.trim().is_empty() {
+                    None
+                } else {
+                    let mut seg = Line::default();
+                    push_model_segment(&mut seg, "", props.model, props.reasoning_effort);
+                    (!seg.spans.is_empty()).then_some(seg)
+                }
+            }
+            StatusLineItem::Context => Some(context_window_line(
+                props.context_window_percent,
+                props.context_window_used_tokens,
+            )),
+            StatusLineItem::Cwd => props.status_line_cwd.map(format_cwd_segment),
+            StatusLineItem::GitBranch => props
+                .status_line_git_branch
+                .filter(|branch| !branch.trim().is_empty())
+                .map(|branch| Line::from(vec![Span::from(format!("git {branch}")).dim()])),
+            StatusLineItem::TokensPerSec => props.status_line_metrics.tokens_per_sec.map(|rate| {
+                Line::from(vec![
+                    Span::from(format!("{} tok/s", format_tokens_per_sec(rate))).dim(),
+                ])
+            }),
+            StatusLineItem::Latency => props.status_line_metrics.latency.map(|latency| {
+                Line::from(vec![
+                    Span::from(format!("latency {}", format_duration(latency))).dim(),
+                ])
+            }),
+            StatusLineItem::ToolTime => props.status_line_metrics.tool_time.map(|duration| {
+                Line::from(vec![
+                    Span::from(format!("tool {}", format_duration(duration))).dim(),
+                ])
+            }),
+            StatusLineItem::Cost => props
+                .status_line_metrics
+                .cost
+                .map(|cost| Line::from(vec![Span::from(format!("cost ${cost:.4}")).dim()])),
+        };
+
+        if let Some(mut segment) = segment {
+            if !line.spans.is_empty() {
+                line.push_span(" · ".dim());
+            }
+
+            line.spans.append(&mut segment.spans);
+        }
     }
 
-    let mut line = Line::default();
-    push_model_segment(&mut line, "", model, effort);
     line
+}
+
+fn format_cwd_segment(cwd: &std::path::Path) -> Line<'static> {
+    let display = if let Some(rel) = relativize_to_home(cwd) {
+        if rel.as_os_str().is_empty() {
+            "~".to_string()
+        } else {
+            format!("~{}{}", std::path::MAIN_SEPARATOR, rel.display())
+        }
+    } else {
+        dunce::simplified(cwd).display().to_string()
+    };
+    Line::from(vec![Span::from(format!("cwd {display}")).dim()])
+}
+
+fn format_tokens_per_sec(rate: f64) -> String {
+    if rate < 1.0 {
+        format!("{rate:.2}")
+    } else if rate < 100.0 {
+        format!("{rate:.1}")
+    } else {
+        format!("{rate:.0}")
+    }
 }
 
 fn push_model_segment(
@@ -387,6 +453,7 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use std::collections::HashMap;
+    use std::time::Duration;
 
     fn snapshot_footer(name: &str, props: FooterProps<'_>) {
         let height = footer_height(props).max(1);
@@ -405,6 +472,21 @@ mod tests {
         let empty: HashMap<String, Vec<String>> = HashMap::new();
         let keybindings_default = Keybindings::from_config(&empty, false, false);
         let keybindings_shift = Keybindings::from_config(&empty, true, false);
+        let status_line_context = vec![StatusLineItem::Context];
+        let status_line_model = vec![StatusLineItem::Model, StatusLineItem::Context];
+        let status_line_metrics_items = vec![
+            StatusLineItem::TokensPerSec,
+            StatusLineItem::Latency,
+            StatusLineItem::ToolTime,
+            StatusLineItem::Cost,
+        ];
+        let status_line_metrics_empty = StatusLineMetrics::default();
+        let status_line_metrics_sample = StatusLineMetrics {
+            tokens_per_sec: Some(12.3),
+            latency: Some(Duration::from_millis(450)),
+            tool_time: Some(Duration::from_secs(2)),
+            cost: Some(0.0042),
+        };
 
         snapshot_footer(
             "footer_shortcuts_default",
@@ -417,6 +499,10 @@ mod tests {
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_default,
+                status_line_items: &status_line_context,
+                status_line_cwd: None,
+                status_line_git_branch: None,
+                status_line_metrics: &status_line_metrics_empty,
             },
         );
 
@@ -431,6 +517,10 @@ mod tests {
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_shift,
+                status_line_items: &status_line_context,
+                status_line_cwd: None,
+                status_line_git_branch: None,
+                status_line_metrics: &status_line_metrics_empty,
             },
         );
 
@@ -445,6 +535,10 @@ mod tests {
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_default,
+                status_line_items: &status_line_context,
+                status_line_cwd: None,
+                status_line_git_branch: None,
+                status_line_metrics: &status_line_metrics_empty,
             },
         );
 
@@ -459,6 +553,10 @@ mod tests {
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_default,
+                status_line_items: &status_line_context,
+                status_line_cwd: None,
+                status_line_git_branch: None,
+                status_line_metrics: &status_line_metrics_empty,
             },
         );
 
@@ -473,6 +571,10 @@ mod tests {
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_default,
+                status_line_items: &status_line_context,
+                status_line_cwd: None,
+                status_line_git_branch: None,
+                status_line_metrics: &status_line_metrics_empty,
             },
         );
 
@@ -487,6 +589,10 @@ mod tests {
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_default,
+                status_line_items: &status_line_context,
+                status_line_cwd: None,
+                status_line_git_branch: None,
+                status_line_metrics: &status_line_metrics_empty,
             },
         );
 
@@ -501,6 +607,10 @@ mod tests {
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_default,
+                status_line_items: &status_line_context,
+                status_line_cwd: None,
+                status_line_git_branch: None,
+                status_line_metrics: &status_line_metrics_empty,
             },
         );
 
@@ -515,6 +625,10 @@ mod tests {
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_default,
+                status_line_items: &status_line_context,
+                status_line_cwd: None,
+                status_line_git_branch: None,
+                status_line_metrics: &status_line_metrics_empty,
             },
         );
 
@@ -529,6 +643,28 @@ mod tests {
                 model: "gpt-5.1-codex",
                 reasoning_effort: Some(ReasoningEffort::Medium),
                 keybindings: &keybindings_default,
+                status_line_items: &status_line_model,
+                status_line_cwd: None,
+                status_line_git_branch: None,
+                status_line_metrics: &status_line_metrics_empty,
+            },
+        );
+
+        snapshot_footer(
+            "footer_status_line_metrics",
+            FooterProps {
+                mode: FooterMode::ContextOnly,
+                esc_backtrack_hint: false,
+                is_task_running: false,
+                context_window_percent: None,
+                context_window_used_tokens: None,
+                model: "",
+                reasoning_effort: None,
+                keybindings: &keybindings_default,
+                status_line_items: &status_line_metrics_items,
+                status_line_cwd: None,
+                status_line_git_branch: None,
+                status_line_metrics: &status_line_metrics_sample,
             },
         );
     }

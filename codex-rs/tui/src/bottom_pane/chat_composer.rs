@@ -23,6 +23,7 @@ use super::command_popup::CommandPopup;
 use super::file_search_popup::FileSearchPopup;
 use super::footer::FooterMode;
 use super::footer::FooterProps;
+use super::footer::StatusLineMetrics;
 use super::footer::esc_hint_mode;
 use super::footer::footer_height;
 use super::footer::render_footer;
@@ -46,6 +47,7 @@ use crate::slash_command::built_in_slash_commands;
 use crate::style::user_message_style;
 use crate::text_formatting::truncate_text;
 use codex_common::fuzzy_match::fuzzy_match;
+use codex_core::config::StatusLineItem;
 use codex_protocol::custom_prompts::CustomPrompt;
 use codex_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
 use codex_protocol::openai_models::ReasoningEffort;
@@ -71,6 +73,16 @@ use std::time::Instant;
 /// If the pasted content exceeds this number of characters, replace it with a
 /// placeholder in the UI.
 const LARGE_PASTE_CHAR_THRESHOLD: usize = 1000;
+fn default_status_line_items() -> Vec<StatusLineItem> {
+    vec![
+        StatusLineItem::Model,
+        StatusLineItem::Context,
+        StatusLineItem::TokensPerSec,
+        StatusLineItem::Latency,
+        StatusLineItem::ToolTime,
+        StatusLineItem::Cost,
+    ]
+}
 
 /// Result returned when the user interacts with the text area.
 #[derive(Debug, PartialEq)]
@@ -168,6 +180,10 @@ pub(crate) struct ChatComposer {
     context_window_used_tokens: Option<i64>,
     session_model: String,
     session_reasoning_effort: Option<ReasoningEffort>,
+    status_line_items: Vec<StatusLineItem>,
+    status_line_cwd: Option<PathBuf>,
+    status_line_git_branch: Option<String>,
+    status_line_metrics: StatusLineMetrics,
     skills: Option<Vec<SkillMetadata>>,
     dismissed_skill_popup_token: Option<String>,
     keybindings: Keybindings,
@@ -219,6 +235,10 @@ impl ChatComposer {
             context_window_used_tokens: None,
             session_model: String::new(),
             session_reasoning_effort: None,
+            status_line_items: default_status_line_items(),
+            status_line_cwd: None,
+            status_line_git_branch: None,
+            status_line_metrics: StatusLineMetrics::default(),
             skills: None,
             dismissed_skill_popup_token: None,
             keybindings,
@@ -348,6 +368,22 @@ impl ChatComposer {
     pub(crate) fn set_commands_enabled(&mut self, enabled: bool) {
         self.commands_enabled = enabled;
         self.sync_popups();
+    }
+
+    pub(crate) fn set_status_line_items(&mut self, items: Vec<StatusLineItem>) {
+        self.status_line_items = items;
+    }
+
+    pub(crate) fn set_status_line_cwd(&mut self, cwd: Option<PathBuf>) {
+        self.status_line_cwd = cwd;
+    }
+
+    pub(crate) fn set_status_line_git_branch(&mut self, branch: Option<String>) {
+        self.status_line_git_branch = branch;
+    }
+
+    pub(crate) fn set_status_line_metrics(&mut self, metrics: StatusLineMetrics) {
+        self.status_line_metrics = metrics;
     }
 
     /// Override the footer hint items displayed beneath the composer. Passing
@@ -2117,6 +2153,10 @@ impl ChatComposer {
             model: &self.session_model,
             reasoning_effort: self.session_reasoning_effort,
             keybindings: &self.keybindings,
+            status_line_items: &self.status_line_items,
+            status_line_cwd: self.status_line_cwd.as_deref(),
+            status_line_git_branch: self.status_line_git_branch.as_deref(),
+            status_line_metrics: &self.status_line_metrics,
         }
     }
 

@@ -66,6 +66,7 @@ pub use constraint::ConstraintResult;
 
 pub use service::ConfigService;
 pub use service::ConfigServiceError;
+pub use types::StatusLineItem;
 
 const OPENAI_DEFAULT_REVIEW_MODEL: &str = "gpt-5.1-codex-max";
 
@@ -177,6 +178,9 @@ pub struct Config {
 
     /// Show startup tooltips in the TUI welcome screen.
     pub show_tooltips: bool,
+
+    /// Ordered list of status line items to render in the TUI footer.
+    pub status_line_items: Vec<StatusLineItem>,
 
     /// Keybinding overrides loaded from `[keybindings]` in `config.toml`.
     pub keybindings: HashMap<String, Vec<String>>,
@@ -1335,6 +1339,11 @@ impl Config {
                 .unwrap_or_default(),
             animations: cfg.tui.as_ref().map(|t| t.animations).unwrap_or(true),
             show_tooltips: cfg.tui.as_ref().map(|t| t.show_tooltips).unwrap_or(true),
+            status_line_items: cfg
+                .tui
+                .as_ref()
+                .and_then(|t| t.status_line.clone())
+                .unwrap_or_else(Self::default_status_line_items),
             keybindings: cfg
                 .keybindings
                 .into_iter()
@@ -1372,6 +1381,17 @@ impl Config {
             }
         }
         None
+    }
+
+    fn default_status_line_items() -> Vec<StatusLineItem> {
+        vec![
+            StatusLineItem::Model,
+            StatusLineItem::Context,
+            StatusLineItem::TokensPerSec,
+            StatusLineItem::Latency,
+            StatusLineItem::ToolTime,
+            StatusLineItem::Cost,
+        ]
     }
 
     /// If `path` is `Some`, attempts to read the file at the given path and
@@ -3107,6 +3127,7 @@ model_verbosity = "high"
                 tui_notifications: Default::default(),
                 animations: true,
                 show_tooltips: true,
+                status_line_items: Config::default_status_line_items(),
                 keybindings: HashMap::new(),
                 otel: OtelConfig::default(),
             },
@@ -3183,6 +3204,7 @@ model_verbosity = "high"
             tui_notifications: Default::default(),
             animations: true,
             show_tooltips: true,
+            status_line_items: Config::default_status_line_items(),
             keybindings: HashMap::new(),
             otel: OtelConfig::default(),
         };
@@ -3274,6 +3296,7 @@ model_verbosity = "high"
             tui_notifications: Default::default(),
             animations: true,
             show_tooltips: true,
+            status_line_items: Config::default_status_line_items(),
             keybindings: HashMap::new(),
             otel: OtelConfig::default(),
         };
@@ -3351,6 +3374,7 @@ model_verbosity = "high"
             tui_notifications: Default::default(),
             animations: true,
             show_tooltips: true,
+            status_line_items: Config::default_status_line_items(),
             keybindings: HashMap::new(),
             otel: OtelConfig::default(),
         };

@@ -142,6 +142,10 @@ notifications = false
 # Enables welcome/status/spinner animations. Default: true
 animations = true
 
+# Configure the status line segments shown in the TUI footer.
+# Default: ["model", "context", "tokens-per-sec", "latency", "tool-time", "cost"]
+status_line = ["model", "context", "tokens-per-sec", "latency", "tool-time", "cost"]
+
 # Suppress internal reasoning events from output. Default: false
 hide_agent_reasoning = false
 
