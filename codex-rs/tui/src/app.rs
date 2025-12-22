@@ -1402,7 +1402,37 @@ impl App {
                 self.chat_widget.handle_key_event(key_event);
             }
             KeyEvent {
+                code: KeyCode::Char('b'),
+                modifiers: crossterm::event::KeyModifiers::ALT,
+                kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                ..
+            } => {
+                if self.chat_widget.is_normal_backtrack_mode()
+                    && self.chat_widget.composer_is_empty()
+                    && self.switch_edit_version(tui, -1).await
+                {
+                    return;
+                }
+
+                self.chat_widget.handle_key_event(key_event);
+            }
+            KeyEvent {
                 code: KeyCode::Right,
+                modifiers: crossterm::event::KeyModifiers::ALT,
+                kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                ..
+            } => {
+                if self.chat_widget.is_normal_backtrack_mode()
+                    && self.chat_widget.composer_is_empty()
+                    && self.switch_edit_version(tui, 1).await
+                {
+                    return;
+                }
+
+                self.chat_widget.handle_key_event(key_event);
+            }
+            KeyEvent {
+                code: KeyCode::Char('f'),
                 modifiers: crossterm::event::KeyModifiers::ALT,
                 kind: KeyEventKind::Press | KeyEventKind::Repeat,
                 ..
