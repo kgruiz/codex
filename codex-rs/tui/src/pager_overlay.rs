@@ -80,6 +80,7 @@ const KEY_CTRL_B: KeyBinding = key_hint::ctrl(KeyCode::Char('b'));
 const KEY_CTRL_U: KeyBinding = key_hint::ctrl(KeyCode::Char('u'));
 const KEY_Q: KeyBinding = key_hint::plain(KeyCode::Char('q'));
 const KEY_ESC: KeyBinding = key_hint::plain(KeyCode::Esc);
+const KEY_SHIFT_ESC: KeyBinding = key_hint::shift(KeyCode::Esc);
 const KEY_ENTER: KeyBinding = key_hint::plain(KeyCode::Enter);
 const KEY_CTRL_T: KeyBinding = key_hint::ctrl(KeyCode::Char('t'));
 const KEY_CTRL_C: KeyBinding = key_hint::ctrl(KeyCode::Char('c'));
@@ -479,8 +480,11 @@ impl TranscriptOverlay {
         let line2 = Rect::new(area.x, area.y.saturating_add(1), area.width, 1);
         render_key_hints(line1, buf, PAGER_KEY_HINTS);
 
-        let mut pairs: Vec<(&[KeyBinding], &str)> =
-            vec![(&[KEY_Q], "to quit"), (&[KEY_ESC], "to edit/branch prev")];
+        let mut pairs: Vec<(&[KeyBinding], &str)> = vec![
+            (&[KEY_Q], "to quit"),
+            (&[KEY_ESC], "to edit/branch prev"),
+            (&[KEY_SHIFT_ESC], "to edit/branch next"),
+        ];
         if self.highlight_cell.is_some() {
             pairs.push((&[KEY_ENTER], "to choose edit action"));
         }
@@ -658,7 +662,7 @@ mod tests {
         })]);
 
         // Render into a small buffer and assert the backtrack hint is present
-        let area = Rect::new(0, 0, 40, 10);
+        let area = Rect::new(0, 0, 80, 10);
         let mut buf = Buffer::empty(area);
         overlay.render(area, &mut buf);
 
@@ -673,6 +677,10 @@ mod tests {
         assert!(
             s.contains("edit/branch prev"),
             "expected 'edit/branch prev' hint in overlay footer, got: {s:?}"
+        );
+        assert!(
+            s.contains("edit/branch next"),
+            "expected 'edit/branch next' hint in overlay footer, got: {s:?}"
         );
     }
 

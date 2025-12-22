@@ -55,6 +55,6 @@ Add new items below as you think of them.
     - `Ctrl+R` enters reverse-i-search with fuzzy/substring matching; repeated `Ctrl+R` cycles matches (`Ctrl+S` forward).
     - Enter accepts, Escape cancels, and editing the selected prompt should be easy (exit search and edit in place).
     - Persist history with configurable size limits and optional frecency ordering.
-18. [ ] Edit selection navigation
+18. [x] Edit selection navigation
     - Add back and forward actions in the edit selection menu.
     - Fix the keybind for navigating between edited prompts.

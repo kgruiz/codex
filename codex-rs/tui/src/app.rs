@@ -1446,6 +1446,21 @@ impl App {
 
                 self.chat_widget.handle_key_event(key_event);
             }
+            // Shift+Esc steps forward through edit selections when backtracking.
+            KeyEvent {
+                code: KeyCode::Esc,
+                modifiers: crossterm::event::KeyModifiers::SHIFT,
+                kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                ..
+            } => {
+                if self.chat_widget.is_normal_backtrack_mode()
+                    && self.chat_widget.composer_is_empty()
+                {
+                    self.handle_backtrack_shift_esc_key(tui);
+                } else {
+                    self.chat_widget.handle_key_event(key_event);
+                }
+            }
             // Esc primes/advances backtracking only in normal (not working) mode
             // with the composer focused and empty. In any other state, forward
             // Esc so the active UI (e.g. status indicator, modals, popups)

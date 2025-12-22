@@ -15,6 +15,7 @@ use color_eyre::eyre::Result;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
+use crossterm::event::KeyModifiers;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BacktrackAction {
@@ -75,7 +76,7 @@ pub(crate) struct EditVersionState {
 
 impl App {
     /// Route overlay events when transcript overlay is active.
-    /// - If backtrack preview is active: Esc steps selection; Enter confirms.
+    /// - If backtrack preview is active: Esc steps back, Shift+Esc steps forward; Enter confirms.
     /// - Otherwise: Esc begins preview; all other events forward to overlay.
     ///   interactions (Esc to step target, Enter to confirm) and overlay lifecycle.
     pub(crate) async fn handle_backtrack_overlay_event(
@@ -85,6 +86,15 @@ impl App {
     ) -> Result<bool> {
         if self.backtrack.overlay_preview_active {
             match event {
+                TuiEvent::Key(KeyEvent {
+                    code: KeyCode::Esc,
+                    modifiers: KeyModifiers::SHIFT,
+                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                    ..
+                }) => {
+                    self.overlay_step_backtrack_forward(tui, event)?;
+                    Ok(true)
+                }
                 TuiEvent::Key(KeyEvent {
                     code: KeyCode::Esc,
                     kind: KeyEventKind::Press | KeyEventKind::Repeat,
@@ -135,6 +145,29 @@ impl App {
             self.open_backtrack_preview(tui);
         } else if self.backtrack.overlay_preview_active {
             self.step_backtrack_and_highlight(tui);
+        }
+    }
+
+    /// Handle Shift+Esc presses to step forward through backtrack selections.
+    pub(crate) fn handle_backtrack_shift_esc_key(&mut self, tui: &mut tui::Tui) {
+        if !self.chat_widget.composer_is_empty() {
+            return;
+        }
+
+        if !self.backtrack.primed {
+            self.prime_backtrack();
+
+            return;
+        }
+
+        if self.overlay.is_none() {
+            self.open_backtrack_preview(tui);
+
+            return;
+        }
+
+        if self.backtrack.overlay_preview_active {
+            self.step_forward_backtrack_and_highlight(tui);
         }
     }
 
@@ -397,6 +430,24 @@ impl App {
         tui.frame_requester().schedule_frame();
     }
 
+    /// Step selection to the next newer user message and update overlay.
+    fn step_forward_backtrack_and_highlight(&mut self, tui: &mut tui::Tui) {
+        let count = user_count(&self.transcript_cells);
+
+        if count == 0 {
+            return;
+        }
+
+        let last_index = count.saturating_sub(1);
+        let next_selection = match self.backtrack.nth_user_message {
+            value if value == usize::MAX => last_index,
+            value => value.saturating_add(1).min(last_index),
+        };
+
+        self.apply_backtrack_selection(next_selection);
+        tui.frame_requester().schedule_frame();
+    }
+
     /// Apply a computed backtrack selection to the overlay and internal counter.
     fn apply_backtrack_selection(&mut self, nth_user_message: usize) {
         if let Some(cell_idx) = nth_user_position(&self.transcript_cells, nth_user_message) {
@@ -445,10 +496,25 @@ impl App {
         self.reset_backtrack_state();
     }
 
-    /// Handle Esc in overlay backtrack preview: step selection if armed, else forward.
+    /// Handle Esc in overlay backtrack preview: step back if armed, else forward.
     fn overlay_step_backtrack(&mut self, tui: &mut tui::Tui, event: TuiEvent) -> Result<()> {
         if self.backtrack.base_id.is_some() {
             self.step_backtrack_and_highlight(tui);
+        } else {
+            self.overlay_forward_event(tui, event)?;
+        }
+
+        Ok(())
+    }
+
+    /// Handle Shift+Esc in overlay backtrack preview: step forward if armed, else forward.
+    fn overlay_step_backtrack_forward(
+        &mut self,
+        tui: &mut tui::Tui,
+        event: TuiEvent,
+    ) -> Result<()> {
+        if self.backtrack.base_id.is_some() {
+            self.step_forward_backtrack_and_highlight(tui);
         } else {
             self.overlay_forward_event(tui, event)?;
         }
