@@ -10,5 +10,5 @@ expression: term.backend()
 "gamma                                   "
 "───────────────────────────────── 100% ─"
 " ↑/↓ to scroll   pgup (fn + ↑)/pgdn (fn "
-" q to quit   esc to edit/branch prev   ⇧"
+" q to quit   esc to edit/branch prev   ⌃"
 "                                        "
