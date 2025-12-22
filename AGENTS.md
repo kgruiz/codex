@@ -113,3 +113,4 @@ When the user asks to implement an item from `wants.md`:
 - Implement the requested item.
 - Mark the corresponding checkbox as complete (`[x]`) in `wants.md` when done.
 - Bump the `codex-rs` workspace minor version in `codex-rs/Cargo.toml` (for example `0.2.0` -> `0.3.0`), updating `Cargo.lock` and any affected snapshots as needed.
+- When snapshots change, run `cargo insta accept --workspace-root .`
