@@ -12,4 +12,4 @@ expression: snapshot
     2 +world
 ─────────────────────────────────────────────────────────────────────────── 0% ─
  ↑/↓ to scroll   pgup (fn + ↑)/pgdn (fn + ↓) to page   home (fn + ←)/end (fn + →
- q to quit   esc to edit/branch prev   ⌃ + n to edit/branch next
+ q to quit   esc to edit/branch prev   ⌥ + → to edit/branch next

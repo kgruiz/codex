@@ -76,7 +76,7 @@ pub(crate) struct EditVersionState {
 
 impl App {
     /// Route overlay events when transcript overlay is active.
-    /// - If backtrack preview is active: Esc/Ctrl+P steps back, Ctrl+N steps forward; Enter confirms.
+    /// - If backtrack preview is active: Esc/Ctrl+P steps back, Ctrl+N or Alt+Right steps forward; Enter confirms.
     /// - Otherwise: Esc begins preview; all other events forward to overlay.
     ///   interactions (Esc to step target, Enter to confirm) and overlay lifecycle.
     pub(crate) async fn handle_backtrack_overlay_event(
@@ -98,6 +98,18 @@ impl App {
                 TuiEvent::Key(KeyEvent {
                     code: KeyCode::Char('n'),
                     modifiers: KeyModifiers::CONTROL,
+                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                    ..
+                })
+                | TuiEvent::Key(KeyEvent {
+                    code: KeyCode::Char('f'),
+                    modifiers: KeyModifiers::ALT,
+                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                    ..
+                })
+                | TuiEvent::Key(KeyEvent {
+                    code: KeyCode::Right,
+                    modifiers: KeyModifiers::ALT,
                     kind: KeyEventKind::Press | KeyEventKind::Repeat,
                     ..
                 })

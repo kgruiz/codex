@@ -80,7 +80,7 @@ const KEY_CTRL_B: KeyBinding = key_hint::ctrl(KeyCode::Char('b'));
 const KEY_CTRL_U: KeyBinding = key_hint::ctrl(KeyCode::Char('u'));
 const KEY_Q: KeyBinding = key_hint::plain(KeyCode::Char('q'));
 const KEY_ESC: KeyBinding = key_hint::plain(KeyCode::Esc);
-const KEY_CTRL_N: KeyBinding = key_hint::ctrl(KeyCode::Char('n'));
+const KEY_ALT_RIGHT: KeyBinding = key_hint::alt(KeyCode::Right);
 const KEY_ENTER: KeyBinding = key_hint::plain(KeyCode::Enter);
 const KEY_CTRL_T: KeyBinding = key_hint::ctrl(KeyCode::Char('t'));
 const KEY_CTRL_C: KeyBinding = key_hint::ctrl(KeyCode::Char('c'));
@@ -483,7 +483,7 @@ impl TranscriptOverlay {
         let mut pairs: Vec<(&[KeyBinding], &str)> = vec![
             (&[KEY_Q], "to quit"),
             (&[KEY_ESC], "to edit/branch prev"),
-            (&[KEY_CTRL_N], "to edit/branch next"),
+            (&[KEY_ALT_RIGHT], "to edit/branch next"),
         ];
         if self.highlight_cell.is_some() {
             pairs.push((&[KEY_ENTER], "to choose edit action"));
