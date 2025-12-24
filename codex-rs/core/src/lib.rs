@@ -114,6 +114,8 @@ pub use codex_protocol::protocol;
 pub use codex_protocol::config_types as protocol_config_types;
 
 pub use client::ModelClient;
+pub use client_common::ASK_PROMPT;
+pub use client_common::PLAN_PROMPT;
 pub use client_common::Prompt;
 pub use client_common::REVIEW_PROMPT;
 pub use client_common::ResponseEvent;

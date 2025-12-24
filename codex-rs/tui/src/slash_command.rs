@@ -17,6 +17,9 @@ pub enum SlashCommand {
     Experimental,
     Skills,
     Review,
+    Plan,
+    Ask,
+    Normal,
     New,
     Resume,
     Session,
@@ -47,6 +50,9 @@ impl SlashCommand {
             SlashCommand::Init => "create an AGENTS.md file with instructions for Codex",
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",
             SlashCommand::Review => "review my current changes and find issues",
+            SlashCommand::Plan => "generate a plan without making edits",
+            SlashCommand::Ask => "ask questions without making edits",
+            SlashCommand::Normal => "return to normal editing mode",
             SlashCommand::Resume => "resume a saved chat",
             SlashCommand::Session => "manage saved chats",
             SlashCommand::Rename => "rename this chat",
@@ -89,6 +95,9 @@ impl SlashCommand {
             | SlashCommand::Approvals
             | SlashCommand::Experimental
             | SlashCommand::Review
+            | SlashCommand::Plan
+            | SlashCommand::Ask
+            | SlashCommand::Normal
             | SlashCommand::Logout => false,
             SlashCommand::Diff
             | SlashCommand::Mention

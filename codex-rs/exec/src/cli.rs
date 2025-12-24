@@ -94,6 +94,12 @@ pub enum Command {
 
     /// Run a code review against the current repository.
     Review(ReviewArgs),
+
+    /// Generate a plan without making edits.
+    Plan(ModeArgs),
+
+    /// Answer questions without making edits.
+    Ask(ModeArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -143,6 +149,13 @@ pub struct ReviewArgs {
     pub commit_title: Option<String>,
 
     /// Custom review instructions. If `-` is used, read from stdin.
+    #[arg(value_name = "PROMPT", value_hint = clap::ValueHint::Other)]
+    pub prompt: Option<String>,
+}
+
+#[derive(Parser, Debug)]
+pub struct ModeArgs {
+    /// Prompt to send. If `-` is used, read from stdin.
     #[arg(value_name = "PROMPT", value_hint = clap::ValueHint::Other)]
     pub prompt: Option<String>,
 }

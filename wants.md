@@ -60,5 +60,5 @@ Add new items below as you think of them.
     - Fix the keybind for navigating between edited prompts.
 19. [x] Show command output while running (scrollable region)
     - Surface live command output in a scrollable area so users can follow along.
-20. [ ] Add plan mode
-    - Add a mode that generates a concise implementation plan before making changes.
+20. [x] Add plan/ask modes
+    - Add modes that generate a concise implementation plan or answer questions without making changes.

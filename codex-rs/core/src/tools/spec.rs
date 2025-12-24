@@ -9,6 +9,7 @@ use crate::tools::handlers::apply_patch::create_apply_patch_json_tool;
 use crate::tools::registry::ToolRegistryBuilder;
 use codex_protocol::openai_models::ApplyPatchToolType;
 use codex_protocol::openai_models::ConfigShellToolType;
+use codex_protocol::protocol::SessionMode;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -28,6 +29,7 @@ pub(crate) struct ToolsConfig {
 pub(crate) struct ToolsConfigParams<'a> {
     pub(crate) model_family: &'a ModelFamily,
     pub(crate) features: &'a Features,
+    pub(crate) mode: SessionMode,
 }
 
 impl ToolsConfig {
@@ -35,12 +37,14 @@ impl ToolsConfig {
         let ToolsConfigParams {
             model_family,
             features,
+            mode,
         } = params;
         let include_apply_patch_tool = features.enabled(Feature::ApplyPatchFreeform);
-        let include_web_search_request = features.enabled(Feature::WebSearchRequest);
+        let include_web_search_request =
+            features.enabled(Feature::WebSearchRequest) && *mode == SessionMode::Normal;
         let include_view_image_tool = features.enabled(Feature::ViewImageTool);
 
-        let shell_type = if !features.enabled(Feature::ShellTool) {
+        let shell_type = if *mode != SessionMode::Normal || !features.enabled(Feature::ShellTool) {
             ConfigShellToolType::Disabled
         } else if features.enabled(Feature::UnifiedExec) {
             // If ConPTY not supported (for old Windows versions), fallback on ShellCommand.
@@ -53,16 +57,19 @@ impl ToolsConfig {
             model_family.shell_type
         };
 
-        let apply_patch_tool_type = match model_family.apply_patch_tool_type {
-            Some(ApplyPatchToolType::Freeform) => Some(ApplyPatchToolType::Freeform),
-            Some(ApplyPatchToolType::Function) => Some(ApplyPatchToolType::Function),
-            None => {
-                if include_apply_patch_tool {
-                    Some(ApplyPatchToolType::Freeform)
-                } else {
-                    None
+        let apply_patch_tool_type = match mode {
+            SessionMode::Normal => match model_family.apply_patch_tool_type {
+                Some(ApplyPatchToolType::Freeform) => Some(ApplyPatchToolType::Freeform),
+                Some(ApplyPatchToolType::Function) => Some(ApplyPatchToolType::Function),
+                None => {
+                    if include_apply_patch_tool {
+                        Some(ApplyPatchToolType::Freeform)
+                    } else {
+                        None
+                    }
                 }
-            }
+            },
+            SessionMode::Plan | SessionMode::Ask => None,
         };
 
         Self {
@@ -1230,6 +1237,7 @@ mod tests {
         let config = ToolsConfig::new(&ToolsConfigParams {
             model_family: &model_family,
             features: &features,
+            mode: SessionMode::Normal,
         });
         let (tools, _) = build_specs(&config, None).build();
 
@@ -1286,6 +1294,7 @@ mod tests {
         let tools_config = ToolsConfig::new(&ToolsConfigParams {
             model_family: &model_family,
             features,
+            mode: SessionMode::Normal,
         });
         let (tools, _) = build_specs(&tools_config, Some(HashMap::new())).build();
         let tool_names = tools.iter().map(|t| t.spec.name()).collect::<Vec<_>>();
@@ -1482,6 +1491,7 @@ mod tests {
         let tools_config = ToolsConfig::new(&ToolsConfigParams {
             model_family: &model_family,
             features: &features,
+            mode: SessionMode::Normal,
         });
         let (tools, _) = build_specs(&tools_config, Some(HashMap::new())).build();
 
@@ -1504,6 +1514,7 @@ mod tests {
         let tools_config = ToolsConfig::new(&ToolsConfigParams {
             model_family: &model_family,
             features: &features,
+            mode: SessionMode::Normal,
         });
         let (tools, _) = build_specs(&tools_config, None).build();
 
@@ -1524,6 +1535,7 @@ mod tests {
         let tools_config = ToolsConfig::new(&ToolsConfigParams {
             model_family: &model_family,
             features: &features,
+            mode: SessionMode::Normal,
         });
         let (tools, _) = build_specs(&tools_config, None).build();
 
@@ -1555,6 +1567,7 @@ mod tests {
         let tools_config = ToolsConfig::new(&ToolsConfigParams {
             model_family: &model_family,
             features: &features,
+            mode: SessionMode::Normal,
         });
         let (tools, _) = build_specs(
             &tools_config,
@@ -1649,6 +1662,7 @@ mod tests {
         let tools_config = ToolsConfig::new(&ToolsConfigParams {
             model_family: &model_family,
             features: &features,
+            mode: SessionMode::Normal,
         });
 
         // Intentionally construct a map with keys that would sort alphabetically.
@@ -1726,6 +1740,7 @@ mod tests {
         let tools_config = ToolsConfig::new(&ToolsConfigParams {
             model_family: &model_family,
             features: &features,
+            mode: SessionMode::Normal,
         });
 
         let (tools, _) = build_specs(
@@ -1783,6 +1798,7 @@ mod tests {
         let tools_config = ToolsConfig::new(&ToolsConfigParams {
             model_family: &model_family,
             features: &features,
+            mode: SessionMode::Normal,
         });
 
         let (tools, _) = build_specs(
@@ -1837,6 +1853,7 @@ mod tests {
         let tools_config = ToolsConfig::new(&ToolsConfigParams {
             model_family: &model_family,
             features: &features,
+            mode: SessionMode::Normal,
         });
 
         let (tools, _) = build_specs(
@@ -1893,6 +1910,7 @@ mod tests {
         let tools_config = ToolsConfig::new(&ToolsConfigParams {
             model_family: &model_family,
             features: &features,
+            mode: SessionMode::Normal,
         });
 
         let (tools, _) = build_specs(
@@ -2005,6 +2023,7 @@ Examples of valid command strings:
         let tools_config = ToolsConfig::new(&ToolsConfigParams {
             model_family: &model_family,
             features: &features,
+            mode: SessionMode::Normal,
         });
         let (tools, _) = build_specs(
             &tools_config,

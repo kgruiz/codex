@@ -104,6 +104,10 @@ pub enum Op {
         summary: ReasoningSummaryConfig,
         // The JSON schema to use for the final assistant message
         final_output_json_schema: Option<Value>,
+
+        /// Optional session mode override for this turn.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        mode: Option<SessionMode>,
     },
 
     /// Override parts of the persistent turn context for subsequent turns.
@@ -139,6 +143,10 @@ pub enum Op {
         /// Updated reasoning summary preference (honored only for reasoning-capable models).
         #[serde(skip_serializing_if = "Option::is_none")]
         summary: Option<ReasoningSummaryConfig>,
+
+        /// Updated session mode.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        mode: Option<SessionMode>,
     },
 
     /// Update the session title stored alongside the rollout metadata.
@@ -274,6 +282,30 @@ pub enum AskForApproval {
     /// Never ask the user to approve commands. Failures are immediately returned
     /// to the model, and never escalated to the user for approval.
     Never,
+}
+
+/// Session interaction mode.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    JsonSchema,
+    TS,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum SessionMode {
+    #[default]
+    Normal,
+    Plan,
+    Ask,
 }
 
 /// Determines execution restrictions for model shell commands.
@@ -1759,6 +1791,10 @@ pub struct SessionConfiguredEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffortConfig>,
 
+    /// Current session mode.
+    #[serde(default)]
+    pub mode: SessionMode,
+
     /// Identifier of the history log file (inode on Unix, 0 otherwise).
     pub history_log_id: u64,
 
@@ -1789,6 +1825,10 @@ pub struct TurnContextUpdatedEvent {
     /// When the model does not support reasoning effort, this will be `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffortConfig>,
+
+    /// Current session mode.
+    #[serde(default)]
+    pub mode: SessionMode,
 }
 
 /// User's decision in response to an ExecApprovalRequest.
@@ -1912,6 +1952,7 @@ mod tests {
                 sandbox_policy: SandboxPolicy::ReadOnly,
                 cwd: PathBuf::from("/home/user/project"),
                 reasoning_effort: Some(ReasoningEffortConfig::default()),
+                mode: SessionMode::Normal,
                 history_log_id: 0,
                 history_entry_count: 0,
                 initial_messages: None,
@@ -1932,6 +1973,7 @@ mod tests {
                 },
                 "cwd": "/home/user/project",
                 "reasoning_effort": "medium",
+                "mode": "normal",
                 "history_log_id": 0,
                 "history_entry_count": 0,
                 "rollout_path": format!("{}", rollout_file.path().display()),

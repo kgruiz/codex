@@ -257,6 +257,7 @@ impl TestCodex {
                     text: prompt.into(),
                 }],
                 final_output_json_schema: None,
+                mode: None,
                 cwd: self.cwd.path().to_path_buf(),
                 approval_policy,
                 sandbox_policy,

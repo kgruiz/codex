@@ -1008,6 +1008,7 @@ impl App {
                                         model: None,
                                         effort: None,
                                         summary: None,
+                                        mode: None,
                                     },
                                 ));
                                 self.app_event_tx
@@ -1563,6 +1564,7 @@ mod tests {
     use codex_core::protocol::EventMsg;
     use codex_core::protocol::SandboxPolicy;
     use codex_core::protocol::SessionConfiguredEvent;
+    use codex_core::protocol::SessionMode;
     use codex_protocol::ConversationId;
     use ratatui::prelude::Line;
     use std::path::PathBuf;
@@ -1780,6 +1782,7 @@ mod tests {
                 sandbox_policy: SandboxPolicy::ReadOnly,
                 cwd: PathBuf::from("/home/user/project"),
                 reasoning_effort: None,
+                mode: SessionMode::Normal,
                 history_log_id: 0,
                 history_entry_count: 0,
                 initial_messages: None,
@@ -1824,6 +1827,7 @@ mod tests {
                 sandbox_policy: SandboxPolicy::ReadOnly,
                 cwd: PathBuf::from("/home/user/project"),
                 reasoning_effort: None,
+                mode: SessionMode::Normal,
                 history_log_id: 0,
                 history_entry_count: 0,
                 initial_messages: None,
@@ -1859,6 +1863,7 @@ mod tests {
             sandbox_policy: SandboxPolicy::ReadOnly,
             cwd: PathBuf::from("/home/user/project"),
             reasoning_effort: None,
+            mode: SessionMode::Normal,
             history_log_id: 0,
             history_entry_count: 0,
             initial_messages: None,

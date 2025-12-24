@@ -15,6 +15,7 @@ use codex_core::protocol::PatchApplyBeginEvent;
 use codex_core::protocol::PatchApplyEndEvent;
 use codex_core::protocol::SandboxPolicy;
 use codex_core::protocol::SessionConfiguredEvent;
+use codex_core::protocol::SessionMode;
 use codex_core::protocol::WarningEvent;
 use codex_core::protocol::WebSearchEndEvent;
 use codex_exec::event_processor_with_jsonl_output::EventProcessorWithJsonOutput;
@@ -82,6 +83,7 @@ fn session_configured_produces_thread_started_event() {
             sandbox_policy: SandboxPolicy::ReadOnly,
             cwd: PathBuf::from("/home/user/project"),
             reasoning_effort: None,
+            mode: SessionMode::Normal,
             history_log_id: 0,
             history_entry_count: 0,
             initial_messages: None,

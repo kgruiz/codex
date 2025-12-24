@@ -14,6 +14,9 @@ Control Codex’s behavior during an interactive session with slash commands.
 | --------------- | -------------------------------------------------------------------------- |
 | `/model`        | choose what model and reasoning effort to use                              |
 | `/approvals`    | choose what Codex can do without approval                                  |
+| `/plan`         | switch to plan mode (generate a plan only; no edits)                        |
+| `/ask`          | switch to ask mode (answer questions; no edits)                             |
+| `/normal`       | return to normal mode (full editing behavior)                               |
 | `/review`       | review my current changes and find issues                                  |
 | `/new`          | start a new chat during a conversation                                     |
 | `/resume`       | resume an old chat                                                         |
@@ -36,3 +39,4 @@ Control Codex’s behavior during an interactive session with slash commands.
 
 Notes:
 - `/diff` uses the configured diff view (`tui.diff_view`, or `--diff-view` on launch). Override per command with `--line`, `--inline`, `--side-by-side`, or `--view line|inline|side-by-side`.
+- Plan/ask/normal modes persist until you switch again.

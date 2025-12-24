@@ -9,6 +9,8 @@ use std::sync::atomic::Ordering;
 
 use crate::AuthManager;
 use crate::SandboxState;
+use crate::client_common::ASK_PROMPT;
+use crate::client_common::PLAN_PROMPT;
 use crate::client_common::REVIEW_PROMPT;
 use crate::compact;
 use crate::compact::run_inline_auto_compact_task;
@@ -111,6 +113,7 @@ use crate::protocol::ReasoningRawContentDeltaEvent;
 use crate::protocol::ReviewDecision;
 use crate::protocol::SandboxPolicy;
 use crate::protocol::SessionConfiguredEvent;
+use crate::protocol::SessionMode;
 use crate::protocol::SkillErrorInfo;
 use crate::protocol::SkillMetadata as ProtocolSkillMetadata;
 use crate::protocol::StreamErrorEvent;
@@ -265,6 +268,7 @@ impl Codex {
             user_instructions,
             base_instructions: config.base_instructions.clone(),
             compact_prompt: config.compact_prompt.clone(),
+            mode: SessionMode::Normal,
             approval_policy: config.approval_policy.clone(),
             sandbox_policy: config.sandbox_policy.clone(),
             cwd: config.cwd.clone(),
@@ -376,6 +380,7 @@ pub(crate) struct TurnContext {
     pub(crate) tool_call_gate: Arc<ReadinessFlag>,
     pub(crate) exec_policy: Arc<RwLock<ExecPolicy>>,
     pub(crate) truncation_policy: TruncationPolicy,
+    pub(crate) mode: SessionMode,
 }
 
 impl TurnContext {
@@ -389,6 +394,31 @@ impl TurnContext {
         self.compact_prompt
             .as_deref()
             .unwrap_or(compact::SUMMARIZATION_PROMPT)
+    }
+}
+
+fn mode_base_instructions(
+    mode: SessionMode,
+    model_family: &ModelFamily,
+    base_override: Option<String>,
+) -> Option<String> {
+    match mode {
+        SessionMode::Normal => base_override,
+        SessionMode::Plan => {
+            let base = base_override.unwrap_or_else(|| model_family.base_instructions.clone());
+            Some(format!("{base}\n\n{PLAN_PROMPT}"))
+        }
+        SessionMode::Ask => {
+            let base = base_override.unwrap_or_else(|| model_family.base_instructions.clone());
+            Some(format!("{base}\n\n{ASK_PROMPT}"))
+        }
+    }
+}
+
+fn mode_sandbox_policy(mode: SessionMode, sandbox_policy: &SandboxPolicy) -> SandboxPolicy {
+    match mode {
+        SessionMode::Normal => sandbox_policy.clone(),
+        SessionMode::Plan | SessionMode::Ask => SandboxPolicy::new_read_only_policy(),
     }
 }
 
@@ -414,6 +444,9 @@ pub(crate) struct SessionConfiguration {
 
     /// Compact prompt override.
     compact_prompt: Option<String>,
+
+    /// Current session mode (normal/plan/ask).
+    mode: SessionMode,
 
     /// When to escalate for approval for execution
     approval_policy: Constrained<AskForApproval>,
@@ -459,6 +492,9 @@ impl SessionConfiguration {
         if let Some(cwd) = updates.cwd.clone() {
             next_configuration.cwd = cwd;
         }
+        if let Some(mode) = updates.mode {
+            next_configuration.mode = mode;
+        }
         Ok(next_configuration)
     }
 }
@@ -472,6 +508,7 @@ pub(crate) struct SessionSettingsUpdate {
     pub(crate) reasoning_effort: Option<Option<ReasoningEffortConfig>>,
     pub(crate) reasoning_summary: Option<ReasoningSummaryConfig>,
     pub(crate) final_output_json_schema: Option<Option<Value>>,
+    pub(crate) mode: Option<SessionMode>,
 }
 
 impl Session {
@@ -515,9 +552,19 @@ impl Session {
             session_configuration.session_source.clone(),
         );
 
+        let base_instructions = mode_base_instructions(
+            session_configuration.mode,
+            &model_family,
+            session_configuration.base_instructions.clone(),
+        );
+        let sandbox_policy = mode_sandbox_policy(
+            session_configuration.mode,
+            &session_configuration.sandbox_policy,
+        );
         let tools_config = ToolsConfig::new(&ToolsConfigParams {
             model_family: &model_family,
             features: &per_turn_config.features,
+            mode: session_configuration.mode,
         });
 
         TurnContext {
@@ -525,11 +572,11 @@ impl Session {
             client,
             cwd: session_configuration.cwd.clone(),
             developer_instructions: session_configuration.developer_instructions.clone(),
-            base_instructions: session_configuration.base_instructions.clone(),
+            base_instructions,
             compact_prompt: session_configuration.compact_prompt.clone(),
             user_instructions: session_configuration.user_instructions.clone(),
             approval_policy: session_configuration.approval_policy.value(),
-            sandbox_policy: session_configuration.sandbox_policy.clone(),
+            sandbox_policy,
             shell_environment_policy: per_turn_config.shell_environment_policy.clone(),
             tools_config,
             ghost_snapshot: per_turn_config.ghost_snapshot.clone(),
@@ -541,6 +588,7 @@ impl Session {
                 per_turn_config.as_ref(),
                 model_family.truncation_policy,
             ),
+            mode: session_configuration.mode,
         }
     }
 
@@ -712,6 +760,7 @@ impl Session {
                 sandbox_policy: session_configuration.sandbox_policy.clone(),
                 cwd: session_configuration.cwd.clone(),
                 reasoning_effort: session_configuration.model_reasoning_effort,
+                mode: session_configuration.mode,
                 history_log_id,
                 history_entry_count,
                 initial_messages,
@@ -723,6 +772,7 @@ impl Session {
             msg: EventMsg::TurnContextUpdated(TurnContextUpdatedEvent {
                 model: model_family.get_model_slug().to_string(),
                 reasoning_effort: effective_reasoning_effort,
+                mode: session_configuration.mode,
             }),
         }))
         .chain(post_session_configured_events.into_iter());
@@ -906,6 +956,7 @@ impl Session {
             msg: EventMsg::TurnContextUpdated(TurnContextUpdatedEvent {
                 model: model_family.get_model_slug().to_string(),
                 reasoning_effort: effective_reasoning_effort,
+                mode: session_configuration.mode,
             }),
         })
         .await;
@@ -1676,6 +1727,7 @@ async fn submission_loop(sess: Arc<Session>, config: Arc<Config>, rx_sub: Receiv
                 model,
                 effort,
                 summary,
+                mode,
             } => {
                 handlers::override_turn_context(
                     &sess,
@@ -1687,6 +1739,7 @@ async fn submission_loop(sess: Arc<Session>, config: Arc<Config>, rx_sub: Receiv
                         model,
                         reasoning_effort: effort,
                         reasoning_summary: summary,
+                        mode,
                         ..Default::default()
                     },
                 )
@@ -1834,6 +1887,7 @@ mod handlers {
                 summary,
                 final_output_json_schema,
                 items,
+                mode,
             } => (
                 items,
                 SessionSettingsUpdate {
@@ -1844,6 +1898,7 @@ mod handlers {
                     reasoning_effort: Some(effort),
                     reasoning_summary: Some(summary),
                     final_output_json_schema: Some(final_output_json_schema),
+                    mode,
                 },
             ),
             Op::UserInput { items } => (items, SessionSettingsUpdate::default()),
@@ -2211,6 +2266,7 @@ async fn spawn_review_thread(
     let tools_config = ToolsConfig::new(&ToolsConfigParams {
         model_family: &review_model_family,
         features: &review_features,
+        mode: SessionMode::Normal,
     });
 
     let base_instructions = REVIEW_PROMPT.to_string();
@@ -2261,6 +2317,7 @@ async fn spawn_review_thread(
         tool_call_gate: Arc::new(ReadinessFlag::new()),
         exec_policy: parent_turn_context.exec_policy.clone(),
         truncation_policy: TruncationPolicy::new(&per_turn_config, model_family.truncation_policy),
+        mode: SessionMode::Normal,
     };
 
     // Seed the child task with the review prompt as the initial user message.
@@ -2482,22 +2539,25 @@ async fn run_turn(
     input: Vec<ResponseItem>,
     cancellation_token: CancellationToken,
 ) -> CodexResult<TurnRunResult> {
-    let mcp_tools = sess
-        .services
-        .mcp_connection_manager
-        .read()
-        .await
-        .list_all_tools()
-        .or_cancel(&cancellation_token)
-        .await?;
-    let router = Arc::new(ToolRouter::from_config(
-        &turn_context.tools_config,
+    let mcp_tools = if turn_context.mode == SessionMode::Normal {
         Some(
-            mcp_tools
+            sess.services
+                .mcp_connection_manager
+                .read()
+                .await
+                .list_all_tools()
+                .or_cancel(&cancellation_token)
+                .await?
                 .into_iter()
                 .map(|(name, tool)| (name, tool.tool))
                 .collect(),
-        ),
+        )
+    } else {
+        None
+    };
+    let router = Arc::new(ToolRouter::from_config(
+        &turn_context.tools_config,
+        mcp_tools,
     ));
 
     let model_supports_parallel = turn_context
@@ -2949,6 +3009,7 @@ mod tests {
             user_instructions: config.user_instructions.clone(),
             base_instructions: config.base_instructions.clone(),
             compact_prompt: config.compact_prompt.clone(),
+            mode: SessionMode::Normal,
             approval_policy: config.approval_policy.clone(),
             sandbox_policy: config.sandbox_policy.clone(),
             cwd: config.cwd.clone(),
@@ -3021,6 +3082,7 @@ mod tests {
             user_instructions: config.user_instructions.clone(),
             base_instructions: config.base_instructions.clone(),
             compact_prompt: config.compact_prompt.clone(),
+            mode: SessionMode::Normal,
             approval_policy: config.approval_policy.clone(),
             sandbox_policy: config.sandbox_policy.clone(),
             cwd: config.cwd.clone(),
@@ -3225,6 +3287,7 @@ mod tests {
             user_instructions: config.user_instructions.clone(),
             base_instructions: config.base_instructions.clone(),
             compact_prompt: config.compact_prompt.clone(),
+            mode: SessionMode::Normal,
             approval_policy: config.approval_policy.clone(),
             sandbox_policy: config.sandbox_policy.clone(),
             cwd: config.cwd.clone(),
@@ -3316,6 +3379,7 @@ mod tests {
             user_instructions: config.user_instructions.clone(),
             base_instructions: config.base_instructions.clone(),
             compact_prompt: config.compact_prompt.clone(),
+            mode: SessionMode::Normal,
             approval_policy: config.approval_policy.clone(),
             sandbox_policy: config.sandbox_policy.clone(),
             cwd: config.cwd.clone(),

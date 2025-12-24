@@ -37,6 +37,7 @@ use codex_core::protocol::PatchApplyEndEvent;
 use codex_core::protocol::RateLimitWindow;
 use codex_core::protocol::ReviewRequest;
 use codex_core::protocol::ReviewTarget;
+use codex_core::protocol::SessionMode;
 use codex_core::protocol::StreamErrorEvent;
 use codex_core::protocol::TaskCompleteEvent;
 use codex_core::protocol::TaskStartedEvent;
@@ -112,6 +113,7 @@ fn resumed_initial_messages_render_history() {
         sandbox_policy: SandboxPolicy::ReadOnly,
         cwd: PathBuf::from("/home/user/project"),
         reasoning_effort: Some(ReasoningEffortConfig::default()),
+        mode: SessionMode::Normal,
         history_log_id: 0,
         history_entry_count: 0,
         initial_messages: Some(vec![
@@ -449,6 +451,7 @@ fn make_chatwidget_manual(
         suppress_session_configured_redraw: false,
         pending_notification: None,
         is_review_mode: false,
+        session_mode: SessionMode::Normal,
         pre_review_token_info: None,
         needs_final_message_separator: false,
         last_rendered_width: std::cell::Cell::new(None),

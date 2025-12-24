@@ -325,6 +325,7 @@ async fn overrides_turn_context_but_keeps_cached_prefix_and_key_constant() -> an
             model: Some("o3".to_string()),
             effort: Some(Some(ReasoningEffort::High)),
             summary: Some(ReasoningSummary::Detailed),
+            mode: None,
         })
         .await?;
 
@@ -404,6 +405,7 @@ async fn override_before_first_turn_emits_environment_context() -> anyhow::Resul
             model: None,
             effort: None,
             summary: None,
+            mode: None,
         })
         .await?;
 
@@ -528,6 +530,7 @@ async fn per_turn_overrides_keep_cached_prefix_and_key_constant() -> anyhow::Res
             effort: Some(ReasoningEffort::High),
             summary: ReasoningSummary::Detailed,
             final_output_json_schema: None,
+            mode: None,
         })
         .await?;
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TaskComplete(_))).await;
@@ -622,6 +625,7 @@ async fn send_user_turn_with_no_changes_does_not_send_environment_context() -> a
             effort: default_effort,
             summary: default_summary,
             final_output_json_schema: None,
+            mode: None,
         })
         .await?;
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TaskComplete(_))).await;
@@ -638,6 +642,7 @@ async fn send_user_turn_with_no_changes_does_not_send_environment_context() -> a
             effort: default_effort,
             summary: default_summary,
             final_output_json_schema: None,
+            mode: None,
         })
         .await?;
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TaskComplete(_))).await;
@@ -712,6 +717,7 @@ async fn send_user_turn_with_changes_sends_environment_context() -> anyhow::Resu
             effort: default_effort,
             summary: default_summary,
             final_output_json_schema: None,
+            mode: None,
         })
         .await?;
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TaskComplete(_))).await;
@@ -728,6 +734,7 @@ async fn send_user_turn_with_changes_sends_environment_context() -> anyhow::Resu
             effort: Some(ReasoningEffort::High),
             summary: ReasoningSummary::Detailed,
             final_output_json_schema: None,
+            mode: None,
         })
         .await?;
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TaskComplete(_))).await;

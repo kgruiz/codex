@@ -238,6 +238,7 @@ mod tests {
     use codex_core::protocol::EventMsg;
     use codex_core::protocol::SandboxPolicy;
     use codex_core::protocol::SessionConfiguredEvent;
+    use codex_core::protocol::SessionMode;
     use codex_protocol::ConversationId;
     use codex_protocol::openai_models::ReasoningEffort;
     use pretty_assertions::assert_eq;
@@ -263,6 +264,7 @@ mod tests {
                 sandbox_policy: SandboxPolicy::ReadOnly,
                 cwd: PathBuf::from("/home/user/project"),
                 reasoning_effort: Some(ReasoningEffort::default()),
+                mode: SessionMode::Normal,
                 history_log_id: 1,
                 history_entry_count: 1000,
                 initial_messages: None,
@@ -302,6 +304,7 @@ mod tests {
             sandbox_policy: SandboxPolicy::ReadOnly,
             cwd: PathBuf::from("/home/user/project"),
             reasoning_effort: Some(ReasoningEffort::default()),
+            mode: SessionMode::Normal,
             history_log_id: 1,
             history_entry_count: 1000,
             initial_messages: None,
@@ -340,6 +343,7 @@ mod tests {
                 },
                 "cwd": "/home/user/project",
                 "reasoning_effort": session_configured_event.reasoning_effort,
+                "mode": session_configured_event.mode,
                 "history_log_id": session_configured_event.history_log_id,
                 "history_entry_count": session_configured_event.history_entry_count,
                 "rollout_path": rollout_file.path().to_path_buf(),

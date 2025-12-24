@@ -139,6 +139,7 @@ async fn remote_models_remote_model_uses_unified_exec() -> Result<()> {
             model: Some(REMOTE_MODEL_SLUG.to_string()),
             effort: None,
             summary: None,
+            mode: None,
         })
         .await?;
 
@@ -167,6 +168,7 @@ async fn remote_models_remote_model_uses_unified_exec() -> Result<()> {
                 text: "run call".into(),
             }],
             final_output_json_schema: None,
+            mode: None,
             cwd: cwd.path().to_path_buf(),
             approval_policy: AskForApproval::Never,
             sandbox_policy: SandboxPolicy::DangerFullAccess,
@@ -272,6 +274,7 @@ async fn remote_models_apply_remote_base_instructions() -> Result<()> {
             model: Some(model.to_string()),
             effort: None,
             summary: None,
+            mode: None,
         })
         .await?;
 
@@ -281,6 +284,7 @@ async fn remote_models_apply_remote_base_instructions() -> Result<()> {
                 text: "hello remote".into(),
             }],
             final_output_json_schema: None,
+            mode: None,
             cwd: cwd.path().to_path_buf(),
             approval_policy: AskForApproval::Never,
             sandbox_policy: SandboxPolicy::DangerFullAccess,

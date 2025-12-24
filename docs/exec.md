@@ -10,6 +10,17 @@ In non-interactive mode, Codex does not ask for command or edit approvals. By de
 
 Use `codex exec --full-auto` to allow file edits. Use `codex exec --sandbox danger-full-access` to allow edits and networked commands.
 
+### Plan and ask modes
+
+Run in a no-edits mode explicitly:
+
+```shell
+codex exec plan "Outline the steps to add plan/ask modes"
+codex exec ask "What does the config file control?"
+```
+
+`codex exec plan` produces a concise implementation plan without making edits. `codex exec ask` answers questions without making edits. Both modes restrict tools to read-only behavior regardless of other sandbox flags.
+
 ### Default output mode
 
 By default, Codex streams its activity to stderr and only writes the final message from the agent to stdout. This makes it easier to pipe `codex exec` into another tool without extra filtering.

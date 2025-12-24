@@ -33,6 +33,7 @@ use codex_core::protocol::EventMsg;
 use codex_core::protocol::Op;
 use codex_core::protocol::ReviewRequest;
 use codex_core::protocol::ReviewTarget;
+use codex_core::protocol::SessionMode;
 use codex_core::protocol::SessionSource;
 use codex_protocol::approvals::ElicitationAction;
 use codex_protocol::config_types::SandboxMode;
@@ -60,6 +61,7 @@ enum InitialOperation {
     UserTurn {
         items: Vec<UserInput>,
         output_schema: Option<Value>,
+        mode: Option<SessionMode>,
     },
     Review {
         review_request: ReviewRequest,
@@ -307,6 +309,44 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
             let summary = codex_core::review_prompts::user_facing_hint(&review_request.target);
             (InitialOperation::Review { review_request }, summary)
         }
+        (Some(ExecCommand::Plan(args)), root_prompt, imgs) => {
+            let prompt_text = resolve_prompt(args.prompt.or(root_prompt));
+            let mut items: Vec<UserInput> = imgs
+                .into_iter()
+                .map(|path| UserInput::LocalImage { path })
+                .collect();
+            items.push(UserInput::Text {
+                text: prompt_text.clone(),
+            });
+            let output_schema = load_output_schema(output_schema_path.clone());
+            (
+                InitialOperation::UserTurn {
+                    items,
+                    output_schema,
+                    mode: Some(SessionMode::Plan),
+                },
+                prompt_text,
+            )
+        }
+        (Some(ExecCommand::Ask(args)), root_prompt, imgs) => {
+            let prompt_text = resolve_prompt(args.prompt.or(root_prompt));
+            let mut items: Vec<UserInput> = imgs
+                .into_iter()
+                .map(|path| UserInput::LocalImage { path })
+                .collect();
+            items.push(UserInput::Text {
+                text: prompt_text.clone(),
+            });
+            let output_schema = load_output_schema(output_schema_path.clone());
+            (
+                InitialOperation::UserTurn {
+                    items,
+                    output_schema,
+                    mode: Some(SessionMode::Ask),
+                },
+                prompt_text,
+            )
+        }
         (Some(ExecCommand::Resume(args)), root_prompt, imgs) => {
             let prompt_arg = args
                 .prompt
@@ -332,6 +372,7 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
                 InitialOperation::UserTurn {
                     items,
                     output_schema,
+                    mode: None,
                 },
                 prompt_text,
             )
@@ -350,6 +391,7 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
                 InitialOperation::UserTurn {
                     items,
                     output_schema,
+                    mode: None,
                 },
                 prompt_text,
             )
@@ -405,6 +447,7 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
         InitialOperation::UserTurn {
             items,
             output_schema,
+            mode,
         } => {
             let task_id = conversation
                 .submit(Op::UserTurn {
@@ -416,6 +459,7 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
                     effort: default_effort,
                     summary: default_summary,
                     final_output_json_schema: output_schema,
+                    mode,
                 })
                 .await?;
             info!("Sent prompt with event ID: {task_id}");

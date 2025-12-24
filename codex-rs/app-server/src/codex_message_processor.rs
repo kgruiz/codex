@@ -2631,6 +2631,7 @@ impl CodexMessageProcessor {
                 effort,
                 summary,
                 final_output_json_schema: None,
+                mode: None,
             })
             .await;
 
@@ -2731,6 +2732,7 @@ impl CodexMessageProcessor {
                     model: params.model,
                     effort: params.effort.map(Some),
                     summary: params.summary,
+                    mode: None,
                 })
                 .await;
         }

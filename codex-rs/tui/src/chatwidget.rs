@@ -50,6 +50,7 @@ use codex_core::protocol::PatchApplyBeginEvent;
 use codex_core::protocol::RateLimitSnapshot;
 use codex_core::protocol::ReviewRequest;
 use codex_core::protocol::ReviewTarget;
+use codex_core::protocol::SessionMode;
 use codex_core::protocol::SessionTitleUpdatedEvent;
 use codex_core::protocol::SkillsListEntry;
 use codex_core::protocol::StreamErrorEvent;
@@ -437,6 +438,7 @@ pub(crate) struct ChatWidget {
     pending_notification: Option<Notification>,
     // Simple review mode flag; used to adjust layout and banners.
     is_review_mode: bool,
+    session_mode: SessionMode,
     // Snapshot of token usage to restore after review mode exits.
     pre_review_token_info: Option<Option<TokenUsageInfo>>,
     // Whether to add a final message separator after the last message
@@ -614,6 +616,7 @@ impl ChatWidget {
         let initial_messages = event.initial_messages.clone();
         let model_for_header = event.model.clone();
         self.config.model = Some(model_for_header.clone());
+        self.session_mode = event.mode;
         self.session_header.set_model(&model_for_header);
         self.bottom_pane.set_session_model(model_for_header.clone());
         self.bottom_pane.set_session_reasoning_effort(
@@ -649,6 +652,7 @@ impl ChatWidget {
     fn on_turn_context_updated(&mut self, event: TurnContextUpdatedEvent) {
         self.config.model = Some(event.model.clone());
         self.config.model_reasoning_effort = event.reasoning_effort;
+        self.session_mode = event.mode;
 
         self.session_header.set_model(&event.model);
         self.bottom_pane.set_session_model(event.model.clone());
@@ -1856,6 +1860,7 @@ impl ChatWidget {
             suppress_session_configured_redraw: false,
             pending_notification: None,
             is_review_mode: false,
+            session_mode: SessionMode::Normal,
             pre_review_token_info: None,
             needs_final_message_separator: false,
             last_rendered_width: std::cell::Cell::new(None),
@@ -1901,6 +1906,7 @@ impl ChatWidget {
         let mut rng = rand::rng();
         let placeholder = EXAMPLE_PROMPTS[rng.random_range(0..EXAMPLE_PROMPTS.len())].to_string();
 
+        let session_mode = session_configured.mode;
         let codex_op_tx =
             spawn_agent_from_existing(conversation, session_configured, app_event_tx.clone());
 
@@ -1974,6 +1980,7 @@ impl ChatWidget {
             suppress_session_configured_redraw: true,
             pending_notification: None,
             is_review_mode: false,
+            session_mode,
             pre_review_token_info: None,
             needs_final_message_separator: false,
             last_rendered_width: std::cell::Cell::new(None),
@@ -2303,6 +2310,7 @@ impl ChatWidget {
                 model: Some(next_model.clone()),
                 effort: Some(next_effort),
                 summary: None,
+                mode: None,
             }));
 
         self.app_event_tx
@@ -2384,6 +2392,7 @@ impl ChatWidget {
                 model: None,
                 effort: Some(next_effort),
                 summary: None,
+                mode: None,
             }));
 
         self.app_event_tx
@@ -3270,6 +3279,15 @@ impl ChatWidget {
             SlashCommand::Review => {
                 self.open_review_popup();
             }
+            SlashCommand::Plan => {
+                self.set_session_mode(SessionMode::Plan);
+            }
+            SlashCommand::Ask => {
+                self.set_session_mode(SessionMode::Ask);
+            }
+            SlashCommand::Normal => {
+                self.set_session_mode(SessionMode::Normal);
+            }
             SlashCommand::Model => {
                 self.open_model_popup();
             }
@@ -3566,6 +3584,7 @@ impl ChatWidget {
                 model: apply_model,
                 effort: apply_effort,
                 summary: None,
+                mode: None,
             });
         }
 
@@ -3587,6 +3606,7 @@ impl ChatWidget {
                 model: restore_model,
                 effort: restore_effort,
                 summary: None,
+                mode: None,
             });
         }
     }
@@ -4145,6 +4165,7 @@ impl ChatWidget {
                 model: Some(switch_model.clone()),
                 effort: Some(Some(default_effort)),
                 summary: None,
+                mode: None,
             }));
         })];
 
@@ -4433,6 +4454,7 @@ impl ChatWidget {
                 model: Some(model_for_action.clone()),
                 effort: Some(effort_for_action),
                 summary: None,
+                mode: None,
             }));
             tx.send(AppEvent::PersistModelSelection {
                 model: model_for_action.clone(),
@@ -4650,6 +4672,7 @@ impl ChatWidget {
                 model: Some(model.clone()),
                 effort: Some(effort),
                 summary: None,
+                mode: None,
             }));
         self.app_event_tx.send(AppEvent::PersistModelSelection {
             model: model.clone(),
@@ -4777,6 +4800,7 @@ impl ChatWidget {
                 model: None,
                 effort: None,
                 summary: None,
+                mode: None,
             }));
             tx.send(AppEvent::UpdateAskForApprovalPolicy(approval));
             tx.send(AppEvent::UpdateSandboxPolicy(sandbox_clone));
@@ -5276,6 +5300,38 @@ impl ChatWidget {
 
     fn on_list_skills(&mut self, ev: ListSkillsResponseEvent) {
         self.set_skills_from_response(&ev);
+    }
+
+    fn mode_label(mode: SessionMode) -> &'static str {
+        match mode {
+            SessionMode::Normal => "Normal",
+            SessionMode::Plan => "Plan",
+            SessionMode::Ask => "Ask",
+        }
+    }
+
+    fn set_session_mode(&mut self, mode: SessionMode) {
+        if self.session_mode == mode {
+            let label = Self::mode_label(mode);
+            self.add_info_message(format!("{label} mode is already active."), None);
+            return;
+        }
+        self.session_mode = mode;
+        self.submit_op(Op::OverrideTurnContext {
+            cwd: None,
+            approval_policy: None,
+            sandbox_policy: None,
+            model: None,
+            effort: None,
+            summary: None,
+            mode: Some(mode),
+        });
+        let message = match mode {
+            SessionMode::Normal => "Switched to normal mode (edits allowed).".to_string(),
+            SessionMode::Plan => "Switched to plan mode (no edits).".to_string(),
+            SessionMode::Ask => "Switched to ask mode (no edits).".to_string(),
+        };
+        self.add_info_message(message, None);
     }
 
     pub(crate) fn open_review_popup(&mut self) {
