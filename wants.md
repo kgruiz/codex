@@ -58,3 +58,5 @@ Add new items below as you think of them.
 18. [x] Edit selection navigation
     - Add back and forward actions in the edit selection menu.
     - Fix the keybind for navigating between edited prompts.
+19. [ ] Show command output while running (scrollable region)
+    - Surface live command output in a scrollable area so users can follow along.
