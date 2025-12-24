@@ -1,4 +1,5 @@
 use clap::Parser;
+use clap::ValueEnum;
 use clap::ValueHint;
 use codex_common::ApprovalModeCliArg;
 use codex_common::CliConfigOverrides;
@@ -85,6 +86,25 @@ pub struct Cli {
     #[arg(long = "add-dir", value_name = "DIR", value_hint = ValueHint::DirPath)]
     pub add_dir: Vec<PathBuf>,
 
+    /// Default diff format for /diff and apply-patch previews (line or inline).
+    #[arg(long = "diff-view", value_enum)]
+    pub diff_view: Option<DiffViewCliArg>,
+
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum DiffViewCliArg {
+    Line,
+    Inline,
+}
+
+impl DiffViewCliArg {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Line => "line",
+            Self::Inline => "inline",
+        }
+    }
 }

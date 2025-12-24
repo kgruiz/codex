@@ -363,6 +363,19 @@ impl Default for Notifications {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DiffView {
+    Line,
+    Inline,
+}
+
+impl Default for DiffView {
+    fn default() -> Self {
+        Self::Line
+    }
+}
+
 /// Collection of settings that are specific to the TUI.
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct Tui {
@@ -390,6 +403,11 @@ pub struct Tui {
     /// Defaults to `false` (queue clears).
     #[serde(default)]
     pub keep_queue_on_branch: bool,
+
+    /// Default diff format shown in the TUI.
+    /// Defaults to `line`.
+    #[serde(default)]
+    pub diff_view: DiffView,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]

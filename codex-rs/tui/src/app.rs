@@ -5,9 +5,7 @@ use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::ComposerAttachment;
 use crate::chatwidget::ChatWidget;
-use crate::diff_render::DiffSection;
 use crate::diff_render::DiffSummary;
-use crate::diff_render::render_diff_sections;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::external_editor;
 use crate::file_search::FileSearchManager;
@@ -794,11 +792,7 @@ impl App {
                         vec!["/diff — not inside a git repository".italic().into()]
                     }
                     GitDiffResult::Error(message) => vec![message.red().into()],
-                    GitDiffResult::Views(views) => render_diff_sections(vec![
-                        DiffSection::new("Line diff", views.line),
-                        DiffSection::new("Inline diff", views.inline),
-                        DiffSection::new("Semantic diff (difftastic)", views.semantic),
-                    ]),
+                    GitDiffResult::Lines(lines) => lines,
                 };
                 self.overlay = Some(Overlay::new_static_with_lines(
                     pager_lines,
@@ -1253,9 +1247,14 @@ impl App {
                 self.chat_widget.show_review_custom_prompt();
             }
             AppEvent::FullScreenApprovalRequest(request) => match request {
-                ApprovalRequest::ApplyPatch { cwd, changes, .. } => {
+                ApprovalRequest::ApplyPatch {
+                    cwd,
+                    changes,
+                    diff_view,
+                    ..
+                } => {
                     let _ = tui.enter_alt_screen();
-                    let diff_summary = DiffSummary::new(changes, cwd);
+                    let diff_summary = DiffSummary::new(changes, cwd, diff_view);
                     self.overlay = Some(Overlay::new_static_with_renderables(
                         vec![diff_summary.into()],
                         "P A T C H".to_string(),

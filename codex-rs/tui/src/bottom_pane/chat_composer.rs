@@ -167,6 +167,7 @@ pub(crate) struct ChatComposer {
     has_focus: bool,
     commands_enabled: bool,
     attached_images: Vec<AttachedImage>,
+    last_command_input: Option<String>,
     placeholder_text: String,
     is_task_running: bool,
     // Non-bracketed paste burst tracker.
@@ -224,6 +225,7 @@ impl ChatComposer {
             has_focus: has_input_focus,
             commands_enabled: true,
             attached_images: Vec::new(),
+            last_command_input: None,
             placeholder_text,
             is_task_running: false,
             paste_burst: PasteBurst::default(),
@@ -742,6 +744,10 @@ impl ChatComposer {
         images.into_iter().map(Into::into).collect()
     }
 
+    pub fn take_last_command_input(&mut self) -> Option<String> {
+        self.last_command_input.take()
+    }
+
     pub(crate) fn flush_paste_burst_if_due(&mut self) -> bool {
         self.handle_paste_burst_flush(Instant::now())
     }
@@ -878,6 +884,7 @@ impl ChatComposer {
                     match sel {
                         CommandItem::Builtin(cmd) => {
                             if cmd == SlashCommand::Skills {
+                                self.last_command_input = Some(format!("/{}", cmd.command()));
                                 self.textarea.set_text("");
                                 return (InputResult::Command(cmd), true);
                             }
@@ -937,7 +944,16 @@ impl ChatComposer {
                 if let Some(sel) = popup.selected_item() {
                     match sel {
                         CommandItem::Builtin(cmd) => {
+                            let command_text = if first_line
+                                .trim_start()
+                                .starts_with(&format!("/{}", cmd.command()))
+                            {
+                                first_line.to_string()
+                            } else {
+                                format!("/{}", cmd.command())
+                            };
                             self.textarea.set_text("");
+                            self.last_command_input = Some(command_text);
                             return (InputResult::Command(cmd), true);
                         }
                         CommandItem::UserPrompt(idx) => {
@@ -1521,6 +1537,7 @@ impl ChatComposer {
                     .into_iter()
                     .find(|(n, _)| *n == name)
             {
+                self.last_command_input = Some(first_line.trim().to_string());
                 self.textarea.set_text("");
                 return (InputResult::Command(cmd), true);
             }
@@ -1595,9 +1612,10 @@ impl ChatComposer {
         {
             let treat_as_plain_text = input_starts_with_space || name.contains('/');
             if !treat_as_plain_text {
-                let is_builtin = built_in_slash_commands()
+                let builtin_match = built_in_slash_commands()
                     .into_iter()
-                    .any(|(command_name, _)| command_name == name);
+                    .find(|(command_name, _)| *command_name == name);
+                let is_builtin = builtin_match.is_some();
                 let prompt_prefix = format!("{PROMPTS_CMD_PREFIX}:");
                 let is_known_prompt = name
                     .strip_prefix(&prompt_prefix)
@@ -1607,6 +1625,10 @@ impl ChatComposer {
                             .any(|prompt| prompt.name == prompt_name)
                     })
                     .unwrap_or(false);
+                if let Some((_name, cmd)) = builtin_match {
+                    self.last_command_input = Some(text.clone());
+                    return (InputResult::Command(cmd), true);
+                }
                 if !is_builtin && !is_known_prompt {
                     let message = format!(
                         r#"Unrecognized command '/{name}'. Type "/" for a list of supported commands."#

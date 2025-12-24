@@ -8,7 +8,7 @@ expression: snapshot
     1 +hello
     2 +world
 
-• Inline diff
+• Line diff
 • Added foo.txt (+2 -0)
 ─────────────────────────────────────────────────────────────────────────── 0% ─
  ↑/↓ to scroll   pgup (fn + ↑)/pgdn (fn + ↓) to page   home (fn + ←)/end (fn + →

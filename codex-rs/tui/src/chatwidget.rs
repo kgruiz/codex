@@ -10,6 +10,7 @@ use std::time::Instant;
 use codex_app_server_protocol::AuthMode;
 use codex_backend_client::Client as BackendClient;
 use codex_core::config::Config;
+use codex_core::config::types::DiffView;
 use codex_core::config::types::Notifications;
 use codex_core::features::FEATURES;
 use codex_core::features::Feature;
@@ -108,6 +109,8 @@ use crate::bottom_pane::SelectionViewParams;
 use crate::bottom_pane::StatusLineMetrics;
 use crate::bottom_pane::ViewCompletionBehavior;
 use crate::bottom_pane::custom_prompt_view::CustomPromptView;
+use crate::bottom_pane::parse_positional_args;
+use crate::bottom_pane::parse_slash_name;
 use crate::bottom_pane::popup_consts::standard_popup_hint_line;
 use crate::clipboard_paste::PasteImageError;
 use crate::clipboard_paste::copy_text_to_clipboard;
@@ -1260,6 +1263,7 @@ impl ChatWidget {
         self.add_to_history(history_cell::new_patch_event(
             event.changes,
             &self.config.cwd,
+            self.config.diff_view,
         ));
     }
 
@@ -1604,6 +1608,7 @@ impl ChatWidget {
             reason: ev.reason,
             changes: ev.changes.clone(),
             cwd: self.config.cwd.clone(),
+            diff_view: self.config.diff_view,
         };
         self.bottom_pane
             .push_approval_request(request, &self.config.features);
@@ -2171,7 +2176,8 @@ impl ChatWidget {
                     self.queue_user_message(text, attachments);
                 }
                 InputResult::Command(cmd) => {
-                    self.dispatch_command(cmd);
+                    let command_input = self.bottom_pane.take_last_command_input();
+                    self.dispatch_command(cmd, command_input);
                 }
                 InputResult::None => {}
             },
@@ -3160,7 +3166,7 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    fn dispatch_command(&mut self, cmd: SlashCommand) {
+    fn dispatch_command(&mut self, cmd: SlashCommand, command_input: Option<String>) {
         if !cmd.available_during_task() && self.bottom_pane.is_task_running() {
             let message = format!(
                 "'/{}' is disabled while a task is in progress.",
@@ -3237,11 +3243,20 @@ impl ChatWidget {
                 self.app_event_tx.send(AppEvent::CodexOp(Op::Undo));
             }
             SlashCommand::Diff => {
+                let diff_view =
+                    match diff_view_override(command_input.as_deref(), self.config.diff_view) {
+                        Ok(view) => view,
+                        Err(message) => {
+                            self.add_error_message(message);
+                            return;
+                        }
+                    };
                 self.add_diff_in_progress();
                 let width = self.last_rendered_width.get().unwrap_or(80);
                 let tx = self.app_event_tx.clone();
+                let cwd = self.config.cwd.clone();
                 tokio::spawn(async move {
-                    let result = match get_git_diff(width).await {
+                    let result = match get_git_diff(&cwd, diff_view, width).await {
                         Ok(result) => result,
                         Err(e) => GitDiffResult::Error(format!("Failed to compute diff: {e}")),
                     };
@@ -5665,6 +5680,60 @@ fn find_skill_mentions(text: &str, skills: &[SkillMetadata]) -> Vec<SkillMetadat
         }
     }
     matches
+}
+
+fn diff_view_override(input: Option<&str>, default_view: DiffView) -> Result<DiffView, String> {
+    let Some(input) = input else {
+        return Ok(default_view);
+    };
+    let Some((name, rest)) = parse_slash_name(input) else {
+        return Ok(default_view);
+    };
+    if name != SlashCommand::Diff.command() {
+        return Ok(default_view);
+    }
+
+    let args = parse_positional_args(rest);
+    if args.is_empty() {
+        return Ok(default_view);
+    }
+
+    let mut view_override = None;
+    let mut args_iter = args.iter().peekable();
+    while let Some(arg) = args_iter.next() {
+        if let Some(value) = arg.strip_prefix("--view=") {
+            view_override = Some(parse_diff_view_value(value)?);
+            continue;
+        }
+        match arg.as_str() {
+            "--inline" => view_override = Some(DiffView::Inline),
+            "--line" => view_override = Some(DiffView::Line),
+            "--view" => {
+                let Some(value) = args_iter.next() else {
+                    return Err("Expected a value after --view (line or inline).".to_string());
+                };
+                view_override = Some(parse_diff_view_value(value)?);
+            }
+            _ if arg.starts_with('-') => {
+                return Err(format!("Unknown /diff flag: {arg}"));
+            }
+            _ => {
+                return Err(format!("Unexpected /diff argument: {arg}"));
+            }
+        }
+    }
+
+    Ok(view_override.unwrap_or(default_view))
+}
+
+fn parse_diff_view_value(value: &str) -> Result<DiffView, String> {
+    match value {
+        "line" => Ok(DiffView::Line),
+        "inline" => Ok(DiffView::Inline),
+        _ => Err(format!(
+            "Invalid /diff view '{value}'. Use 'line' or 'inline'."
+        )),
+    }
 }
 
 #[cfg(test)]

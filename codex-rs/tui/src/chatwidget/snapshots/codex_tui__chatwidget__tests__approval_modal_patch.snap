@@ -11,14 +11,6 @@ expression: terminal.backend().vt100().screen().contents()
       1 +hello
       2 +world
 
-  • Inline diff
-  • Added README.md (+2 -0)
-      1  hello
-      2  world
-
-  • Semantic diff (difftastic)
-  difftastic not found on PATH (install with `cargo install difftastic`)
-
 › 1. Yes, proceed (y)
   2. No, and tell Codex what to do differently (esc)
 

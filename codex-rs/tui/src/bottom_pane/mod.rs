@@ -35,6 +35,8 @@ mod file_search_popup;
 mod footer;
 mod list_selection_view;
 mod prompt_args;
+pub(crate) use prompt_args::parse_positional_args;
+pub(crate) use prompt_args::parse_slash_name;
 mod skill_popup;
 pub(crate) use list_selection_view::SelectionViewParams;
 mod feedback_view;
@@ -737,6 +739,10 @@ impl BottomPane {
 
     pub(crate) fn take_recent_submission_attachments(&mut self) -> Vec<ComposerAttachment> {
         self.composer.take_recent_submission_attachments()
+    }
+
+    pub(crate) fn take_last_command_input(&mut self) -> Option<String> {
+        self.composer.take_last_command_input()
     }
 
     fn as_renderable(&'_ self) -> RenderableItem<'_> {

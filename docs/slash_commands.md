@@ -35,4 +35,4 @@ Control Codex’s behavior during an interactive session with slash commands.
 ---
 
 Notes:
-- `/diff` renders line, inline, and semantic diffs. Semantic diffs require `difftastic` on your `PATH` (install with `cargo install difftastic`).
+- `/diff` uses the configured diff view (`tui.diff_view`, or `--diff-view` on launch). Override per command with `--line`, `--inline`, or `--view line|inline`.

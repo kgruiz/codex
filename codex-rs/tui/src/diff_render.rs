@@ -13,17 +13,14 @@ use similar::TextDiff;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Mutex;
 
-use crate::diff_semantic::SemanticDiffInput;
-use crate::diff_semantic::difftastic_available;
-use crate::diff_semantic::difftastic_lines;
 use crate::exec_command::relativize_to_home;
 use crate::render::line_utils::line_to_static;
 use crate::render::line_utils::prefix_lines;
 use crate::render::renderable::Renderable;
 use crate::wrapping::RtOptions;
 use crate::wrapping::word_wrap_line;
+use codex_core::config::types::DiffView;
 use codex_core::git_info::get_git_repo_root;
 use codex_core::protocol::FileChange;
 
@@ -37,43 +34,23 @@ enum DiffLineType {
 pub struct DiffSummary {
     changes: HashMap<PathBuf, FileChange>,
     cwd: PathBuf,
-    semantic_cache: Mutex<Option<SemanticDiffCache>>,
-}
-
-#[derive(Debug)]
-pub(crate) struct SemanticDiffCache {
-    width: usize,
-    lines: Vec<RtLine<'static>>,
+    view: DiffView,
 }
 
 impl DiffSummary {
-    pub fn new(changes: HashMap<PathBuf, FileChange>, cwd: PathBuf) -> Self {
-        Self {
-            changes,
-            cwd,
-            semantic_cache: Mutex::new(None),
-        }
+    pub fn new(changes: HashMap<PathBuf, FileChange>, cwd: PathBuf, view: DiffView) -> Self {
+        Self { changes, cwd, view }
     }
 }
 
 impl Renderable for DiffSummary {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        let lines = create_diff_summary_with_semantic(
-            &self.changes,
-            &self.cwd,
-            area.width as usize,
-            &self.semantic_cache,
-        );
+        let lines = create_diff_summary(&self.changes, &self.cwd, area.width as usize, self.view);
         Paragraph::new(lines).render(area, buf);
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        let lines = create_diff_summary_with_semantic(
-            &self.changes,
-            &self.cwd,
-            width as usize,
-            &self.semantic_cache,
-        );
+        let lines = create_diff_summary(&self.changes, &self.cwd, width as usize, self.view);
         lines.len() as u16
     }
 }
@@ -92,38 +69,14 @@ impl Renderable for FileChange {
     }
 }
 
-#[cfg(test)]
 pub(crate) fn create_diff_summary(
     changes: &HashMap<PathBuf, FileChange>,
     cwd: &Path,
     wrap_cols: usize,
+    view: DiffView,
 ) -> Vec<RtLine<'static>> {
-    let rows = collect_rows(changes);
-    let line_view = render_changes_block(rows.clone(), wrap_cols, cwd, DiffViewKind::Line);
-    let inline_view = render_changes_block(rows, wrap_cols, cwd, DiffViewKind::Inline);
-
-    render_diff_sections(vec![
-        DiffSection::new("Line diff", line_view),
-        DiffSection::new("Inline diff", inline_view),
-    ])
-}
-
-pub(crate) fn create_diff_summary_with_semantic(
-    changes: &HashMap<PathBuf, FileChange>,
-    cwd: &Path,
-    wrap_cols: usize,
-    semantic_cache: &Mutex<Option<SemanticDiffCache>>,
-) -> Vec<RtLine<'static>> {
-    let rows = collect_rows(changes);
-    let line_view = render_changes_block(rows.clone(), wrap_cols, cwd, DiffViewKind::Line);
-    let inline_view = render_changes_block(rows, wrap_cols, cwd, DiffViewKind::Inline);
-    let semantic_view = semantic_lines_for_changes(changes, cwd, wrap_cols, semantic_cache);
-
-    render_diff_sections(vec![
-        DiffSection::new("Line diff", line_view),
-        DiffSection::new("Inline diff", inline_view),
-        DiffSection::new("Semantic diff (difftastic)", semantic_view),
-    ])
+    let view_lines = render_diff_view(changes, cwd, wrap_cols, view);
+    render_diff_sections(vec![DiffSection::new(diff_view_title(view), view_lines)])
 }
 
 pub(crate) struct DiffSection {
@@ -134,6 +87,13 @@ pub(crate) struct DiffSection {
 impl DiffSection {
     pub(crate) fn new(title: &'static str, lines: Vec<RtLine<'static>>) -> Self {
         Self { title, lines }
+    }
+}
+
+pub(crate) fn diff_view_title(view: DiffView) -> &'static str {
+    match view {
+        DiffView::Line => "Line diff",
+        DiffView::Inline => "Inline diff",
     }
 }
 
@@ -151,6 +111,19 @@ pub(crate) fn render_diff_sections(sections: Vec<DiffSection>) -> Vec<RtLine<'st
         }
     }
     out
+}
+
+pub(crate) fn render_diff_view(
+    changes: &HashMap<PathBuf, FileChange>,
+    cwd: &Path,
+    wrap_cols: usize,
+    view: DiffView,
+) -> Vec<RtLine<'static>> {
+    if changes.is_empty() {
+        return Vec::new();
+    }
+    let rows = collect_rows(changes);
+    render_changes_block(rows, wrap_cols, cwd, view)
 }
 
 // Shared row for per-file presentation
@@ -191,11 +164,6 @@ fn collect_rows(changes: &HashMap<PathBuf, FileChange>) -> Vec<Row> {
     rows
 }
 
-enum DiffViewKind {
-    Line,
-    Inline,
-}
-
 fn render_line_count_summary(added: usize, removed: usize) -> Vec<RtSpan<'static>> {
     let mut spans = Vec::new();
     spans.push("(".into());
@@ -210,7 +178,7 @@ fn render_changes_block(
     rows: Vec<Row>,
     wrap_cols: usize,
     cwd: &Path,
-    view: DiffViewKind,
+    view: DiffView,
 ) -> Vec<RtLine<'static>> {
     let mut out: Vec<RtLine<'static>> = Vec::new();
 
@@ -265,7 +233,7 @@ fn render_changes_block(
         }
 
         let mut lines = vec![];
-        render_change_with_view(&r.change, &mut lines, wrap_cols - 4, &view);
+        render_change_with_view(&r.change, &mut lines, wrap_cols - 4, view);
         out.extend(prefix_lines(lines, "    ".into(), "    ".into()));
     }
 
@@ -276,11 +244,11 @@ fn render_change_with_view(
     change: &FileChange,
     out: &mut Vec<RtLine<'static>>,
     width: usize,
-    view: &DiffViewKind,
+    view: DiffView,
 ) {
     match view {
-        DiffViewKind::Line => render_change_line(change, out, width),
-        DiffViewKind::Inline => render_change_inline(change, out, width),
+        DiffView::Line => render_change_line(change, out, width),
+        DiffView::Inline => render_change_inline(change, out, width),
     }
 }
 
@@ -644,117 +612,6 @@ pub(crate) fn display_path_for(path: &Path, cwd: &Path) -> String {
     chosen.display().to_string()
 }
 
-fn semantic_lines_for_changes(
-    changes: &HashMap<PathBuf, FileChange>,
-    cwd: &Path,
-    wrap_cols: usize,
-    cache: &Mutex<Option<SemanticDiffCache>>,
-) -> Vec<RtLine<'static>> {
-    if let Ok(cache_guard) = cache.lock()
-        && let Some(cached) = cache_guard.as_ref()
-        && cached.width == wrap_cols
-    {
-        return cached.lines.clone();
-    }
-    let lines = if difftastic_available() {
-        let SemanticInputs { inputs, warnings } = semantic_inputs_from_changes(changes, cwd);
-        difftastic_lines(&inputs, wrap_cols, &warnings)
-    } else {
-        difftastic_lines(&[], wrap_cols, &[])
-    };
-    if let Ok(mut cache_guard) = cache.lock() {
-        *cache_guard = Some(SemanticDiffCache {
-            width: wrap_cols,
-            lines: lines.clone(),
-        });
-    }
-    lines
-}
-
-struct SemanticInputs {
-    inputs: Vec<SemanticDiffInput>,
-    warnings: Vec<String>,
-}
-
-fn semantic_inputs_from_changes(
-    changes: &HashMap<PathBuf, FileChange>,
-    cwd: &Path,
-) -> SemanticInputs {
-    let rows = collect_rows(changes);
-    let mut inputs = Vec::new();
-    let mut warnings = Vec::new();
-
-    for row in rows {
-        let display_path = display_path_for(&row.path, cwd);
-        let display_path = if let Some(move_path) = &row.move_path {
-            let move_display = display_path_for(move_path, cwd);
-            format!("{display_path} -> {move_display}")
-        } else {
-            display_path
-        };
-
-        match &row.change {
-            FileChange::Add { content } => {
-                inputs.push(SemanticDiffInput {
-                    display_path,
-                    old: Vec::new(),
-                    new: content.as_bytes().to_vec(),
-                });
-            }
-            FileChange::Delete { content } => {
-                inputs.push(SemanticDiffInput {
-                    display_path,
-                    old: content.as_bytes().to_vec(),
-                    new: Vec::new(),
-                });
-            }
-            FileChange::Update { unified_diff, .. } => {
-                let old_bytes = match std::fs::read(&row.path) {
-                    Ok(bytes) => bytes,
-                    Err(err) => {
-                        warnings.push(format!(
-                            "Skipping {display_path}: failed to read file ({err})"
-                        ));
-                        continue;
-                    }
-                };
-                let old_text = match String::from_utf8(old_bytes) {
-                    Ok(text) => text,
-                    Err(err) => {
-                        warnings.push(format!(
-                            "Skipping {display_path}: file is not UTF-8 ({err})"
-                        ));
-                        continue;
-                    }
-                };
-                let patch = match diffy::Patch::from_str(unified_diff) {
-                    Ok(patch) => patch,
-                    Err(err) => {
-                        warnings.push(format!("Skipping {display_path}: invalid patch ({err})"));
-                        continue;
-                    }
-                };
-                let new_text = match diffy::apply(&old_text, &patch) {
-                    Ok(text) => text,
-                    Err(err) => {
-                        warnings.push(format!(
-                            "Skipping {display_path}: patch failed to apply ({err})"
-                        ));
-                        continue;
-                    }
-                };
-                inputs.push(SemanticDiffInput {
-                    display_path,
-                    old: old_text.into_bytes(),
-                    new: new_text.into_bytes(),
-                });
-            }
-        }
-    }
-
-    SemanticInputs { inputs, warnings }
-}
-
 fn calculate_add_remove_from_diff(diff: &str) -> (usize, usize) {
     if let Ok(patch) = diffy::Patch::from_str(diff) {
         patch
@@ -869,8 +726,11 @@ mod tests {
     use ratatui::widgets::Paragraph;
     use ratatui::widgets::WidgetRef;
     use ratatui::widgets::Wrap;
-    fn diff_summary_for_tests(changes: &HashMap<PathBuf, FileChange>) -> Vec<RtLine<'static>> {
-        create_diff_summary(changes, &PathBuf::from("/"), 80)
+    fn diff_summary_for_tests(
+        changes: &HashMap<PathBuf, FileChange>,
+        view: DiffView,
+    ) -> Vec<RtLine<'static>> {
+        create_diff_summary(changes, &PathBuf::from("/"), 80, view)
     }
 
     fn snapshot_lines(name: &str, lines: Vec<RtLine<'static>>, width: u16, height: u16) {
@@ -936,7 +796,7 @@ mod tests {
             },
         );
 
-        let lines = diff_summary_for_tests(&changes);
+        let lines = diff_summary_for_tests(&changes, DiffView::Line);
 
         snapshot_lines("apply_update_block", lines, 80, 12);
     }
@@ -956,7 +816,7 @@ mod tests {
             },
         );
 
-        let lines = diff_summary_for_tests(&changes);
+        let lines = diff_summary_for_tests(&changes, DiffView::Line);
 
         snapshot_lines("apply_update_with_rename_block", lines, 80, 12);
     }
@@ -984,7 +844,7 @@ mod tests {
             },
         );
 
-        let lines = diff_summary_for_tests(&changes);
+        let lines = diff_summary_for_tests(&changes, DiffView::Line);
 
         snapshot_lines("apply_multiple_files_block", lines, 80, 14);
     }
@@ -999,7 +859,7 @@ mod tests {
             },
         );
 
-        let lines = diff_summary_for_tests(&changes);
+        let lines = diff_summary_for_tests(&changes, DiffView::Line);
 
         snapshot_lines("apply_add_block", lines, 80, 10);
     }
@@ -1018,7 +878,7 @@ mod tests {
             },
         );
 
-        let lines = diff_summary_for_tests(&changes);
+        let lines = diff_summary_for_tests(&changes, DiffView::Line);
 
         // Cleanup best-effort; rendering has already read the file
         let _ = std::fs::remove_file(&tmp_path);
@@ -1042,7 +902,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 72);
+        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 72, DiffView::Line);
 
         // Render with backend width wider than wrap width to avoid Paragraph auto-wrap.
         snapshot_lines("apply_update_block_wraps_long_lines", lines, 80, 12);
@@ -1065,7 +925,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 28);
+        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 28, DiffView::Line);
         snapshot_lines_text("apply_update_block_wraps_long_lines_text", &lines);
     }
 
@@ -1092,7 +952,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 80);
+        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 80, DiffView::Line);
         snapshot_lines_text("apply_update_block_line_numbers_three_digits_text", &lines);
     }
 
@@ -1115,7 +975,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &cwd, 80);
+        let lines = create_diff_summary(&changes, &cwd, 80, DiffView::Line);
 
         snapshot_lines("apply_update_block_relativizes_path", lines, 80, 10);
     }

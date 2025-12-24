@@ -149,6 +149,9 @@ status_line = ["model", "context", "tokens-per-sec", "latency", "tool-time", "co
 # Keep queued messages when branching from Esc backtrack. Default: false
 keep_queue_on_branch = false
 
+# Default diff view for /diff and apply-patch previews. Default: line
+diff_view = "line"
+
 # Suppress internal reasoning events from output. Default: false
 hide_agent_reasoning = false
 

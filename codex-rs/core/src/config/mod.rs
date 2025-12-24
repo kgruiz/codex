@@ -1,5 +1,6 @@
 use crate::auth::AuthCredentialsStoreMode;
 use crate::config::types::DEFAULT_OTEL_ENVIRONMENT;
+use crate::config::types::DiffView;
 use crate::config::types::History;
 use crate::config::types::McpServerConfig;
 use crate::config::types::Notice;
@@ -184,6 +185,9 @@ pub struct Config {
 
     /// Keep queued messages when branching from Esc backtrack.
     pub keep_queue_on_branch: bool,
+
+    /// Default diff format shown in the TUI.
+    pub diff_view: DiffView,
 
     /// Keybinding overrides loaded from `[keybindings]` in `config.toml`.
     pub keybindings: HashMap<String, Vec<String>>,
@@ -1352,6 +1356,7 @@ impl Config {
                 .as_ref()
                 .map(|t| t.keep_queue_on_branch)
                 .unwrap_or(false),
+            diff_view: cfg.tui.as_ref().map(|t| t.diff_view).unwrap_or_default(),
             keybindings: cfg
                 .keybindings
                 .into_iter()
@@ -3137,6 +3142,7 @@ model_verbosity = "high"
                 show_tooltips: true,
                 status_line_items: Config::default_status_line_items(),
                 keep_queue_on_branch: false,
+                diff_view: DiffView::Line,
                 keybindings: HashMap::new(),
                 otel: OtelConfig::default(),
             },
@@ -3215,6 +3221,7 @@ model_verbosity = "high"
             show_tooltips: true,
             status_line_items: Config::default_status_line_items(),
             keep_queue_on_branch: false,
+            diff_view: DiffView::Line,
             keybindings: HashMap::new(),
             otel: OtelConfig::default(),
         };
@@ -3308,6 +3315,7 @@ model_verbosity = "high"
             show_tooltips: true,
             status_line_items: Config::default_status_line_items(),
             keep_queue_on_branch: false,
+            diff_view: DiffView::Line,
             keybindings: HashMap::new(),
             otel: OtelConfig::default(),
         };
@@ -3387,6 +3395,7 @@ model_verbosity = "high"
             show_tooltips: true,
             status_line_items: Config::default_status_line_items(),
             keep_queue_on_branch: false,
+            diff_view: DiffView::Line,
             keybindings: HashMap::new(),
             otel: OtelConfig::default(),
         };

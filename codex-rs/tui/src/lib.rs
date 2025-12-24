@@ -44,7 +44,6 @@ mod clipboard_paste;
 mod color;
 pub mod custom_terminal;
 mod diff_render;
-mod diff_semantic;
 mod exec_cell;
 mod exec_command;
 mod export_markdown;
@@ -130,6 +129,12 @@ pub async fn run_main(
         cli.config_overrides
             .raw_overrides
             .push("features.web_search_request=true".to_string());
+    }
+
+    if let Some(diff_view) = cli.diff_view {
+        cli.config_overrides
+            .raw_overrides
+            .push(format!("tui.diff_view={}", diff_view.as_str()));
     }
 
     // When using `--oss`, let the bootstrapper pick the model (defaulting to

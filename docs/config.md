@@ -892,6 +892,10 @@ status_line = ["model", "context", "tokens-per-sec", "latency", "tool-time", "co
 # Keep queued messages when branching from Esc backtrack.
 # Defaults to false.
 keep_queue_on_branch = true
+
+# Default diff view for /diff and apply-patch previews.
+# Options: "line" or "inline". Defaults to "line".
+diff_view = "line"
 ```
 
 Status line values are `model`, `context`, `cwd`, `git-branch`, `tokens-per-sec`, `latency`, `tool-time`, and `cost`.
@@ -1057,6 +1061,7 @@ Valid values:
 | `tui.notifications`                              | boolean \| array<string>                                          | Enable desktop notifications in the tui (default: true).                                                                        |
 | `tui.status_line`                                | array<string>                                                     | Ordered status line segments in the footer (default: model, context, tokens-per-sec, latency, tool-time, cost).                  |
 | `tui.keep_queue_on_branch`                       | boolean                                                           | Keep queued messages when branching from Esc backtrack (default: false).                                                         |
+| `tui.diff_view`                                  | `line` \| `inline`                                                | Default diff view for /diff and apply-patch previews (default: line).                                                            |
 | `keybindings`                                    | table<string,string \| array<string>>                             | Customize common TUI shortcuts (see `keybindings`).                                                                             |
 | `hide_agent_reasoning`                           | boolean                                                           | Hide model reasoning events.                                                                                                    |
 | `check_for_update_on_startup`                    | boolean                                                           | Check for Codex updates on startup (default: true). Set to `false` only if updates are centrally managed.                       |

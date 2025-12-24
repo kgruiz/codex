@@ -5,10 +5,3 @@ expression: lines_to_single_string(&approved_lines)
 • Line diff
 • Added foo.txt (+1 -0)
     1 +hello
-
-• Inline diff
-• Added foo.txt (+1 -0)
-    1  hello
-
-• Semantic diff (difftastic)
-difftastic not found on PATH (install with `cargo install difftastic`)

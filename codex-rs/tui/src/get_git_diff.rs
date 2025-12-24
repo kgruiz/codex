@@ -5,124 +5,58 @@
 //! untracked files. When the current directory is not inside a Git
 //! repository, the function returns `Ok(GitDiffResult::NotGitRepo)`.
 
-use codex_ansi_escape::ansi_escape_line;
+use codex_core::config::types::DiffView;
+use codex_core::protocol::FileChange;
+use diffy::create_patch;
+use ratatui::style::Stylize;
 use ratatui::text::Line as RtLine;
+use std::collections::HashMap;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::process::Command;
 
-use crate::diff_semantic::SemanticDiffInput;
-use crate::diff_semantic::difftastic_available;
-use crate::diff_semantic::difftastic_lines;
+use crate::diff_render::DiffSection;
+use crate::diff_render::diff_view_title;
+use crate::diff_render::render_diff_sections;
+use crate::diff_render::render_diff_view;
 
 #[derive(Debug)]
 pub(crate) enum GitDiffResult {
     NotGitRepo,
     Error(String),
-    Views(GitDiffViews),
+    Lines(Vec<RtLine<'static>>),
 }
 
-#[derive(Debug)]
-pub(crate) struct GitDiffViews {
-    pub line: Vec<RtLine<'static>>,
-    pub inline: Vec<RtLine<'static>>,
-    pub semantic: Vec<RtLine<'static>>,
-}
-
-pub(crate) async fn get_git_diff(width: usize) -> io::Result<GitDiffResult> {
+pub(crate) async fn get_git_diff(
+    cwd: &Path,
+    view: DiffView,
+    width: usize,
+) -> io::Result<GitDiffResult> {
     // First check if we are inside a Git repository.
-    if !inside_git_repo().await? {
+    if !inside_git_repo(cwd).await? {
         return Ok(GitDiffResult::NotGitRepo);
     }
 
-    // Run tracked diff and untracked file listing in parallel.
-    let (tracked_diff_res, tracked_inline_res, untracked_output_res) = tokio::join!(
-        run_git_capture_diff(&["diff", "--color"]),
-        run_git_capture_diff(&["diff", "--color", "--word-diff"]),
-        run_git_capture_stdout(&["ls-files", "--others", "--exclude-standard"]),
-    );
-    let tracked_diff = tracked_diff_res?;
-    let tracked_inline = tracked_inline_res?;
-    let untracked_output = untracked_output_res?;
+    let GitChanges { changes, warnings } = collect_git_changes(cwd).await?;
+    let view_lines = render_diff_view(&changes, cwd, width, view);
+    let mut lines = render_diff_sections(vec![DiffSection::new(diff_view_title(view), view_lines)]);
+    append_warnings(&mut lines, &warnings);
 
-    let null_device: &Path = if cfg!(windows) {
-        Path::new("NUL")
-    } else {
-        Path::new("/dev/null")
-    };
-
-    let null_path = null_device.to_str().unwrap_or("/dev/null").to_string();
-    let mut untracked_line = String::new();
-    let mut untracked_inline = String::new();
-    let mut join_set: tokio::task::JoinSet<io::Result<(String, String)>> =
-        tokio::task::JoinSet::new();
-    for file in untracked_output
-        .split('\n')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        let null_path = null_path.clone();
-        let file = file.to_string();
-        join_set.spawn(async move {
-            let line =
-                run_git_capture_diff(&["diff", "--color", "--no-index", "--", &null_path, &file])
-                    .await?;
-            let inline = run_git_capture_diff(&[
-                "diff",
-                "--color",
-                "--word-diff",
-                "--no-index",
-                "--",
-                &null_path,
-                &file,
-            ])
-            .await?;
-            Ok((line, inline))
-        });
-    }
-    while let Some(res) = join_set.join_next().await {
-        match res {
-            Ok(Ok((line, inline))) => {
-                untracked_line.push_str(&line);
-                untracked_inline.push_str(&inline);
-            }
-            Ok(Err(err)) if err.kind() == io::ErrorKind::NotFound => {}
-            Ok(Err(err)) => return Err(err),
-            Err(_) => {}
-        }
-    }
-
-    let line_diff = format!("{tracked_diff}{untracked_line}");
-    let inline_diff = format!("{tracked_inline}{untracked_inline}");
-
-    let line_lines = line_diff.lines().map(ansi_escape_line).collect();
-    let inline_lines = inline_diff.lines().map(ansi_escape_line).collect();
-
-    let semantic_lines = if difftastic_available() {
-        let SemanticInputs { inputs, warnings } = semantic_inputs_for_git_diff().await?;
-        difftastic_lines(&inputs, width, &warnings)
-    } else {
-        difftastic_lines(&[], width, &[])
-    };
-
-    Ok(GitDiffResult::Views(GitDiffViews {
-        line: line_lines,
-        inline: inline_lines,
-        semantic: semantic_lines,
-    }))
+    Ok(GitDiffResult::Lines(lines))
 }
 
-struct SemanticInputs {
-    inputs: Vec<SemanticDiffInput>,
+struct GitChanges {
+    changes: HashMap<PathBuf, FileChange>,
     warnings: Vec<String>,
 }
 
-async fn semantic_inputs_for_git_diff() -> io::Result<SemanticInputs> {
-    let repo_root = git_repo_root().await?;
-    let status_output = run_git_capture_stdout(&["diff", "--name-status", "-z", "-M"]).await?;
-    let mut inputs = Vec::new();
+async fn collect_git_changes(cwd: &Path) -> io::Result<GitChanges> {
+    let repo_root = git_repo_root(cwd).await?;
+    let status_output =
+        run_git_capture_stdout(&repo_root, &["diff", "--name-status", "-z", "-M"]).await?;
+    let mut changes = HashMap::new();
     let mut warnings = Vec::new();
 
     let mut parts = status_output.split('\0').filter(|s| !s.is_empty());
@@ -136,7 +70,7 @@ async fn semantic_inputs_for_git_diff() -> io::Result<SemanticInputs> {
                 let Some(new_path) = parts.next() else {
                     break;
                 };
-                if let Some(input) = build_semantic_input(
+                if let Some((path, change)) = build_change(
                     &repo_root,
                     status_char,
                     old_path,
@@ -145,43 +79,46 @@ async fn semantic_inputs_for_git_diff() -> io::Result<SemanticInputs> {
                 )
                 .await?
                 {
-                    inputs.push(input);
+                    changes.insert(path, change);
                 }
             }
             'A' | 'D' | 'M' => {
                 let Some(path) = parts.next() else {
                     break;
                 };
-                if let Some(input) =
-                    build_semantic_input(&repo_root, status_char, path, None, &mut warnings).await?
+                if let Some((path, change)) =
+                    build_change(&repo_root, status_char, path, None, &mut warnings).await?
                 {
-                    inputs.push(input);
+                    changes.insert(path, change);
                 }
             }
             _ => {}
         }
     }
 
-    let untracked_output =
-        run_git_capture_stdout(&["ls-files", "--others", "--exclude-standard", "-z"]).await?;
+    let untracked_output = run_git_capture_stdout(
+        &repo_root,
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+    )
+    .await?;
     for path in untracked_output.split('\0').filter(|s| !s.is_empty()) {
-        if let Some(input) =
-            build_semantic_input(&repo_root, 'A', path, None, &mut warnings).await?
+        if let Some((path, change)) =
+            build_change(&repo_root, 'A', path, None, &mut warnings).await?
         {
-            inputs.push(input);
+            changes.insert(path, change);
         }
     }
 
-    Ok(SemanticInputs { inputs, warnings })
+    Ok(GitChanges { changes, warnings })
 }
 
-async fn build_semantic_input(
+async fn build_change(
     repo_root: &Path,
     status: char,
     path: &str,
     renamed_to: Option<&str>,
     warnings: &mut Vec<String>,
-) -> io::Result<Option<SemanticDiffInput>> {
+) -> io::Result<Option<(PathBuf, FileChange)>> {
     let display_path = if let Some(new_path) = renamed_to {
         format!("{path} -> {new_path}")
     } else {
@@ -191,7 +128,7 @@ async fn build_semantic_input(
     let old_bytes = if matches!(status, 'A') {
         Vec::new()
     } else {
-        match run_git_capture_bytes(&["show", &format!(":{path}")]).await {
+        match run_git_capture_bytes(repo_root, &["show", &format!(":{path}")]).await {
             Ok(bytes) => bytes,
             Err(err) => {
                 warnings.push(format!("Skipping {display_path}: {err}"));
@@ -216,26 +153,74 @@ async fn build_semantic_input(
         return Ok(None);
     }
 
-    Ok(Some(SemanticDiffInput {
-        display_path,
-        old: old_bytes,
-        new: new_bytes,
-    }))
+    let old_text = if matches!(status, 'A') {
+        String::new()
+    } else {
+        match String::from_utf8(old_bytes) {
+            Ok(text) => text,
+            Err(err) => {
+                warnings.push(format!(
+                    "Skipping {display_path}: file is not UTF-8 ({err})"
+                ));
+                return Ok(None);
+            }
+        }
+    };
+    let new_text = if matches!(status, 'D') {
+        String::new()
+    } else {
+        match String::from_utf8(new_bytes) {
+            Ok(text) => text,
+            Err(err) => {
+                warnings.push(format!(
+                    "Skipping {display_path}: file is not UTF-8 ({err})"
+                ));
+                return Ok(None);
+            }
+        }
+    };
+
+    let move_path = renamed_to.map(|p| repo_root.join(p));
+    let path = repo_root.join(path);
+    let change = match status {
+        'A' => FileChange::Add { content: new_text },
+        'D' => FileChange::Delete { content: old_text },
+        _ => FileChange::Update {
+            unified_diff: create_patch(&old_text, &new_text).to_string(),
+            move_path,
+        },
+    };
+
+    Ok(Some((path, change)))
+}
+
+fn append_warnings(lines: &mut Vec<RtLine<'static>>, warnings: &[String]) {
+    if warnings.is_empty() {
+        return;
+    }
+    lines.push(RtLine::from(""));
+    lines.push(RtLine::from("Warnings:".dim().bold()));
+    lines.extend(
+        warnings
+            .iter()
+            .map(|warning| RtLine::from(warning.clone().dim())),
+    );
 }
 
 fn is_binary(bytes: &[u8]) -> bool {
     bytes.contains(&0)
 }
 
-async fn git_repo_root() -> io::Result<PathBuf> {
-    let output = run_git_capture_stdout(&["rev-parse", "--show-toplevel"]).await?;
+async fn git_repo_root(cwd: &Path) -> io::Result<PathBuf> {
+    let output = run_git_capture_stdout(cwd, &["rev-parse", "--show-toplevel"]).await?;
     Ok(PathBuf::from(output.trim()))
 }
 
 /// Helper that executes `git` with the given `args` and returns `stdout` as a
 /// UTF-8 string. Any non-zero exit status is considered an *error*.
-async fn run_git_capture_stdout(args: &[&str]) -> io::Result<String> {
+async fn run_git_capture_stdout(cwd: &Path, args: &[&str]) -> io::Result<String> {
     let output = Command::new("git")
+        .current_dir(cwd)
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -252,8 +237,9 @@ async fn run_git_capture_stdout(args: &[&str]) -> io::Result<String> {
     }
 }
 
-async fn run_git_capture_bytes(args: &[&str]) -> io::Result<Vec<u8>> {
+async fn run_git_capture_bytes(cwd: &Path, args: &[&str]) -> io::Result<Vec<u8>> {
     let output = Command::new("git")
+        .current_dir(cwd)
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -270,29 +256,10 @@ async fn run_git_capture_bytes(args: &[&str]) -> io::Result<Vec<u8>> {
     }
 }
 
-/// Like [`run_git_capture_stdout`] but treats exit status 1 as success and
-/// returns stdout. Git returns 1 for diffs when differences are present.
-async fn run_git_capture_diff(args: &[&str]) -> io::Result<String> {
-    let output = Command::new("git")
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .await?;
-
-    if output.status.success() || output.status.code() == Some(1) {
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-    } else {
-        Err(io::Error::other(format!(
-            "git {args:?} failed with status {status}",
-            status = output.status
-        )))
-    }
-}
-
 /// Determine if the current directory is inside a Git repository.
-async fn inside_git_repo() -> io::Result<bool> {
+async fn inside_git_repo(cwd: &Path) -> io::Result<bool> {
     let status = Command::new("git")
+        .current_dir(cwd)
         .args(["rev-parse", "--is-inside-work-tree"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
