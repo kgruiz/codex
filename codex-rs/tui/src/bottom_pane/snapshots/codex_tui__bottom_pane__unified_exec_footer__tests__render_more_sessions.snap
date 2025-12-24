@@ -1,6 +1,5 @@
 ---
 source: tui/src/bottom_pane/unified_exec_footer.rs
-assertion_line: 123
 expression: "format!(\"{buf:?}\")"
 ---
 Buffer {

@@ -19,6 +19,8 @@ pub(crate) struct ExecCall {
     pub(crate) command: Vec<String>,
     pub(crate) parsed: Vec<ParsedCommand>,
     pub(crate) output: Option<CommandOutput>,
+    pub(crate) live_output: String,
+    pub(crate) live_output_scroll: usize,
     pub(crate) source: ExecCommandSource,
     pub(crate) start_time: Option<Instant>,
     pub(crate) duration: Option<Duration>,
@@ -52,6 +54,8 @@ impl ExecCell {
             command,
             parsed,
             output: None,
+            live_output: String::new(),
+            live_output_scroll: usize::MAX,
             source,
             start_time: Some(Instant::now()),
             duration: None,
@@ -75,6 +79,8 @@ impl ExecCell {
     ) {
         if let Some(call) = self.calls.iter_mut().rev().find(|c| c.call_id == call_id) {
             call.output = Some(output);
+            call.live_output.clear();
+            call.live_output_scroll = usize::MAX;
             call.duration = Some(duration);
             call.start_time = None;
         }
@@ -98,6 +104,8 @@ impl ExecCell {
                     formatted_output: String::new(),
                     aggregated_output: String::new(),
                 });
+                call.live_output.clear();
+                call.live_output_scroll = usize::MAX;
             }
         }
     }

@@ -119,6 +119,7 @@ use crate::clipboard_paste::paste_text_from_clipboard;
 use crate::diff_render::display_path_for;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::ExecCell;
+use crate::exec_cell::LiveOutputScrollAction;
 use crate::exec_cell::new_active_exec_command;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::export_markdown;
@@ -1241,9 +1242,23 @@ impl ChatWidget {
 
     fn on_exec_command_output_delta(
         &mut self,
-        _ev: codex_core::protocol::ExecCommandOutputDeltaEvent,
+        ev: codex_core::protocol::ExecCommandOutputDeltaEvent,
     ) {
-        // TODO: Handle streaming exec output if/when implemented
+        if self.suppressed_exec_calls.contains(&ev.call_id) {
+            return;
+        }
+        let delta = String::from_utf8_lossy(&ev.chunk).to_string();
+        if delta.is_empty() {
+            return;
+        }
+        let appended = self
+            .active_cell
+            .as_mut()
+            .and_then(|cell| cell.as_any_mut().downcast_mut::<ExecCell>())
+            .is_some_and(|cell| cell.append_live_output(&ev.call_id, &delta));
+        if appended {
+            self.request_redraw();
+        }
     }
 
     fn on_terminal_interaction(&mut self, ev: TerminalInteractionEvent) {
@@ -2122,6 +2137,9 @@ impl ChatWidget {
                 self.on_ctrl_c();
                 return;
             }
+            key_event if self.handle_live_output_scroll_key(key_event) => {
+                return;
+            }
             key_event
                 if key_event.kind == KeyEventKind::Press
                     && self.keybindings.paste.iter().any(|b| b.matches(&key_event)) =>
@@ -2184,6 +2202,40 @@ impl ChatWidget {
         }
 
         self.maybe_send_next_queued_input();
+    }
+
+    fn handle_live_output_scroll_key(&mut self, key_event: KeyEvent) -> bool {
+        if key_event.kind != KeyEventKind::Press {
+            return false;
+        }
+        if self.bottom_pane.has_active_view() || self.bottom_pane.composer_popup_active() {
+            return false;
+        }
+        if !self.bottom_pane.is_task_running() {
+            return false;
+        }
+        let action = match key_event.code {
+            KeyCode::PageUp => LiveOutputScrollAction::PageUp,
+            KeyCode::PageDown => LiveOutputScrollAction::PageDown,
+            _ => return false,
+        };
+        let Some(width) = self.last_rendered_width.get() else {
+            return false;
+        };
+        let Some(exec) = self
+            .active_cell
+            .as_mut()
+            .and_then(|cell| cell.as_any_mut().downcast_mut::<ExecCell>())
+        else {
+            return false;
+        };
+        if !exec.has_live_output_box() {
+            return false;
+        }
+        if exec.scroll_live_output(width as u16, action) {
+            self.request_redraw();
+        }
+        true
     }
 
     fn cycle_model(&mut self, direction: isize) {

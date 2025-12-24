@@ -1,0 +1,12 @@
+---
+source: tui/src/history_cell.rs
+expression: rendered
+---
+• Running echo streaming
+  └ ┌ live output · pgup (fn + ↑)/pgdn (fn + ↓) to scroll
+    │ line 3
+    │ line 4
+    │ line 5
+    │ line 6
+    │ line 7
+    └

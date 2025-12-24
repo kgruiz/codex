@@ -2109,6 +2109,8 @@ mod tests {
                     },
                 ],
                 output: None,
+                live_output: String::new(),
+                live_output_scroll: usize::MAX,
                 source: ExecCommandSource::Agent,
                 start_time: Some(Instant::now()),
                 duration: None,
@@ -2136,6 +2138,8 @@ mod tests {
                     cmd: "rg shimmer_spans".into(),
                 }],
                 output: None,
+                live_output: String::new(),
+                live_output_scroll: usize::MAX,
                 source: ExecCommandSource::Agent,
                 start_time: Some(Instant::now()),
                 duration: None,
@@ -2205,6 +2209,8 @@ mod tests {
                     },
                 ],
                 output: None,
+                live_output: String::new(),
+                live_output_scroll: usize::MAX,
                 source: ExecCommandSource::Agent,
                 start_time: Some(Instant::now()),
                 duration: None,
@@ -2229,6 +2235,8 @@ mod tests {
                 command: vec!["bash".into(), "-lc".into(), cmd],
                 parsed: Vec::new(),
                 output: None,
+                live_output: String::new(),
+                live_output_scroll: usize::MAX,
                 source: ExecCommandSource::Agent,
                 start_time: Some(Instant::now()),
                 duration: None,
@@ -2255,6 +2263,8 @@ mod tests {
                 command: vec!["echo".into(), "ok".into()],
                 parsed: Vec::new(),
                 output: None,
+                live_output: String::new(),
+                live_output_scroll: usize::MAX,
                 source: ExecCommandSource::Agent,
                 start_time: Some(Instant::now()),
                 duration: None,
@@ -2270,6 +2280,55 @@ mod tests {
     }
 
     #[test]
+    fn running_exec_shows_live_output_box() {
+        let call_id = "c1".to_string();
+        let cell = ExecCell::new(
+            ExecCall {
+                call_id,
+                command: vec!["bash".into(), "-lc".into(), "echo streaming".into()],
+                parsed: Vec::new(),
+                output: None,
+                live_output: "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\n".to_string(),
+                live_output_scroll: usize::MAX,
+                source: ExecCommandSource::Agent,
+                start_time: Some(Instant::now()),
+                duration: None,
+                interaction_input: None,
+            },
+            false,
+        );
+        let lines = cell.display_lines(60);
+        let rendered = render_lines(&lines).join("\n");
+        insta::assert_snapshot!(rendered);
+    }
+
+    #[test]
+    fn running_exec_live_output_scrolls() {
+        use crate::exec_cell::LiveOutputScrollAction;
+
+        let call_id = "c1".to_string();
+        let mut cell = ExecCell::new(
+            ExecCall {
+                call_id,
+                command: vec!["bash".into(), "-lc".into(), "echo streaming".into()],
+                parsed: Vec::new(),
+                output: None,
+                live_output: "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\n".to_string(),
+                live_output_scroll: usize::MAX,
+                source: ExecCommandSource::Agent,
+                start_time: Some(Instant::now()),
+                duration: None,
+                interaction_input: None,
+            },
+            false,
+        );
+        cell.scroll_live_output(60, LiveOutputScrollAction::PageUp);
+        let lines = cell.display_lines(60);
+        let rendered = render_lines(&lines).join("\n");
+        insta::assert_snapshot!(rendered);
+    }
+
+    #[test]
     fn single_line_command_wraps_with_four_space_continuation() {
         let call_id = "c1".to_string();
         let long = "a_very_long_token_without_spaces_to_force_wrapping".to_string();
@@ -2279,6 +2338,8 @@ mod tests {
                 command: vec!["bash".into(), "-lc".into(), long],
                 parsed: Vec::new(),
                 output: None,
+                live_output: String::new(),
+                live_output_scroll: usize::MAX,
                 source: ExecCommandSource::Agent,
                 start_time: Some(Instant::now()),
                 duration: None,
@@ -2302,6 +2363,8 @@ mod tests {
                 command: vec!["bash".into(), "-lc".into(), cmd],
                 parsed: Vec::new(),
                 output: None,
+                live_output: String::new(),
+                live_output_scroll: usize::MAX,
                 source: ExecCommandSource::Agent,
                 start_time: Some(Instant::now()),
                 duration: None,
@@ -2326,6 +2389,8 @@ mod tests {
                 command: vec!["bash".into(), "-lc".into(), cmd],
                 parsed: Vec::new(),
                 output: None,
+                live_output: String::new(),
+                live_output_scroll: usize::MAX,
                 source: ExecCommandSource::Agent,
                 start_time: Some(Instant::now()),
                 duration: None,
@@ -2350,6 +2415,8 @@ mod tests {
                 command: vec!["bash".into(), "-lc".into(), "seq 1 10 1>&2 && false".into()],
                 parsed: Vec::new(),
                 output: None,
+                live_output: String::new(),
+                live_output_scroll: usize::MAX,
                 source: ExecCommandSource::Agent,
                 start_time: Some(Instant::now()),
                 duration: None,
@@ -2400,6 +2467,8 @@ mod tests {
                 command: vec!["bash".into(), "-lc".into(), long_cmd.to_string()],
                 parsed: Vec::new(),
                 output: None,
+                live_output: String::new(),
+                live_output_scroll: usize::MAX,
                 source: ExecCommandSource::Agent,
                 start_time: Some(Instant::now()),
                 duration: None,

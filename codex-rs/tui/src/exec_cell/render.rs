@@ -5,6 +5,7 @@ use super::model::ExecCall;
 use super::model::ExecCell;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::history_cell::HistoryCell;
+use crate::key_hint;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::render::line_utils::prefix_lines;
 use crate::render::line_utils::push_owned_lines;
@@ -17,6 +18,7 @@ use codex_common::elapsed::format_duration;
 use codex_core::bash::extract_bash_command;
 use codex_core::protocol::ExecCommandSource;
 use codex_protocol::parse_command::ParsedCommand;
+use crossterm::event::KeyCode;
 use itertools::Itertools;
 use ratatui::prelude::*;
 use ratatui::style::Modifier;
@@ -27,6 +29,14 @@ use unicode_width::UnicodeWidthStr;
 pub(crate) const TOOL_CALL_MAX_LINES: usize = 5;
 const USER_SHELL_TOOL_CALL_MAX_LINES: usize = 50;
 const MAX_INTERACTION_PREVIEW_CHARS: usize = 80;
+const LIVE_OUTPUT_VIEWPORT_LINES: usize = 5;
+const LIVE_OUTPUT_BORDER_PREFIX: &str = "│ ";
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum LiveOutputScrollAction {
+    PageUp,
+    PageDown,
+}
 
 pub(crate) struct OutputLinesParams {
     pub(crate) line_limit: usize,
@@ -49,6 +59,8 @@ pub(crate) fn new_active_exec_command(
             command,
             parsed,
             output: None,
+            live_output: String::new(),
+            live_output_scroll: usize::MAX,
             source,
             start_time: Some(Instant::now()),
             duration: None,
@@ -175,6 +187,59 @@ pub(crate) fn output_lines(
         lines: out,
         omitted,
     }
+}
+
+struct LiveOutputViewport {
+    visible: Vec<Line<'static>>,
+    total: usize,
+    max_scroll: usize,
+}
+
+fn live_output_viewport(
+    output: &str,
+    wrap_width: usize,
+    scroll_offset: usize,
+) -> LiveOutputViewport {
+    let mut wrapped_lines = live_output_wrapped_lines(output, wrap_width);
+    if wrapped_lines.is_empty() {
+        wrapped_lines.push(Line::from("(no output yet)".dim()));
+    }
+    let total = wrapped_lines.len();
+    let viewport = LIVE_OUTPUT_VIEWPORT_LINES.min(total).max(1);
+    let max_scroll = total.saturating_sub(viewport);
+    let current_scroll = if scroll_offset == usize::MAX {
+        max_scroll
+    } else {
+        scroll_offset.min(max_scroll)
+    };
+    let visible = wrapped_lines
+        .into_iter()
+        .skip(current_scroll)
+        .take(viewport)
+        .collect();
+    LiveOutputViewport {
+        visible,
+        total,
+        max_scroll,
+    }
+}
+
+fn live_output_wrapped_lines(output: &str, wrap_width: usize) -> Vec<Line<'static>> {
+    let lines: Vec<&str> = if output.is_empty() {
+        vec!["(no output yet)"]
+    } else {
+        output.lines().collect()
+    };
+    let mut wrapped = Vec::new();
+    let opts = RtOptions::new(wrap_width.max(1)).word_splitter(WordSplitter::NoHyphenation);
+    for raw in lines {
+        let mut line = ansi_escape_line(raw);
+        line.spans.iter_mut().for_each(|span| {
+            span.style = span.style.add_modifier(Modifier::DIM);
+        });
+        push_owned_lines(&word_wrap_line(&line, opts.clone()), &mut wrapped);
+    }
+    wrapped
 }
 
 pub(crate) fn spinner(start_time: Option<Instant>, animations_enabled: bool) -> Span<'static> {
@@ -486,9 +551,112 @@ impl ExecCell {
                     ));
                 }
             }
+        } else if !call.is_unified_exec_interaction() {
+            let mut header_spans = vec!["┌ ".dim(), "live output".dim()];
+            let prefix_width = UnicodeWidthStr::width(LIVE_OUTPUT_BORDER_PREFIX);
+            let wrap_width = layout
+                .output_block
+                .wrap_width(width)
+                .saturating_sub(prefix_width)
+                .max(1);
+            let viewport =
+                live_output_viewport(&call.live_output, wrap_width, call.live_output_scroll);
+            if viewport.max_scroll > 0 {
+                header_spans.push(" · ".dim());
+                header_spans.push(key_hint::plain(KeyCode::PageUp).into());
+                header_spans.push("/".dim());
+                header_spans.push(key_hint::plain(KeyCode::PageDown).into());
+                header_spans.push(" to scroll".dim());
+            }
+            let mut block_lines = Vec::new();
+            block_lines.push(header_spans.into());
+            for mut line in viewport.visible {
+                line.spans.insert(0, LIVE_OUTPUT_BORDER_PREFIX.dim());
+                block_lines.push(line);
+            }
+            block_lines.push(Line::from("└".dim()));
+            lines.extend(prefix_lines(
+                block_lines,
+                Span::from(layout.output_block.initial_prefix).dim(),
+                Span::from(layout.output_block.subsequent_prefix),
+            ));
         }
 
         lines
+    }
+
+    pub(crate) fn append_live_output(&mut self, call_id: &str, delta: &str) -> bool {
+        if delta.is_empty() {
+            return false;
+        }
+        if let Some(call) = self
+            .calls
+            .iter_mut()
+            .rev()
+            .find(|call| call.call_id == call_id && call.output.is_none())
+        {
+            call.live_output.push_str(delta);
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn has_live_output_box(&self) -> bool {
+        if self.is_exploring_cell() {
+            return false;
+        }
+        self.calls
+            .iter()
+            .any(|call| call.output.is_none() && !call.is_unified_exec_interaction())
+    }
+
+    pub(crate) fn scroll_live_output(
+        &mut self,
+        width: u16,
+        action: LiveOutputScrollAction,
+    ) -> bool {
+        if self.is_exploring_cell() {
+            return false;
+        }
+        let Some(call) = self
+            .calls
+            .iter_mut()
+            .rev()
+            .find(|call| call.output.is_none() && !call.is_unified_exec_interaction())
+        else {
+            return false;
+        };
+
+        let prefix_width = UnicodeWidthStr::width(LIVE_OUTPUT_BORDER_PREFIX);
+        let wrap_width = EXEC_DISPLAY_LAYOUT
+            .output_block
+            .wrap_width(width)
+            .saturating_sub(prefix_width)
+            .max(1);
+        let viewport = live_output_viewport(&call.live_output, wrap_width, call.live_output_scroll);
+        if viewport.max_scroll == 0 {
+            return false;
+        }
+        let current_scroll = if call.live_output_scroll == usize::MAX {
+            viewport.max_scroll
+        } else {
+            call.live_output_scroll.min(viewport.max_scroll)
+        };
+        let page = LIVE_OUTPUT_VIEWPORT_LINES.min(viewport.total).max(1);
+        let next_scroll = match action {
+            LiveOutputScrollAction::PageUp => current_scroll.saturating_sub(page),
+            LiveOutputScrollAction::PageDown => (current_scroll + page).min(viewport.max_scroll),
+        };
+        let updated_scroll = if next_scroll >= viewport.max_scroll {
+            usize::MAX
+        } else {
+            next_scroll
+        };
+        if updated_scroll == call.live_output_scroll {
+            return false;
+        }
+        call.live_output_scroll = updated_scroll;
+        true
     }
 
     fn limit_lines_from_start(lines: &[Line<'static>], keep: usize) -> Vec<Line<'static>> {
@@ -675,6 +843,8 @@ mod tests {
             command: vec!["bash".into(), "-lc".into(), "echo long".into()],
             parsed: Vec::new(),
             output: Some(output),
+            live_output: String::new(),
+            live_output_scroll: usize::MAX,
             source: ExecCommandSource::UserShell,
             start_time: None,
             duration: None,
