@@ -91,42 +91,11 @@ pub(crate) fn create_diff_summary(
     view: DiffView,
 ) -> Vec<RtLine<'static>> {
     let view_lines = render_diff_view(changes, cwd, wrap_cols, view);
-    render_diff_sections(vec![DiffSection::new(diff_view_title(view), view_lines)])
-}
-
-pub(crate) struct DiffSection {
-    title: &'static str,
-    lines: Vec<RtLine<'static>>,
-}
-
-impl DiffSection {
-    pub(crate) fn new(title: &'static str, lines: Vec<RtLine<'static>>) -> Self {
-        Self { title, lines }
+    if view_lines.is_empty() {
+        vec![RtLine::from("(no changes)".dim().italic())]
+    } else {
+        view_lines
     }
-}
-
-pub(crate) fn diff_view_title(view: DiffView) -> &'static str {
-    match view {
-        DiffView::Line => "Line diff",
-        DiffView::Inline => "Inline diff",
-        DiffView::SideBySide => "Side-by-side diff",
-    }
-}
-
-pub(crate) fn render_diff_sections(sections: Vec<DiffSection>) -> Vec<RtLine<'static>> {
-    let mut out = Vec::new();
-    for (idx, section) in sections.into_iter().enumerate() {
-        if idx > 0 {
-            out.push(RtLine::from(""));
-        }
-        out.push(RtLine::from(vec!["• ".dim(), section.title.bold()]));
-        if section.lines.is_empty() {
-            out.push(RtLine::from("(no changes)".dim().italic()));
-        } else {
-            out.extend(section.lines);
-        }
-    }
-    out
 }
 
 pub(crate) fn render_diff_view(

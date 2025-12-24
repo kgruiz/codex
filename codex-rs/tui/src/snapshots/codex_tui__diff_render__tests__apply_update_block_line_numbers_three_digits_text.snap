@@ -2,7 +2,6 @@
 source: tui/src/diff_render.rs
 expression: text
 ---
-• Line diff
 • Edited hundreds.txt (+1 -1)
      97  line 97
      98  line 98

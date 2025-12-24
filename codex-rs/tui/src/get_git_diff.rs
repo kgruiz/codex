@@ -17,9 +17,6 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::process::Command;
 
-use crate::diff_render::DiffSection;
-use crate::diff_render::diff_view_title;
-use crate::diff_render::render_diff_sections;
 use crate::diff_render::render_diff_view;
 
 #[derive(Debug)]
@@ -41,7 +38,11 @@ pub(crate) async fn get_git_diff(
 
     let GitChanges { changes, warnings } = collect_git_changes(cwd).await?;
     let view_lines = render_diff_view(&changes, cwd, width, view);
-    let mut lines = render_diff_sections(vec![DiffSection::new(diff_view_title(view), view_lines)]);
+    let mut lines = if view_lines.is_empty() {
+        vec![RtLine::from("(no changes)".dim().italic())]
+    } else {
+        view_lines
+    };
     append_warnings(&mut lines, &warnings);
 
     Ok(GitDiffResult::Lines(lines))

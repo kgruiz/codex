@@ -6,7 +6,6 @@ expression: terminal.backend().vt100().screen().contents()
 
   Reason: The model wants to apply changes
 
-  • Line diff
   • Added README.md (+2 -0)
       1 +hello
       2 +world
