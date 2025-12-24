@@ -8,11 +8,13 @@ use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
 use ratatui::layout::Margin;
 use ratatui::layout::Rect;
+use ratatui::style::Color;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
 use ratatui::widgets::StatefulWidgetRef;
 use ratatui::widgets::WidgetRef;
 
@@ -48,6 +50,7 @@ use crate::style::user_message_style;
 use crate::text_formatting::truncate_text;
 use codex_common::fuzzy_match::fuzzy_match;
 use codex_core::config::StatusLineItem;
+use codex_core::protocol::SessionMode;
 use codex_protocol::custom_prompts::CustomPrompt;
 use codex_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
 use codex_protocol::openai_models::ReasoningEffort;
@@ -179,6 +182,7 @@ pub(crate) struct ChatComposer {
     footer_hint_override: Option<Vec<(String, String)>>,
     context_window_percent: Option<i64>,
     context_window_used_tokens: Option<i64>,
+    session_mode: SessionMode,
     session_model: String,
     session_reasoning_effort: Option<ReasoningEffort>,
     status_line_items: Vec<StatusLineItem>,
@@ -235,6 +239,7 @@ impl ChatComposer {
             footer_hint_override: None,
             context_window_percent: None,
             context_window_used_tokens: None,
+            session_mode: SessionMode::Normal,
             session_model: String::new(),
             session_reasoning_effort: None,
             status_line_items: default_status_line_items(),
@@ -276,6 +281,14 @@ impl ChatComposer {
             Layout::vertical([Constraint::Min(3), popup_constraint]).areas(area);
         let textarea_rect = composer_rect.inset(Insets::tlbr(1, LIVE_PREFIX_COLS, 1, 1));
         [composer_rect, textarea_rect, popup_rect]
+    }
+
+    fn composer_border_style(&self) -> Option<Style> {
+        match self.session_mode {
+            SessionMode::Normal => None,
+            SessionMode::Plan => Some(Style::default().fg(Color::Red)),
+            SessionMode::Ask => Some(Style::default().fg(Color::Green)),
+        }
     }
 
     fn footer_spacing(footer_hint_height: u16) -> u16 {
@@ -2433,6 +2446,15 @@ impl ChatComposer {
         true
     }
 
+    pub(crate) fn set_session_mode(&mut self, mode: SessionMode) -> bool {
+        if self.session_mode == mode {
+            return false;
+        }
+
+        self.session_mode = mode;
+        true
+    }
+
     pub(crate) fn set_session_reasoning_effort(&mut self, effort: Option<ReasoningEffort>) -> bool {
         if self.session_reasoning_effort == effort {
             return false;
@@ -2530,7 +2552,15 @@ impl Renderable for ChatComposer {
             }
         }
         let style = user_message_style();
-        Block::default().style(style).render_ref(composer_rect, buf);
+        if let Some(border_style) = self.composer_border_style() {
+            Block::default()
+                .style(style)
+                .borders(Borders::ALL)
+                .border_style(border_style)
+                .render_ref(composer_rect, buf);
+        } else {
+            Block::default().style(style).render_ref(composer_rect, buf);
+        }
         if !textarea_rect.is_empty() {
             buf.set_span(
                 textarea_rect.x - LIVE_PREFIX_COLS,

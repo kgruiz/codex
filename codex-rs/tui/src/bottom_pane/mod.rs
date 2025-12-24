@@ -16,6 +16,7 @@ pub(crate) use bottom_pane_view::ViewCompletionBehavior;
 use codex_core::features::Features;
 use codex_core::skills::model::SkillMetadata;
 use codex_file_search::FileMatch;
+use codex_core::protocol::SessionMode;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
@@ -392,6 +393,12 @@ impl BottomPane {
 
     pub(crate) fn set_session_model(&mut self, model: String) {
         if self.composer.set_session_model(model) {
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn set_session_mode(&mut self, mode: SessionMode) {
+        if self.composer.set_session_mode(mode) {
             self.request_redraw();
         }
     }

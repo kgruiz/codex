@@ -619,6 +619,7 @@ impl ChatWidget {
         self.session_mode = event.mode;
         self.session_header.set_model(&model_for_header);
         self.bottom_pane.set_session_model(model_for_header.clone());
+        self.bottom_pane.set_session_mode(event.mode);
         self.bottom_pane.set_session_reasoning_effort(
             event.reasoning_effort.or(self.effective_reasoning_effort()),
         );
@@ -656,6 +657,7 @@ impl ChatWidget {
 
         self.session_header.set_model(&event.model);
         self.bottom_pane.set_session_model(event.model.clone());
+        self.bottom_pane.set_session_mode(event.mode);
         self.bottom_pane
             .set_session_reasoning_effort(event.reasoning_effort);
 
@@ -5317,6 +5319,7 @@ impl ChatWidget {
             return;
         }
         self.session_mode = mode;
+        self.bottom_pane.set_session_mode(mode);
         self.submit_op(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
