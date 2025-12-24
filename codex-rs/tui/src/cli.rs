@@ -98,6 +98,7 @@ pub struct Cli {
 pub enum DiffViewCliArg {
     Line,
     Inline,
+    SideBySide,
 }
 
 impl DiffViewCliArg {
@@ -105,6 +106,7 @@ impl DiffViewCliArg {
         match self {
             Self::Line => "line",
             Self::Inline => "inline",
+            Self::SideBySide => "side-by-side",
         }
     }
 }

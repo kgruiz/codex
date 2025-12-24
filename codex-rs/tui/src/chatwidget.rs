@@ -5708,9 +5708,13 @@ fn diff_view_override(input: Option<&str>, default_view: DiffView) -> Result<Dif
         match arg.as_str() {
             "--inline" => view_override = Some(DiffView::Inline),
             "--line" => view_override = Some(DiffView::Line),
+            "--side-by-side" => view_override = Some(DiffView::SideBySide),
             "--view" => {
                 let Some(value) = args_iter.next() else {
-                    return Err("Expected a value after --view (line or inline).".to_string());
+                    return Err(
+                        "Expected a value after --view (line, inline, or side-by-side)."
+                            .to_string(),
+                    );
                 };
                 view_override = Some(parse_diff_view_value(value)?);
             }
@@ -5730,8 +5734,9 @@ fn parse_diff_view_value(value: &str) -> Result<DiffView, String> {
     match value {
         "line" => Ok(DiffView::Line),
         "inline" => Ok(DiffView::Inline),
+        "side-by-side" | "side_by_side" | "side" => Ok(DiffView::SideBySide),
         _ => Err(format!(
-            "Invalid /diff view '{value}'. Use 'line' or 'inline'."
+            "Invalid /diff view '{value}'. Use 'line', 'inline', or 'side-by-side'."
         )),
     }
 }

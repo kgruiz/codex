@@ -150,6 +150,7 @@ status_line = ["model", "context", "tokens-per-sec", "latency", "tool-time", "co
 keep_queue_on_branch = false
 
 # Default diff view for /diff and apply-patch previews. Default: line
+# Options: "line", "inline", or "side-by-side"
 diff_view = "line"
 
 # Suppress internal reasoning events from output. Default: false

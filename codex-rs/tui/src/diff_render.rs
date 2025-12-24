@@ -13,6 +13,7 @@ use similar::TextDiff;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use unicode_width::UnicodeWidthStr;
 
 use crate::exec_command::relativize_to_home;
 use crate::render::line_utils::line_to_static;
@@ -29,6 +30,20 @@ enum DiffLineType {
     Insert,
     Delete,
     Context,
+}
+
+const SIDE_BY_SIDE_SEPARATOR: &str = " │ ";
+
+#[derive(Clone)]
+struct ColumnLine {
+    line_number: Option<usize>,
+    spans: Vec<RtSpan<'static>>,
+}
+
+#[derive(Clone)]
+struct SideBySideRow {
+    left: Option<ColumnLine>,
+    right: Option<ColumnLine>,
 }
 
 pub struct DiffSummary {
@@ -94,6 +109,7 @@ pub(crate) fn diff_view_title(view: DiffView) -> &'static str {
     match view {
         DiffView::Line => "Line diff",
         DiffView::Inline => "Inline diff",
+        DiffView::SideBySide => "Side-by-side diff",
     }
 }
 
@@ -249,6 +265,7 @@ fn render_change_with_view(
     match view {
         DiffView::Line => render_change_line(change, out, width),
         DiffView::Inline => render_change_inline(change, out, width),
+        DiffView::SideBySide => render_change_side_by_side(change, out, width),
     }
 }
 
@@ -533,6 +550,204 @@ fn render_change_inline(change: &FileChange, out: &mut Vec<RtLine<'static>>, wid
     }
 }
 
+fn render_change_side_by_side(change: &FileChange, out: &mut Vec<RtLine<'static>>, width: usize) {
+    match change {
+        FileChange::Add { content } => {
+            let line_number_width = line_number_width(content.lines().count());
+            let Some((left_width, right_width)) =
+                side_by_side_column_widths(width, line_number_width)
+            else {
+                render_change_inline(change, out, width);
+                return;
+            };
+            let rows = content
+                .lines()
+                .enumerate()
+                .map(|(idx, raw)| SideBySideRow {
+                    left: None,
+                    right: Some(ColumnLine {
+                        line_number: Some(idx + 1),
+                        spans: vec![RtSpan::styled(raw.to_string(), style_add())],
+                    }),
+                })
+                .collect();
+            render_side_by_side_rows(rows, out, left_width, right_width, line_number_width);
+        }
+        FileChange::Delete { content } => {
+            let line_number_width = line_number_width(content.lines().count());
+            let Some((left_width, right_width)) =
+                side_by_side_column_widths(width, line_number_width)
+            else {
+                render_change_inline(change, out, width);
+                return;
+            };
+            let rows = content
+                .lines()
+                .enumerate()
+                .map(|(idx, raw)| SideBySideRow {
+                    left: Some(ColumnLine {
+                        line_number: Some(idx + 1),
+                        spans: vec![RtSpan::styled(raw.to_string(), style_del())],
+                    }),
+                    right: None,
+                })
+                .collect();
+            render_side_by_side_rows(rows, out, left_width, right_width, line_number_width);
+        }
+        FileChange::Update { unified_diff, .. } => {
+            let Ok(patch) = diffy::Patch::from_str(unified_diff) else {
+                return;
+            };
+            let mut max_line_number = 0;
+            for h in patch.hunks() {
+                let mut old_ln = h.old_range().start();
+                let mut new_ln = h.new_range().start();
+                for l in h.lines() {
+                    match l {
+                        diffy::Line::Insert(_) => {
+                            max_line_number = max_line_number.max(new_ln);
+                            new_ln += 1;
+                        }
+                        diffy::Line::Delete(_) => {
+                            max_line_number = max_line_number.max(old_ln);
+                            old_ln += 1;
+                        }
+                        diffy::Line::Context(_) => {
+                            max_line_number = max_line_number.max(new_ln);
+                            old_ln += 1;
+                            new_ln += 1;
+                        }
+                    }
+                }
+            }
+            let line_number_width = line_number_width(max_line_number);
+            let Some((left_width, right_width)) =
+                side_by_side_column_widths(width, line_number_width)
+            else {
+                render_change_inline(change, out, width);
+                return;
+            };
+
+            let mut rows: Vec<SideBySideRow> = Vec::new();
+            let mut is_first_hunk = true;
+            for h in patch.hunks() {
+                if !is_first_hunk {
+                    let divider = ColumnLine {
+                        line_number: None,
+                        spans: vec!["⋮".dim()],
+                    };
+                    rows.push(SideBySideRow {
+                        left: Some(divider.clone()),
+                        right: Some(divider),
+                    });
+                }
+                is_first_hunk = false;
+
+                let mut old_ln = h.old_range().start();
+                let mut new_ln = h.new_range().start();
+                let mut idx = 0usize;
+                let hunk_lines = h.lines();
+                while idx < hunk_lines.len() {
+                    match &hunk_lines[idx] {
+                        diffy::Line::Delete(_) => {
+                            let mut deletes = Vec::new();
+                            while idx < hunk_lines.len() {
+                                match &hunk_lines[idx] {
+                                    diffy::Line::Delete(text) => {
+                                        let s = text.trim_end_matches('\n').to_string();
+                                        deletes.push((old_ln, s));
+                                        old_ln += 1;
+                                        idx += 1;
+                                    }
+                                    _ => break,
+                                }
+                            }
+                            let mut inserts = Vec::new();
+                            while idx < hunk_lines.len() {
+                                match &hunk_lines[idx] {
+                                    diffy::Line::Insert(text) => {
+                                        let s = text.trim_end_matches('\n').to_string();
+                                        inserts.push((new_ln, s));
+                                        new_ln += 1;
+                                        idx += 1;
+                                    }
+                                    _ => break,
+                                }
+                            }
+
+                            let paired = deletes.len().min(inserts.len());
+                            for pair_idx in 0..paired {
+                                let (old_line, old_text) = &deletes[pair_idx];
+                                let (new_line, new_text) = &inserts[pair_idx];
+                                let (old_spans, new_spans) = inline_spans(old_text, new_text);
+                                rows.push(SideBySideRow {
+                                    left: Some(ColumnLine {
+                                        line_number: Some(*old_line),
+                                        spans: old_spans,
+                                    }),
+                                    right: Some(ColumnLine {
+                                        line_number: Some(*new_line),
+                                        spans: new_spans,
+                                    }),
+                                });
+                            }
+                            for (old_line, old_text) in deletes.into_iter().skip(paired) {
+                                rows.push(SideBySideRow {
+                                    left: Some(ColumnLine {
+                                        line_number: Some(old_line),
+                                        spans: vec![RtSpan::styled(old_text, style_del())],
+                                    }),
+                                    right: None,
+                                });
+                            }
+                            for (new_line, new_text) in inserts.into_iter().skip(paired) {
+                                rows.push(SideBySideRow {
+                                    left: None,
+                                    right: Some(ColumnLine {
+                                        line_number: Some(new_line),
+                                        spans: vec![RtSpan::styled(new_text, style_add())],
+                                    }),
+                                });
+                            }
+                        }
+                        diffy::Line::Insert(text) => {
+                            let s = text.trim_end_matches('\n').to_string();
+                            rows.push(SideBySideRow {
+                                left: None,
+                                right: Some(ColumnLine {
+                                    line_number: Some(new_ln),
+                                    spans: vec![RtSpan::styled(s, style_add())],
+                                }),
+                            });
+                            new_ln += 1;
+                            idx += 1;
+                        }
+                        diffy::Line::Context(text) => {
+                            let s = text.trim_end_matches('\n').to_string();
+                            let spans = vec![RtSpan::styled(s, style_context())];
+                            rows.push(SideBySideRow {
+                                left: Some(ColumnLine {
+                                    line_number: Some(old_ln),
+                                    spans: spans.clone(),
+                                }),
+                                right: Some(ColumnLine {
+                                    line_number: Some(new_ln),
+                                    spans,
+                                }),
+                            });
+                            old_ln += 1;
+                            new_ln += 1;
+                            idx += 1;
+                        }
+                    }
+                }
+            }
+
+            render_side_by_side_rows(rows, out, left_width, right_width, line_number_width);
+        }
+    }
+}
+
 fn inline_spans(old_text: &str, new_text: &str) -> (Vec<RtSpan<'static>>, Vec<RtSpan<'static>>) {
     let diff = TextDiff::from_words(old_text, new_text);
     let base_delete = style_del();
@@ -563,6 +778,100 @@ fn inline_spans(old_text: &str, new_text: &str) -> (Vec<RtSpan<'static>>, Vec<Rt
     }
 
     (delete_spans, insert_spans)
+}
+
+fn side_by_side_column_widths(
+    total_width: usize,
+    line_number_width: usize,
+) -> Option<(usize, usize)> {
+    let separator_width = UnicodeWidthStr::width(SIDE_BY_SIDE_SEPARATOR);
+    let min_column_width = line_number_width + 1;
+    if total_width < separator_width + min_column_width * 2 {
+        return None;
+    }
+    let available = total_width.saturating_sub(separator_width);
+    let left_width = available / 2;
+    let right_width = available - left_width;
+    Some((left_width, right_width))
+}
+
+fn render_side_by_side_rows(
+    rows: Vec<SideBySideRow>,
+    out: &mut Vec<RtLine<'static>>,
+    left_width: usize,
+    right_width: usize,
+    line_number_width: usize,
+) {
+    let separator = SIDE_BY_SIDE_SEPARATOR.dim();
+    for row in rows {
+        let left_lines = row
+            .left
+            .map(|line| wrap_column_line(line, left_width, line_number_width))
+            .unwrap_or_else(|| vec![blank_line(left_width)]);
+        let right_lines = row
+            .right
+            .map(|line| wrap_column_line(line, right_width, line_number_width))
+            .unwrap_or_else(|| vec![blank_line(right_width)]);
+        let row_count = left_lines.len().max(right_lines.len());
+        for idx in 0..row_count {
+            let left_line = left_lines
+                .get(idx)
+                .cloned()
+                .unwrap_or_else(|| blank_line(left_width));
+            let right_line = right_lines
+                .get(idx)
+                .cloned()
+                .unwrap_or_else(|| blank_line(right_width));
+            let mut left_line = pad_line_to_width(left_line, left_width);
+            let right_line = pad_line_to_width(right_line, right_width);
+            let mut spans = Vec::new();
+            spans.append(&mut left_line.spans);
+            spans.push(separator.clone());
+            spans.extend(right_line.spans);
+            out.push(RtLine::from(spans));
+        }
+    }
+}
+
+fn wrap_column_line(
+    line: ColumnLine,
+    width: usize,
+    line_number_width: usize,
+) -> Vec<RtLine<'static>> {
+    let gutter_width = line_number_width.max(1);
+    let ln_str = line.line_number.map(|n| n.to_string()).unwrap_or_default();
+    let gutter = RtSpan::styled(format!("{ln_str:>gutter_width$} "), style_gutter());
+    let indent_first = RtLine::from(vec![gutter.clone()]);
+    let spacer = RtSpan::styled(format!("{:gutter_width$} ", ""), style_gutter());
+    let indent_sub = RtLine::from(vec![spacer]);
+
+    let content = RtLine::from(line.spans);
+    let opts = RtOptions::new(width)
+        .initial_indent(indent_first)
+        .subsequent_indent(indent_sub);
+    word_wrap_line(&content, opts)
+        .iter()
+        .map(line_to_static)
+        .collect()
+}
+
+fn pad_line_to_width(mut line: RtLine<'static>, width: usize) -> RtLine<'static> {
+    let current = line_width(&line);
+    if current < width {
+        line.spans.push(RtSpan::raw(" ".repeat(width - current)));
+    }
+    line
+}
+
+fn line_width(line: &RtLine<'static>) -> usize {
+    line.spans
+        .iter()
+        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+        .sum()
+}
+
+fn blank_line(width: usize) -> RtLine<'static> {
+    RtLine::from(vec![RtSpan::raw(" ".repeat(width))])
 }
 
 fn push_wrapped_inline_diff_line(

@@ -368,6 +368,7 @@ impl Default for Notifications {
 pub enum DiffView {
     Line,
     Inline,
+    SideBySide,
 }
 
 impl Default for DiffView {

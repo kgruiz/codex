@@ -35,4 +35,4 @@ Control Codex’s behavior during an interactive session with slash commands.
 ---
 
 Notes:
-- `/diff` uses the configured diff view (`tui.diff_view`, or `--diff-view` on launch). Override per command with `--line`, `--inline`, or `--view line|inline`.
+- `/diff` uses the configured diff view (`tui.diff_view`, or `--diff-view` on launch). Override per command with `--line`, `--inline`, `--side-by-side`, or `--view line|inline|side-by-side`.
