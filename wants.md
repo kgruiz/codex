@@ -12,7 +12,7 @@ Add new items below as you think of them.
 4. [x] Export chats as Markdown
 5. [x] Add current model name to the status line (<https://github.com/openai/codex/issues/2920>)
    - Show the active model/thinking setting in the status bar so it is obvious what will be used on submit.
-6. [ ] Syntax highlighting (code blocks)
+6. [x] Syntax highlighting (code blocks)
 7. [x] Rename chats
 8. [x] Customizable status line + live stats (tokens/sec, latency, cost, tool time) (<https://github.com/openai/codex/issues/2926>)
    - Show tokens/sec (and other live stats like latency, cost, tool time).

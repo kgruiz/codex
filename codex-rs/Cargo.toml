@@ -48,7 +48,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.14.3"
+version = "0.15.0"
 # Track the edition for all workspace crates in one place. Individual
 # crates can still override this value, but keeping it here means new
 # crates created with `cargo new -w ...` automatically inherit the 2024
@@ -215,6 +215,10 @@ tracing-test = "0.2.5"
 tree-sitter = "0.25.10"
 tree-sitter-bash = "0.25"
 tree-sitter-highlight = "0.25.10"
+tree-sitter-json = "0.24.8"
+tree-sitter-python = "0.25.0"
+tree-sitter-rust = "0.24.0"
+tree-sitter-yaml = "0.7.2"
 ts-rs = "11"
 uds_windows = "1.1.0"
 unicode-segmentation = "1.12.0"

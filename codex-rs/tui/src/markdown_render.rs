@@ -1,3 +1,4 @@
+use crate::render::highlight::highlight_code_block_to_lines;
 use crate::render::line_utils::line_to_static;
 use crate::wrapping::RtOptions;
 use crate::wrapping::word_wrap_line;
@@ -99,6 +100,7 @@ where
     pending_marker_line: bool,
     in_paragraph: bool,
     in_code_block: bool,
+    code_block_language: Option<String>,
     wrap_width: Option<usize>,
     current_line_content: Option<Line<'static>>,
     current_initial_indent: Vec<Span<'static>>,
@@ -124,6 +126,7 @@ where
             pending_marker_line: false,
             in_paragraph: false,
             in_code_block: false,
+            code_block_language: None,
             wrap_width,
             current_line_content: None,
             current_initial_indent: Vec::new(),
@@ -274,11 +277,38 @@ where
     }
 
     fn text(&mut self, text: CowStr<'a>) {
+        if self.in_code_block {
+            self.code_block_text(text);
+            return;
+        }
         if self.pending_marker_line {
             self.push_line(Line::default());
         }
         self.pending_marker_line = false;
-        if self.in_code_block && !self.needs_newline {
+        for (i, line) in text.lines().enumerate() {
+            if self.needs_newline {
+                self.push_line(Line::default());
+                self.needs_newline = false;
+            }
+            if i > 0 {
+                self.push_line(Line::default());
+            }
+            let content = line.to_string();
+            let span = Span::styled(
+                content,
+                self.inline_styles.last().copied().unwrap_or_default(),
+            );
+            self.push_span(span);
+        }
+        self.needs_newline = false;
+    }
+
+    fn code_block_text(&mut self, text: CowStr<'a>) {
+        if self.pending_marker_line {
+            self.push_line(Line::default());
+            self.pending_marker_line = false;
+        }
+        if !self.needs_newline {
             let has_content = self
                 .current_line_content
                 .as_ref()
@@ -294,7 +324,9 @@ where
                 self.push_line(Line::default());
             }
         }
-        for (i, line) in text.lines().enumerate() {
+        let lines =
+            highlight_code_block_to_lines(self.code_block_language.as_deref(), text.as_ref());
+        for (i, line) in lines.into_iter().enumerate() {
             if self.needs_newline {
                 self.push_line(Line::default());
                 self.needs_newline = false;
@@ -302,12 +334,9 @@ where
             if i > 0 {
                 self.push_line(Line::default());
             }
-            let content = line.to_string();
-            let span = Span::styled(
-                content,
-                self.inline_styles.last().copied().unwrap_or_default(),
-            );
-            self.push_span(span);
+            for span in line.spans {
+                self.push_span(span);
+            }
         }
         self.needs_newline = false;
     }
@@ -394,12 +423,13 @@ where
         self.needs_newline = false;
     }
 
-    fn start_codeblock(&mut self, _lang: Option<String>, indent: Option<Span<'static>>) {
+    fn start_codeblock(&mut self, lang: Option<String>, indent: Option<Span<'static>>) {
         self.flush_current_line();
         if !self.text.lines.is_empty() {
             self.push_blank_line();
         }
         self.in_code_block = true;
+        self.code_block_language = lang;
         self.indent_stack.push(IndentContext::new(
             vec![indent.unwrap_or_default()],
             None,
@@ -411,6 +441,7 @@ where
     fn end_codeblock(&mut self) {
         self.needs_newline = true;
         self.in_code_block = false;
+        self.code_block_language = None;
         self.indent_stack.pop();
     }
 

@@ -652,10 +652,23 @@ fn link() {
 }
 
 #[test]
-fn code_block_unhighlighted() {
-    let text = render_markdown_text("```rust\nfn main() {}\n```\n");
-    let expected = Text::from_iter([Line::from_iter(["", "fn main() {}"])]);
-    assert_eq!(text, expected);
+fn code_block_highlights_bash() {
+    use ratatui::style::Modifier;
+
+    let text = render_markdown_text("```bash\necho \"hi\" && true\n```\n");
+    let dimmed: Vec<String> = text
+        .lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .filter(|span| span.style.add_modifier.contains(Modifier::DIM))
+        .map(|span| span.content.clone().into_owned())
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty())
+        .collect();
+    assert!(
+        dimmed.iter().any(|token| token == "\"hi\"" || token == "&&"),
+        "expected dimmed tokens in highlighted bash block, got: {dimmed:?}"
+    );
 }
 
 #[test]

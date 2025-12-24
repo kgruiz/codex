@@ -105,6 +105,253 @@ fn push_segment(lines: &mut Vec<Line<'static>>, segment: &str, style: Option<Sty
     }
 }
 
+const CODE_HIGHLIGHT_NAMES: [&str; 43] = [
+    "comment",
+    "comment.documentation",
+    "constant",
+    "constant.builtin",
+    "constant.character",
+    "constant.macro",
+    "string",
+    "string.special",
+    "string.escape",
+    "character",
+    "number",
+    "float",
+    "boolean",
+    "keyword",
+    "keyword.function",
+    "keyword.operator",
+    "keyword.return",
+    "operator",
+    "punctuation",
+    "punctuation.bracket",
+    "punctuation.delimiter",
+    "punctuation.special",
+    "function",
+    "function.builtin",
+    "function.macro",
+    "method",
+    "method.call",
+    "constructor",
+    "type",
+    "type.builtin",
+    "type.definition",
+    "tag",
+    "attribute",
+    "property",
+    "field",
+    "variable",
+    "variable.builtin",
+    "variable.parameter",
+    "label",
+    "namespace",
+    "module",
+    "macro",
+    "embedded",
+];
+
+fn code_highlight_names() -> &'static [&'static str] {
+    &CODE_HIGHLIGHT_NAMES
+}
+
+fn code_style_for(name: &str) -> Option<Style> {
+    if name.starts_with("comment") {
+        Some(Style::default().dim())
+    } else if name.starts_with("string") || name == "character" {
+        Some(Style::default().green())
+    } else if matches!(name, "number" | "float" | "boolean") || name.starts_with("keyword") {
+        Some(Style::default().magenta())
+    } else if name.starts_with("function")
+        || name.starts_with("method")
+        || name == "constructor"
+        || name.starts_with("type")
+        || matches!(name, "tag" | "attribute")
+    {
+        Some(Style::default().cyan())
+    } else if name.starts_with("constant") || name == "macro" {
+        Some(Style::default().magenta())
+    } else if name.starts_with("operator") || name.starts_with("punctuation") {
+        Some(Style::default().dim())
+    } else if name == "label" {
+        Some(Style::default().magenta())
+    } else if name == "embedded" {
+        Some(Style::default().cyan())
+    } else {
+        None
+    }
+}
+
+fn highlight_code_to_lines(script: &str, config: &HighlightConfiguration) -> Vec<Line<'static>> {
+    let mut highlighter = Highlighter::new();
+    let iterator = match highlighter.highlight(config, script.as_bytes(), None, |_| None) {
+        Ok(iter) => iter,
+        Err(_) => return plain_code_to_lines(script),
+    };
+
+    let mut lines: Vec<Line<'static>> = vec![Line::from("")];
+    let mut highlight_stack: Vec<Highlight> = Vec::new();
+
+    for event in iterator {
+        match event {
+            Ok(HighlightEvent::HighlightStart(highlight)) => highlight_stack.push(highlight),
+            Ok(HighlightEvent::HighlightEnd) => {
+                highlight_stack.pop();
+            }
+            Ok(HighlightEvent::Source { start, end }) => {
+                if start == end {
+                    continue;
+                }
+                let style = highlight_stack
+                    .last()
+                    .and_then(|highlight| code_highlight_names().get(highlight.0))
+                    .and_then(|name| code_style_for(name));
+                push_segment(&mut lines, &script[start..end], style);
+            }
+            Err(_) => return plain_code_to_lines(script),
+        }
+    }
+
+    trim_trailing_empty_line(&mut lines, script);
+    lines
+}
+
+fn plain_code_to_lines(script: &str) -> Vec<Line<'static>> {
+    if script.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    for line in script.split('\n') {
+        if line.is_empty() {
+            lines.push(Line::from(""));
+        } else {
+            lines.push(Line::from(line.to_string()));
+        }
+    }
+    trim_trailing_empty_line(&mut lines, script);
+    lines
+}
+
+fn trim_trailing_empty_line(lines: &mut Vec<Line<'static>>, script: &str) {
+    if script.ends_with('\n') && lines.last().is_some_and(|line| line.spans.is_empty()) {
+        lines.pop();
+    }
+}
+
+static JSON_HIGHLIGHT_CONFIG: OnceLock<HighlightConfiguration> = OnceLock::new();
+static PYTHON_HIGHLIGHT_CONFIG: OnceLock<HighlightConfiguration> = OnceLock::new();
+static RUST_HIGHLIGHT_CONFIG: OnceLock<HighlightConfiguration> = OnceLock::new();
+static YAML_HIGHLIGHT_CONFIG: OnceLock<HighlightConfiguration> = OnceLock::new();
+
+fn highlight_config_json() -> &'static HighlightConfiguration {
+    JSON_HIGHLIGHT_CONFIG.get_or_init(|| {
+        let language = tree_sitter_json::LANGUAGE.into();
+        #[expect(clippy::expect_used)]
+        let mut config = HighlightConfiguration::new(
+            language,
+            "json",
+            tree_sitter_json::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        )
+        .expect("load json highlight query");
+        config.configure(code_highlight_names());
+        config
+    })
+}
+
+fn highlight_config_python() -> &'static HighlightConfiguration {
+    PYTHON_HIGHLIGHT_CONFIG.get_or_init(|| {
+        let language = tree_sitter_python::LANGUAGE.into();
+        #[expect(clippy::expect_used)]
+        let mut config = HighlightConfiguration::new(
+            language,
+            "python",
+            tree_sitter_python::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        )
+        .expect("load python highlight query");
+        config.configure(code_highlight_names());
+        config
+    })
+}
+
+fn highlight_config_rust() -> &'static HighlightConfiguration {
+    RUST_HIGHLIGHT_CONFIG.get_or_init(|| {
+        let language = tree_sitter_rust::LANGUAGE.into();
+        #[expect(clippy::expect_used)]
+        let mut config = HighlightConfiguration::new(
+            language,
+            "rust",
+            tree_sitter_rust::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        )
+        .expect("load rust highlight query");
+        config.configure(code_highlight_names());
+        config
+    })
+}
+
+fn highlight_config_yaml() -> &'static HighlightConfiguration {
+    YAML_HIGHLIGHT_CONFIG.get_or_init(|| {
+        let language = tree_sitter_yaml::LANGUAGE.into();
+        #[expect(clippy::expect_used)]
+        let mut config = HighlightConfiguration::new(
+            language,
+            "yaml",
+            tree_sitter_yaml::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        )
+        .expect("load yaml highlight query");
+        config.configure(code_highlight_names());
+        config
+    })
+}
+
+fn normalized_language(lang: Option<&str>) -> Option<String> {
+    let lang = lang?;
+    let lang = lang.trim();
+    if lang.is_empty() {
+        return None;
+    }
+    let base = lang
+        .split(|c: char| c.is_whitespace() || c == ',' || c == ';' || c == '{' || c == '}')
+        .next()
+        .unwrap_or("");
+    let base = base.trim_start_matches(['.', '{', '}']);
+    let base = base.trim();
+    if base.is_empty() {
+        None
+    } else {
+        Some(base.to_ascii_lowercase())
+    }
+}
+
+pub(crate) fn highlight_code_block_to_lines(
+    lang: Option<&str>,
+    script: &str,
+) -> Vec<Line<'static>> {
+    let lang = normalized_language(lang);
+    let Some(lang) = lang.as_deref() else {
+        return plain_code_to_lines(script);
+    };
+    match lang {
+        "bash" | "sh" | "shell" | "zsh" | "fish" | "shell-session" | "sh-session" => {
+            let mut lines = highlight_bash_to_lines(script);
+            trim_trailing_empty_line(&mut lines, script);
+            lines
+        }
+        "json" | "jsonc" | "json5" => highlight_code_to_lines(script, highlight_config_json()),
+        "python" | "py" => highlight_code_to_lines(script, highlight_config_python()),
+        "rust" | "rs" => highlight_code_to_lines(script, highlight_config_rust()),
+        "yaml" | "yml" => highlight_code_to_lines(script, highlight_config_yaml()),
+        _ => plain_code_to_lines(script),
+    }
+}
+
 /// Convert a bash script into per-line styled content using tree-sitter's
 /// bash highlight query. The highlighter is streamed so multi-line content is
 /// split into `Line`s while preserving style boundaries.
