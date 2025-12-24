@@ -2,6 +2,7 @@
 source: tui/src/diff_render.rs
 expression: text
 ---
+• Line diff
 • Edited wrap_demo.txt (+2 -2)
     1  1
     2 -2
@@ -12,4 +13,18 @@ expression: text
     3  3
     4 -4
     4 +4 context line which
+       also wraps across
+
+• Inline diff
+• Edited wrap_demo.txt (+2 -2)
+    1  1
+    2  2
+    2  added long line which
+       wraps
+       and_if_there_is_a_lon
+       g_token_it_will_be_br
+       oken
+    3  3
+    4  4
+    4  4 context line which
        also wraps across

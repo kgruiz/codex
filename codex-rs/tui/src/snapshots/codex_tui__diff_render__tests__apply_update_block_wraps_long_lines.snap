@@ -2,6 +2,7 @@
 source: tui/src/diff_render.rs
 expression: terminal.backend()
 ---
+"• Line diff                                                                     "
 "• Edited long_example.txt (+1 -1)                                               "
 "    1  line 1                                                                   "
 "    2 -short                                                                    "
@@ -10,7 +11,6 @@ expression: terminal.backend()
 "       columns_to_force_multiple_wraps                                          "
 "    3  line 3                                                                   "
 "                                                                                "
-"                                                                                "
-"                                                                                "
-"                                                                                "
-"                                                                                "
+"• Inline diff                                                                   "
+"• Edited long_example.txt (+1 -1)                                               "
+"    1  line 1                                                                   "

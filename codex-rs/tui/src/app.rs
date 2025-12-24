@@ -5,10 +5,13 @@ use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::ComposerAttachment;
 use crate::chatwidget::ChatWidget;
+use crate::diff_render::DiffSection;
 use crate::diff_render::DiffSummary;
+use crate::diff_render::render_diff_sections;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::external_editor;
 use crate::file_search::FileSearchManager;
+use crate::get_git_diff::GitDiffResult;
 use crate::history_cell::HistoryCell;
 use crate::model_migration::ModelMigrationOutcome;
 use crate::model_migration::migration_copy_for_models;
@@ -20,7 +23,6 @@ use crate::resume_picker::ResumeSelection;
 use crate::tui;
 use crate::tui::TuiEvent;
 use crate::update_action::UpdateAction;
-use codex_ansi_escape::ansi_escape_line;
 use codex_core::AuthManager;
 use codex_core::ConversationManager;
 use codex_core::RolloutRecorder;
@@ -782,15 +784,21 @@ impl App {
                 return Ok(false);
             }
             AppEvent::CodexOp(op) => self.chat_widget.submit_op(op),
-            AppEvent::DiffResult(text) => {
+            AppEvent::DiffResult(result) => {
                 // Clear the in-progress state in the bottom pane
                 self.chat_widget.on_diff_complete();
                 // Enter alternate screen using TUI helper and build pager lines
                 let _ = tui.enter_alt_screen();
-                let pager_lines: Vec<ratatui::text::Line<'static>> = if text.trim().is_empty() {
-                    vec!["No changes detected.".italic().into()]
-                } else {
-                    text.lines().map(ansi_escape_line).collect()
+                let pager_lines: Vec<ratatui::text::Line<'static>> = match result {
+                    GitDiffResult::NotGitRepo => {
+                        vec!["/diff — not inside a git repository".italic().into()]
+                    }
+                    GitDiffResult::Error(message) => vec![message.red().into()],
+                    GitDiffResult::Views(views) => render_diff_sections(vec![
+                        DiffSection::new("Line diff", views.line),
+                        DiffSection::new("Inline diff", views.inline),
+                        DiffSection::new("Semantic diff (difftastic)", views.semantic),
+                    ]),
                 };
                 self.overlay = Some(Overlay::new_static_with_lines(
                     pager_lines,

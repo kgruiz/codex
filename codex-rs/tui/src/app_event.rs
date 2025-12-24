@@ -11,6 +11,7 @@ use crate::app_backtrack::BacktrackAction;
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::ComposerAttachment;
 use crate::bottom_pane::RenameTarget;
+use crate::get_git_diff::GitDiffResult;
 use crate::history_cell::HistoryCell;
 use crate::session_manager::SessionManagerEntry;
 
@@ -60,7 +61,7 @@ pub(crate) enum AppEvent {
     RateLimitSnapshotFetched(RateLimitSnapshot),
 
     /// Result of computing a `/diff` command.
-    DiffResult(String),
+    DiffResult(GitDiffResult),
 
     /// Export the current chat in the selected format.
     ExportChat {

@@ -8,16 +8,22 @@ use ratatui::style::Stylize;
 use ratatui::text::Line as RtLine;
 use ratatui::text::Span as RtSpan;
 use ratatui::widgets::Paragraph;
+use similar::ChangeTag;
+use similar::TextDiff;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
+use crate::diff_semantic::SemanticDiffInput;
+use crate::diff_semantic::difftastic_available;
+use crate::diff_semantic::difftastic_lines;
 use crate::exec_command::relativize_to_home;
-use crate::render::Insets;
+use crate::render::line_utils::line_to_static;
 use crate::render::line_utils::prefix_lines;
-use crate::render::renderable::ColumnRenderable;
-use crate::render::renderable::InsetRenderable;
 use crate::render::renderable::Renderable;
+use crate::wrapping::RtOptions;
+use crate::wrapping::word_wrap_line;
 use codex_core::git_info::get_git_repo_root;
 use codex_core::protocol::FileChange;
 
@@ -31,58 +37,120 @@ enum DiffLineType {
 pub struct DiffSummary {
     changes: HashMap<PathBuf, FileChange>,
     cwd: PathBuf,
+    semantic_cache: Mutex<Option<SemanticDiffCache>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct SemanticDiffCache {
+    width: usize,
+    lines: Vec<RtLine<'static>>,
 }
 
 impl DiffSummary {
     pub fn new(changes: HashMap<PathBuf, FileChange>, cwd: PathBuf) -> Self {
-        Self { changes, cwd }
+        Self {
+            changes,
+            cwd,
+            semantic_cache: Mutex::new(None),
+        }
+    }
+}
+
+impl Renderable for DiffSummary {
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        let lines = create_diff_summary_with_semantic(
+            &self.changes,
+            &self.cwd,
+            area.width as usize,
+            &self.semantic_cache,
+        );
+        Paragraph::new(lines).render(area, buf);
+    }
+
+    fn desired_height(&self, width: u16) -> u16 {
+        let lines = create_diff_summary_with_semantic(
+            &self.changes,
+            &self.cwd,
+            width as usize,
+            &self.semantic_cache,
+        );
+        lines.len() as u16
     }
 }
 
 impl Renderable for FileChange {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let mut lines = vec![];
-        render_change(self, &mut lines, area.width as usize);
+        render_change_line(self, &mut lines, area.width as usize);
         Paragraph::new(lines).render(area, buf);
     }
 
     fn desired_height(&self, width: u16) -> u16 {
         let mut lines = vec![];
-        render_change(self, &mut lines, width as usize);
+        render_change_line(self, &mut lines, width as usize);
         lines.len() as u16
     }
 }
 
-impl From<DiffSummary> for Box<dyn Renderable> {
-    fn from(val: DiffSummary) -> Self {
-        let mut rows: Vec<Box<dyn Renderable>> = vec![];
-
-        for (i, row) in collect_rows(&val.changes).into_iter().enumerate() {
-            if i > 0 {
-                rows.push(Box::new(RtLine::from("")));
-            }
-            let mut path = RtLine::from(display_path_for(&row.path, &val.cwd));
-            path.push_span(" ");
-            path.extend(render_line_count_summary(row.added, row.removed));
-            rows.push(Box::new(path));
-            rows.push(Box::new(RtLine::from("")));
-            rows.push(Box::new(InsetRenderable::new(
-                Box::new(row.change) as Box<dyn Renderable>,
-                Insets::tlbr(0, 2, 0, 0),
-            )));
-        }
-
-        Box::new(ColumnRenderable::with(rows))
-    }
-}
-
+#[cfg(test)]
 pub(crate) fn create_diff_summary(
     changes: &HashMap<PathBuf, FileChange>,
     cwd: &Path,
     wrap_cols: usize,
 ) -> Vec<RtLine<'static>> {
     let rows = collect_rows(changes);
-    render_changes_block(rows, wrap_cols, cwd)
+    let line_view = render_changes_block(rows.clone(), wrap_cols, cwd, DiffViewKind::Line);
+    let inline_view = render_changes_block(rows, wrap_cols, cwd, DiffViewKind::Inline);
+
+    render_diff_sections(vec![
+        DiffSection::new("Line diff", line_view),
+        DiffSection::new("Inline diff", inline_view),
+    ])
+}
+
+pub(crate) fn create_diff_summary_with_semantic(
+    changes: &HashMap<PathBuf, FileChange>,
+    cwd: &Path,
+    wrap_cols: usize,
+    semantic_cache: &Mutex<Option<SemanticDiffCache>>,
+) -> Vec<RtLine<'static>> {
+    let rows = collect_rows(changes);
+    let line_view = render_changes_block(rows.clone(), wrap_cols, cwd, DiffViewKind::Line);
+    let inline_view = render_changes_block(rows, wrap_cols, cwd, DiffViewKind::Inline);
+    let semantic_view = semantic_lines_for_changes(changes, cwd, wrap_cols, semantic_cache);
+
+    render_diff_sections(vec![
+        DiffSection::new("Line diff", line_view),
+        DiffSection::new("Inline diff", inline_view),
+        DiffSection::new("Semantic diff (difftastic)", semantic_view),
+    ])
+}
+
+pub(crate) struct DiffSection {
+    title: &'static str,
+    lines: Vec<RtLine<'static>>,
+}
+
+impl DiffSection {
+    pub(crate) fn new(title: &'static str, lines: Vec<RtLine<'static>>) -> Self {
+        Self { title, lines }
+    }
+}
+
+pub(crate) fn render_diff_sections(sections: Vec<DiffSection>) -> Vec<RtLine<'static>> {
+    let mut out = Vec::new();
+    for (idx, section) in sections.into_iter().enumerate() {
+        if idx > 0 {
+            out.push(RtLine::from(""));
+        }
+        out.push(RtLine::from(vec!["• ".dim(), section.title.bold()]));
+        if section.lines.is_empty() {
+            out.push(RtLine::from("(no changes)".dim().italic()));
+        } else {
+            out.extend(section.lines);
+        }
+    }
+    out
 }
 
 // Shared row for per-file presentation
@@ -123,6 +191,11 @@ fn collect_rows(changes: &HashMap<PathBuf, FileChange>) -> Vec<Row> {
     rows
 }
 
+enum DiffViewKind {
+    Line,
+    Inline,
+}
+
 fn render_line_count_summary(added: usize, removed: usize) -> Vec<RtSpan<'static>> {
     let mut spans = Vec::new();
     spans.push("(".into());
@@ -133,14 +206,20 @@ fn render_line_count_summary(added: usize, removed: usize) -> Vec<RtSpan<'static
     spans
 }
 
-fn render_changes_block(rows: Vec<Row>, wrap_cols: usize, cwd: &Path) -> Vec<RtLine<'static>> {
+fn render_changes_block(
+    rows: Vec<Row>,
+    wrap_cols: usize,
+    cwd: &Path,
+    view: DiffViewKind,
+) -> Vec<RtLine<'static>> {
     let mut out: Vec<RtLine<'static>> = Vec::new();
 
     let render_path = |row: &Row| -> Vec<RtSpan<'static>> {
         let mut spans = Vec::new();
         spans.push(display_path_for(&row.path, cwd).into());
         if let Some(move_path) = &row.move_path {
-            spans.push(format!(" → {}", display_path_for(move_path, cwd)).into());
+            let move_display = display_path_for(move_path, cwd);
+            spans.push(format!(" → {move_display}").into());
         }
         spans
     };
@@ -186,14 +265,26 @@ fn render_changes_block(rows: Vec<Row>, wrap_cols: usize, cwd: &Path) -> Vec<RtL
         }
 
         let mut lines = vec![];
-        render_change(&r.change, &mut lines, wrap_cols - 4);
+        render_change_with_view(&r.change, &mut lines, wrap_cols - 4, &view);
         out.extend(prefix_lines(lines, "    ".into(), "    ".into()));
     }
 
     out
 }
 
-fn render_change(change: &FileChange, out: &mut Vec<RtLine<'static>>, width: usize) {
+fn render_change_with_view(
+    change: &FileChange,
+    out: &mut Vec<RtLine<'static>>,
+    width: usize,
+    view: &DiffViewKind,
+) {
+    match view {
+        DiffViewKind::Line => render_change_line(change, out, width),
+        DiffViewKind::Inline => render_change_inline(change, out, width),
+    }
+}
+
+fn render_change_line(change: &FileChange, out: &mut Vec<RtLine<'static>>, width: usize) {
     match change {
         FileChange::Add { content } => {
             let line_number_width = line_number_width(content.lines().count());
@@ -204,6 +295,7 @@ fn render_change(change: &FileChange, out: &mut Vec<RtLine<'static>>, width: usi
                     raw,
                     width,
                     line_number_width,
+                    true,
                 ));
             }
         }
@@ -216,6 +308,7 @@ fn render_change(change: &FileChange, out: &mut Vec<RtLine<'static>>, width: usi
                     raw,
                     width,
                     line_number_width,
+                    true,
                 ));
             }
         }
@@ -265,6 +358,7 @@ fn render_change(change: &FileChange, out: &mut Vec<RtLine<'static>>, width: usi
                                     s,
                                     width,
                                     line_number_width,
+                                    true,
                                 ));
                                 new_ln += 1;
                             }
@@ -276,6 +370,7 @@ fn render_change(change: &FileChange, out: &mut Vec<RtLine<'static>>, width: usi
                                     s,
                                     width,
                                     line_number_width,
+                                    true,
                                 ));
                                 old_ln += 1;
                             }
@@ -287,6 +382,7 @@ fn render_change(change: &FileChange, out: &mut Vec<RtLine<'static>>, width: usi
                                     s,
                                     width,
                                     line_number_width,
+                                    true,
                                 ));
                                 old_ln += 1;
                                 new_ln += 1;
@@ -297,6 +393,240 @@ fn render_change(change: &FileChange, out: &mut Vec<RtLine<'static>>, width: usi
             }
         }
     }
+}
+
+fn render_change_inline(change: &FileChange, out: &mut Vec<RtLine<'static>>, width: usize) {
+    match change {
+        FileChange::Add { content } => {
+            let line_number_width = line_number_width(content.lines().count());
+            for (i, raw) in content.lines().enumerate() {
+                out.extend(push_wrapped_diff_line(
+                    i + 1,
+                    DiffLineType::Insert,
+                    raw,
+                    width,
+                    line_number_width,
+                    false,
+                ));
+            }
+        }
+        FileChange::Delete { content } => {
+            let line_number_width = line_number_width(content.lines().count());
+            for (i, raw) in content.lines().enumerate() {
+                out.extend(push_wrapped_diff_line(
+                    i + 1,
+                    DiffLineType::Delete,
+                    raw,
+                    width,
+                    line_number_width,
+                    false,
+                ));
+            }
+        }
+        FileChange::Update { unified_diff, .. } => {
+            if let Ok(patch) = diffy::Patch::from_str(unified_diff) {
+                let mut max_line_number = 0;
+                for h in patch.hunks() {
+                    let mut old_ln = h.old_range().start();
+                    let mut new_ln = h.new_range().start();
+                    for l in h.lines() {
+                        match l {
+                            diffy::Line::Insert(_) => {
+                                max_line_number = max_line_number.max(new_ln);
+                                new_ln += 1;
+                            }
+                            diffy::Line::Delete(_) => {
+                                max_line_number = max_line_number.max(old_ln);
+                                old_ln += 1;
+                            }
+                            diffy::Line::Context(_) => {
+                                max_line_number = max_line_number.max(new_ln);
+                                old_ln += 1;
+                                new_ln += 1;
+                            }
+                        }
+                    }
+                }
+                let line_number_width = line_number_width(max_line_number);
+                let mut is_first_hunk = true;
+                for h in patch.hunks() {
+                    if !is_first_hunk {
+                        let spacer = format!("{:width$} ", "", width = line_number_width.max(1));
+                        let spacer_span = RtSpan::styled(spacer, style_gutter());
+                        out.push(RtLine::from(vec![spacer_span, "⋮".dim()]));
+                    }
+                    is_first_hunk = false;
+
+                    let mut old_ln = h.old_range().start();
+                    let mut new_ln = h.new_range().start();
+                    let mut idx = 0usize;
+                    let hunk_lines = h.lines();
+                    while idx < hunk_lines.len() {
+                        match &hunk_lines[idx] {
+                            diffy::Line::Delete(_text) => {
+                                let mut deletes = Vec::new();
+                                while idx < hunk_lines.len() {
+                                    match &hunk_lines[idx] {
+                                        diffy::Line::Delete(text) => {
+                                            let s = text.trim_end_matches('\n').to_string();
+                                            deletes.push((old_ln, s));
+                                            old_ln += 1;
+                                            idx += 1;
+                                        }
+                                        _ => break,
+                                    }
+                                }
+                                let mut inserts = Vec::new();
+                                while idx < hunk_lines.len() {
+                                    match &hunk_lines[idx] {
+                                        diffy::Line::Insert(text) => {
+                                            let s = text.trim_end_matches('\n').to_string();
+                                            inserts.push((new_ln, s));
+                                            new_ln += 1;
+                                            idx += 1;
+                                        }
+                                        _ => break,
+                                    }
+                                }
+
+                                let paired = deletes.len().min(inserts.len());
+                                for pair_idx in 0..paired {
+                                    let (old_line, old_text) = &deletes[pair_idx];
+                                    let (new_line, new_text) = &inserts[pair_idx];
+                                    let (old_spans, new_spans) = inline_spans(old_text, new_text);
+                                    out.extend(push_wrapped_inline_diff_line(
+                                        *old_line,
+                                        DiffLineType::Delete,
+                                        old_spans,
+                                        width,
+                                        line_number_width,
+                                    ));
+                                    out.extend(push_wrapped_inline_diff_line(
+                                        *new_line,
+                                        DiffLineType::Insert,
+                                        new_spans,
+                                        width,
+                                        line_number_width,
+                                    ));
+                                }
+                                for (old_line, old_text) in deletes.into_iter().skip(paired) {
+                                    out.extend(push_wrapped_diff_line(
+                                        old_line,
+                                        DiffLineType::Delete,
+                                        &old_text,
+                                        width,
+                                        line_number_width,
+                                        false,
+                                    ));
+                                }
+                                for (new_line, new_text) in inserts.into_iter().skip(paired) {
+                                    out.extend(push_wrapped_diff_line(
+                                        new_line,
+                                        DiffLineType::Insert,
+                                        &new_text,
+                                        width,
+                                        line_number_width,
+                                        false,
+                                    ));
+                                }
+                            }
+                            diffy::Line::Insert(text) => {
+                                let s = text.trim_end_matches('\n');
+                                out.extend(push_wrapped_diff_line(
+                                    new_ln,
+                                    DiffLineType::Insert,
+                                    s,
+                                    width,
+                                    line_number_width,
+                                    false,
+                                ));
+                                new_ln += 1;
+                                idx += 1;
+                            }
+                            diffy::Line::Context(text) => {
+                                let s = text.trim_end_matches('\n');
+                                out.extend(push_wrapped_diff_line(
+                                    new_ln,
+                                    DiffLineType::Context,
+                                    s,
+                                    width,
+                                    line_number_width,
+                                    false,
+                                ));
+                                old_ln += 1;
+                                new_ln += 1;
+                                idx += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn inline_spans(old_text: &str, new_text: &str) -> (Vec<RtSpan<'static>>, Vec<RtSpan<'static>>) {
+    let diff = TextDiff::from_words(old_text, new_text);
+    let base_delete = style_del();
+    let base_insert = style_add();
+    let emph_delete = base_delete.add_modifier(Modifier::BOLD);
+    let emph_insert = base_insert.add_modifier(Modifier::BOLD);
+
+    let mut delete_spans = Vec::new();
+    let mut insert_spans = Vec::new();
+
+    for change in diff.iter_all_changes() {
+        let text = change.to_string_lossy();
+        if text.is_empty() {
+            continue;
+        }
+        match change.tag() {
+            ChangeTag::Equal => {
+                delete_spans.push(RtSpan::styled(text.to_string(), base_delete));
+                insert_spans.push(RtSpan::styled(text.to_string(), base_insert));
+            }
+            ChangeTag::Delete => {
+                delete_spans.push(RtSpan::styled(text.to_string(), emph_delete));
+            }
+            ChangeTag::Insert => {
+                insert_spans.push(RtSpan::styled(text.to_string(), emph_insert));
+            }
+        }
+    }
+
+    (delete_spans, insert_spans)
+}
+
+fn push_wrapped_inline_diff_line(
+    line_number: usize,
+    kind: DiffLineType,
+    spans: Vec<RtSpan<'static>>,
+    width: usize,
+    line_number_width: usize,
+) -> Vec<RtLine<'static>> {
+    let ln_str = line_number.to_string();
+    let gutter_width = line_number_width.max(1);
+    let gutter = RtSpan::styled(format!("{ln_str:>gutter_width$} "), style_gutter());
+
+    let line_style = match kind {
+        DiffLineType::Insert => style_add(),
+        DiffLineType::Delete => style_del(),
+        DiffLineType::Context => style_context(),
+    };
+    let sign = RtSpan::styled(" ".to_string(), line_style);
+    let indent_first = RtLine::from(vec![gutter.clone(), sign]);
+    let spacer = RtSpan::styled(format!("{:gutter_width$} ", ""), style_gutter());
+    let indent_sub = RtLine::from(vec![spacer, RtSpan::styled(" ".to_string(), line_style)]);
+
+    let content = RtLine::from(spans);
+    let opts = RtOptions::new(width)
+        .initial_indent(indent_first)
+        .subsequent_indent(indent_sub);
+
+    word_wrap_line(&content, opts)
+        .iter()
+        .map(line_to_static)
+        .collect()
 }
 
 pub(crate) fn display_path_for(path: &Path, cwd: &Path) -> String {
@@ -312,6 +642,117 @@ pub(crate) fn display_path_for(path: &Path, cwd: &Path) -> String {
             .unwrap_or_else(|| path.to_path_buf())
     };
     chosen.display().to_string()
+}
+
+fn semantic_lines_for_changes(
+    changes: &HashMap<PathBuf, FileChange>,
+    cwd: &Path,
+    wrap_cols: usize,
+    cache: &Mutex<Option<SemanticDiffCache>>,
+) -> Vec<RtLine<'static>> {
+    if let Ok(cache_guard) = cache.lock()
+        && let Some(cached) = cache_guard.as_ref()
+        && cached.width == wrap_cols
+    {
+        return cached.lines.clone();
+    }
+    let lines = if difftastic_available() {
+        let SemanticInputs { inputs, warnings } = semantic_inputs_from_changes(changes, cwd);
+        difftastic_lines(&inputs, wrap_cols, &warnings)
+    } else {
+        difftastic_lines(&[], wrap_cols, &[])
+    };
+    if let Ok(mut cache_guard) = cache.lock() {
+        *cache_guard = Some(SemanticDiffCache {
+            width: wrap_cols,
+            lines: lines.clone(),
+        });
+    }
+    lines
+}
+
+struct SemanticInputs {
+    inputs: Vec<SemanticDiffInput>,
+    warnings: Vec<String>,
+}
+
+fn semantic_inputs_from_changes(
+    changes: &HashMap<PathBuf, FileChange>,
+    cwd: &Path,
+) -> SemanticInputs {
+    let rows = collect_rows(changes);
+    let mut inputs = Vec::new();
+    let mut warnings = Vec::new();
+
+    for row in rows {
+        let display_path = display_path_for(&row.path, cwd);
+        let display_path = if let Some(move_path) = &row.move_path {
+            let move_display = display_path_for(move_path, cwd);
+            format!("{display_path} -> {move_display}")
+        } else {
+            display_path
+        };
+
+        match &row.change {
+            FileChange::Add { content } => {
+                inputs.push(SemanticDiffInput {
+                    display_path,
+                    old: Vec::new(),
+                    new: content.as_bytes().to_vec(),
+                });
+            }
+            FileChange::Delete { content } => {
+                inputs.push(SemanticDiffInput {
+                    display_path,
+                    old: content.as_bytes().to_vec(),
+                    new: Vec::new(),
+                });
+            }
+            FileChange::Update { unified_diff, .. } => {
+                let old_bytes = match std::fs::read(&row.path) {
+                    Ok(bytes) => bytes,
+                    Err(err) => {
+                        warnings.push(format!(
+                            "Skipping {display_path}: failed to read file ({err})"
+                        ));
+                        continue;
+                    }
+                };
+                let old_text = match String::from_utf8(old_bytes) {
+                    Ok(text) => text,
+                    Err(err) => {
+                        warnings.push(format!(
+                            "Skipping {display_path}: file is not UTF-8 ({err})"
+                        ));
+                        continue;
+                    }
+                };
+                let patch = match diffy::Patch::from_str(unified_diff) {
+                    Ok(patch) => patch,
+                    Err(err) => {
+                        warnings.push(format!("Skipping {display_path}: invalid patch ({err})"));
+                        continue;
+                    }
+                };
+                let new_text = match diffy::apply(&old_text, &patch) {
+                    Ok(text) => text,
+                    Err(err) => {
+                        warnings.push(format!(
+                            "Skipping {display_path}: patch failed to apply ({err})"
+                        ));
+                        continue;
+                    }
+                };
+                inputs.push(SemanticDiffInput {
+                    display_path,
+                    old: old_text.into_bytes(),
+                    new: new_text.into_bytes(),
+                });
+            }
+        }
+    }
+
+    SemanticInputs { inputs, warnings }
 }
 
 fn calculate_add_remove_from_diff(diff: &str) -> (usize, usize) {
@@ -337,6 +778,7 @@ fn push_wrapped_diff_line(
     text: &str,
     width: usize,
     line_number_width: usize,
+    show_sign: bool,
 ) -> Vec<RtLine<'static>> {
     let ln_str = line_number.to_string();
     let mut remaining_text: &str = text;
@@ -352,6 +794,7 @@ fn push_wrapped_diff_line(
         DiffLineType::Delete => ('-', style_del()),
         DiffLineType::Context => (' ', style_context()),
     };
+    let sign_char = if show_sign { sign_char } else { ' ' };
     let mut lines: Vec<RtLine<'static>> = Vec::new();
 
     loop {
@@ -465,8 +908,14 @@ mod tests {
         let long_line = "this is a very long line that should wrap across multiple terminal columns and continue";
 
         // Call the wrapping function directly so we can precisely control the width
-        let lines =
-            push_wrapped_diff_line(1, DiffLineType::Insert, long_line, 80, line_number_width(1));
+        let lines = push_wrapped_diff_line(
+            1,
+            DiffLineType::Insert,
+            long_line,
+            80,
+            line_number_width(1),
+            true,
+        );
 
         // Render into a small terminal to capture the visual layout
         snapshot_lines("wrap_behavior_insert", lines, 90, 8);

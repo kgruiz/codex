@@ -33,3 +33,6 @@ Control Codex’s behavior during an interactive session with slash commands.
 | `/feedback`     | send logs to maintainers                                                   |
 
 ---
+
+Notes:
+- `/diff` renders line, inline, and semantic diffs. Semantic diffs require `difftastic` on your `PATH` (install with `cargo install difftastic`).

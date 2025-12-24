@@ -1,4 +1,5 @@
-use crate::diff_render::create_diff_summary;
+use crate::diff_render::SemanticDiffCache;
+use crate::diff_render::create_diff_summary_with_semantic;
 use crate::diff_render::display_path_for;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::OutputLinesParams;
@@ -55,6 +56,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 use tracing::error;
@@ -587,11 +589,17 @@ pub(crate) fn new_review_status_line(message: String) -> PlainHistoryCell {
 pub(crate) struct PatchHistoryCell {
     changes: HashMap<PathBuf, FileChange>,
     cwd: PathBuf,
+    semantic_cache: Mutex<Option<SemanticDiffCache>>,
 }
 
 impl HistoryCell for PatchHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        create_diff_summary(&self.changes, &self.cwd, width as usize)
+        create_diff_summary_with_semantic(
+            &self.changes,
+            &self.cwd,
+            width as usize,
+            &self.semantic_cache,
+        )
     }
 }
 
@@ -1487,6 +1495,7 @@ pub(crate) fn new_patch_event(
     PatchHistoryCell {
         changes,
         cwd: cwd.to_path_buf(),
+        semantic_cache: Mutex::new(None),
     }
 }
 

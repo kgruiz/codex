@@ -2,6 +2,7 @@
 source: tui/src/diff_render.rs
 expression: terminal.backend()
 ---
+"• Line diff                                                                     "
 "• Edited 2 files (+2 -1)                                                        "
 "  └ a.txt (+1 -1)                                                               "
 "    1 -one                                                                      "
@@ -10,9 +11,8 @@ expression: terminal.backend()
 "  └ b.txt (+1 -0)                                                               "
 "    1 +new                                                                      "
 "                                                                                "
-"                                                                                "
-"                                                                                "
-"                                                                                "
-"                                                                                "
-"                                                                                "
-"                                                                                "
+"• Inline diff                                                                   "
+"• Edited 2 files (+2 -1)                                                        "
+"  └ a.txt (+1 -1)                                                               "
+"    1  one                                                                      "
+"    1  one changed                                                              "

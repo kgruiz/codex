@@ -119,6 +119,7 @@ use crate::exec_cell::ExecCell;
 use crate::exec_cell::new_active_exec_command;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::export_markdown;
+use crate::get_git_diff::GitDiffResult;
 use crate::get_git_diff::get_git_diff;
 use crate::history_cell;
 use crate::history_cell::AgentMessageCell;
@@ -3237,19 +3238,14 @@ impl ChatWidget {
             }
             SlashCommand::Diff => {
                 self.add_diff_in_progress();
+                let width = self.last_rendered_width.get().unwrap_or(80);
                 let tx = self.app_event_tx.clone();
                 tokio::spawn(async move {
-                    let text = match get_git_diff().await {
-                        Ok((is_git_repo, diff_text)) => {
-                            if is_git_repo {
-                                diff_text
-                            } else {
-                                "`/diff` — _not inside a git repository_".to_string()
-                            }
-                        }
-                        Err(e) => format!("Failed to compute diff: {e}"),
+                    let result = match get_git_diff(width).await {
+                        Ok(result) => result,
+                        Err(e) => GitDiffResult::Error(format!("Failed to compute diff: {e}")),
                     };
-                    tx.send(AppEvent::DiffResult(text));
+                    tx.send(AppEvent::DiffResult(result));
                 });
             }
             SlashCommand::Mention => {

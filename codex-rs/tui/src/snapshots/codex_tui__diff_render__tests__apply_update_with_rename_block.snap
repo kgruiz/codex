@@ -2,15 +2,15 @@
 source: tui/src/diff_render.rs
 expression: terminal.backend()
 ---
+"• Line diff                                                                     "
 "• Edited old_name.rs → new_name.rs (+1 -1)                                      "
 "    1  A                                                                        "
 "    2 -B                                                                        "
 "    2 +B changed                                                                "
 "    3  C                                                                        "
 "                                                                                "
-"                                                                                "
-"                                                                                "
-"                                                                                "
-"                                                                                "
-"                                                                                "
-"                                                                                "
+"• Inline diff                                                                   "
+"• Edited old_name.rs → new_name.rs (+1 -1)                                      "
+"    1  A                                                                        "
+"    2  B                                                                        "
+"    2  B changed                                                                "

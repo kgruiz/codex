@@ -44,6 +44,7 @@ mod clipboard_paste;
 mod color;
 pub mod custom_terminal;
 mod diff_render;
+mod diff_semantic;
 mod exec_cell;
 mod exec_command;
 mod export_markdown;
