@@ -7,6 +7,7 @@ use crate::status::format_tokens_compact;
 use crate::ui_consts::FOOTER_INDENT_COLS;
 use codex_common::elapsed::format_duration;
 use codex_core::config::StatusLineItem;
+use codex_core::protocol::SessionMode;
 use codex_protocol::openai_models::ReasoningEffort;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
@@ -25,6 +26,7 @@ pub(crate) struct FooterProps<'a> {
     pub(crate) is_task_running: bool,
     pub(crate) context_window_percent: Option<i64>,
     pub(crate) context_window_used_tokens: Option<i64>,
+    pub(crate) session_mode: SessionMode,
     pub(crate) model: &'a str,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
     pub(crate) keybindings: &'a Keybindings,
@@ -338,6 +340,18 @@ fn context_window_line(percent: Option<i64>, used_tokens: Option<i64>) -> Line<'
 
 fn status_line_line(props: FooterProps<'_>) -> Line<'static> {
     let mut line = Line::default();
+    let mut push_segment = |mut segment: Line<'static>| {
+        if !line.spans.is_empty() {
+            line.push_span(" · ".dim());
+        }
+
+        line.spans.append(&mut segment.spans);
+    };
+
+    if let Some(segment) = mode_segment(props.session_mode) {
+        push_segment(segment);
+    }
+
     for item in props.status_line_items {
         let segment = match item {
             StatusLineItem::Model => {
@@ -379,16 +393,20 @@ fn status_line_line(props: FooterProps<'_>) -> Line<'static> {
                 .map(|cost| Line::from(vec![Span::from(format!("cost ${cost:.4}")).dim()])),
         };
 
-        if let Some(mut segment) = segment {
-            if !line.spans.is_empty() {
-                line.push_span(" · ".dim());
-            }
-
-            line.spans.append(&mut segment.spans);
+        if let Some(segment) = segment {
+            push_segment(segment);
         }
     }
 
     line
+}
+
+fn mode_segment(mode: SessionMode) -> Option<Line<'static>> {
+    match mode {
+        SessionMode::Normal => None,
+        SessionMode::Plan => Some(Line::from(vec!["mode ".dim(), "plan".red().bold()])),
+        SessionMode::Ask => Some(Line::from(vec!["mode ".dim(), "ask".green().bold()])),
+    }
 }
 
 fn format_cwd_segment(cwd: &std::path::Path) -> Line<'static> {
@@ -500,6 +518,7 @@ mod tests {
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
+                session_mode: SessionMode::Normal,
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_default,
@@ -518,6 +537,7 @@ mod tests {
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
+                session_mode: SessionMode::Normal,
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_shift,
@@ -536,6 +556,7 @@ mod tests {
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
+                session_mode: SessionMode::Normal,
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_default,
@@ -554,6 +575,7 @@ mod tests {
                 is_task_running: true,
                 context_window_percent: None,
                 context_window_used_tokens: None,
+                session_mode: SessionMode::Normal,
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_default,
@@ -572,6 +594,7 @@ mod tests {
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
+                session_mode: SessionMode::Normal,
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_default,
@@ -590,6 +613,7 @@ mod tests {
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
+                session_mode: SessionMode::Normal,
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_default,
@@ -608,6 +632,7 @@ mod tests {
                 is_task_running: true,
                 context_window_percent: Some(72),
                 context_window_used_tokens: None,
+                session_mode: SessionMode::Normal,
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_default,
@@ -626,6 +651,7 @@ mod tests {
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: Some(123_456),
+                session_mode: SessionMode::Normal,
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_default,
@@ -644,6 +670,7 @@ mod tests {
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
+                session_mode: SessionMode::Normal,
                 model: "gpt-5.1-codex",
                 reasoning_effort: Some(ReasoningEffort::Medium),
                 keybindings: &keybindings_default,
@@ -662,6 +689,7 @@ mod tests {
                 is_task_running: false,
                 context_window_percent: None,
                 context_window_used_tokens: None,
+                session_mode: SessionMode::Normal,
                 model: "",
                 reasoning_effort: None,
                 keybindings: &keybindings_default,

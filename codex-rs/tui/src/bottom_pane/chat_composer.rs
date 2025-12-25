@@ -2185,6 +2185,7 @@ impl ChatComposer {
             is_task_running: self.is_task_running,
             context_window_percent: self.context_window_percent,
             context_window_used_tokens: self.context_window_used_tokens,
+            session_mode: self.session_mode,
             model: &self.session_model,
             reasoning_effort: self.session_reasoning_effort,
             keybindings: &self.keybindings,
