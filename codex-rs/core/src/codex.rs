@@ -404,15 +404,26 @@ fn mode_base_instructions(
 ) -> Option<String> {
     match mode {
         SessionMode::Normal => base_override,
-        SessionMode::Plan => {
-            let base = base_override.unwrap_or_else(|| model_family.base_instructions.clone());
-            Some(format!("{base}\n\n{PLAN_PROMPT}"))
-        }
-        SessionMode::Ask => {
-            let base = base_override.unwrap_or_else(|| model_family.base_instructions.clone());
-            Some(format!("{base}\n\n{ASK_PROMPT}"))
+        SessionMode::Plan | SessionMode::Ask => {
+            Some(base_override.unwrap_or_else(|| model_family.base_instructions.clone()))
         }
     }
+}
+
+fn mode_developer_instructions(
+    mode: SessionMode,
+    developer_instructions: Option<String>,
+) -> Option<String> {
+    let mode_prompt = match mode {
+        SessionMode::Normal => return developer_instructions,
+        SessionMode::Plan => PLAN_PROMPT,
+        SessionMode::Ask => ASK_PROMPT,
+    };
+
+    Some(match developer_instructions {
+        Some(base) => format!("{base}\n\n{mode_prompt}"),
+        None => mode_prompt.to_string(),
+    })
 }
 
 fn mode_sandbox_policy(mode: SessionMode, sandbox_policy: &SandboxPolicy) -> SandboxPolicy {
@@ -571,7 +582,10 @@ impl Session {
             sub_id,
             client,
             cwd: session_configuration.cwd.clone(),
-            developer_instructions: session_configuration.developer_instructions.clone(),
+            developer_instructions: mode_developer_instructions(
+                session_configuration.mode,
+                session_configuration.developer_instructions.clone(),
+            ),
             base_instructions,
             compact_prompt: session_configuration.compact_prompt.clone(),
             user_instructions: session_configuration.user_instructions.clone(),
