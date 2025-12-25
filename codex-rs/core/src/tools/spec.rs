@@ -44,7 +44,7 @@ impl ToolsConfig {
             features.enabled(Feature::WebSearchRequest) && *mode == SessionMode::Normal;
         let include_view_image_tool = features.enabled(Feature::ViewImageTool);
 
-        let shell_type = if *mode != SessionMode::Normal || !features.enabled(Feature::ShellTool) {
+        let shell_type = if !features.enabled(Feature::ShellTool) {
             ConfigShellToolType::Disabled
         } else if features.enabled(Feature::UnifiedExec) {
             // If ConPTY not supported (for old Windows versions), fallback on ShellCommand.
