@@ -423,6 +423,13 @@ impl BottomPane {
         }
     }
 
+    pub(crate) fn set_active_mode(&mut self, mode: Option<SessionMode>) {
+        if let Some(status) = self.status.as_mut() {
+            status.set_active_mode(mode);
+            self.request_redraw();
+        }
+    }
+
     pub(crate) fn show_ctrl_c_quit_hint(&mut self) {
         self.ctrl_c_quit_hint = true;
         self.composer

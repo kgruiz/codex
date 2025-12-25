@@ -5,12 +5,14 @@ use std::time::Duration;
 use std::time::Instant;
 
 use codex_core::protocol::Op;
+use codex_core::protocol::SessionMode;
 use codex_protocol::openai_models::ReasoningEffort;
 use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
+use ratatui::text::Span;
 use ratatui::widgets::WidgetRef;
 
 use crate::app_event::AppEvent;
@@ -28,6 +30,7 @@ pub(crate) struct StatusIndicatorWidget {
 
     active_model: Option<String>,
     active_reasoning_effort: Option<ReasoningEffort>,
+    active_mode: Option<SessionMode>,
 
     elapsed_running: Duration,
     last_resume_at: Instant,
@@ -65,6 +68,7 @@ impl StatusIndicatorWidget {
             show_interrupt_hint: true,
             active_model: None,
             active_reasoning_effort: None,
+            active_mode: None,
             elapsed_running: Duration::ZERO,
             last_resume_at: Instant::now(),
             is_paused: false,
@@ -99,6 +103,10 @@ impl StatusIndicatorWidget {
 
     pub(crate) fn set_active_reasoning_effort(&mut self, effort: Option<ReasoningEffort>) {
         self.active_reasoning_effort = effort;
+    }
+
+    pub(crate) fn set_active_mode(&mut self, mode: Option<SessionMode>) {
+        self.active_mode = mode;
     }
 
     #[cfg(test)]
@@ -174,23 +182,40 @@ impl Renderable for StatusIndicatorWidget {
             spans.push(self.header.clone().into());
         }
 
+        let mut detail_spans = Vec::with_capacity(6);
+        let mut push_detail = |mut segment: Vec<Span<'static>>| {
+            if !detail_spans.is_empty() {
+                detail_spans.push(" · ".dim());
+            }
+            detail_spans.append(&mut segment);
+        };
+
+        if let Some(segment) = mode_segment(self.active_mode) {
+            push_detail(segment);
+        }
+
         if let Some(model) = self.active_model.as_deref()
             && !model.trim().is_empty()
         {
-            spans.push(" · ".dim());
-            spans.push(model.to_string().into());
+            let mut segment = Vec::new();
+            segment.push(model.to_string().into());
             if let Some(label) =
                 thinking_label_for(model, self.active_reasoning_effort).or_else(|| {
                     (!model.starts_with("codex-auto-") && self.active_reasoning_effort.is_none())
                         .then_some("default")
                 })
             {
-                spans.push(format!(" (reasoning {label})").dim());
+                segment.push(format!(" (reasoning {label})").dim());
             }
+            push_detail(segment);
+        }
 
-            spans.push(" · ".dim());
-        } else {
+        if detail_spans.is_empty() {
             spans.push(" ".into());
+        } else {
+            spans.push(" · ".dim());
+            spans.extend(detail_spans);
+            spans.push(" · ".dim());
         }
 
         if self.show_interrupt_hint {
@@ -213,6 +238,15 @@ fn thinking_label_for(model: &str, effort: Option<ReasoningEffort>) -> Option<&'
     }
 
     effort.map(thinking_label)
+}
+
+fn mode_segment(mode: Option<SessionMode>) -> Option<Vec<Span<'static>>> {
+    let mode = mode?;
+    match mode {
+        SessionMode::Normal => None,
+        SessionMode::Plan => Some(vec!["mode ".dim(), "plan".red().bold()]),
+        SessionMode::Ask => Some(vec!["mode ".dim(), "ask".green().bold()]),
+    }
 }
 
 fn thinking_label(effort: ReasoningEffort) -> &'static str {

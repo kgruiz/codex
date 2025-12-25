@@ -480,6 +480,7 @@ struct PendingTurnContext {
     model: String,
     reasoning_effort: Option<ReasoningEffortConfig>,
     model_family: ModelFamily,
+    mode: SessionMode,
 }
 
 #[derive(Clone)]
@@ -545,6 +546,7 @@ impl ChatWidget {
                 .unwrap_or_else(|| self.model_family.get_model_slug().to_string()),
             reasoning_effort: self.effective_reasoning_effort(),
             model_family: self.model_family.clone(),
+            mode: self.session_mode,
         }
     }
 
@@ -926,6 +928,7 @@ impl ChatWidget {
         self.bottom_pane.set_active_model(Some(active.model));
         self.bottom_pane
             .set_active_reasoning_effort(active.reasoning_effort);
+        self.bottom_pane.set_active_mode(Some(active.mode));
         self.retry_status_header = None;
         self.bottom_pane.set_interrupt_hint_visible(true);
         self.set_status_header(String::from("Working"));
@@ -946,6 +949,7 @@ impl ChatWidget {
         self.bottom_pane.set_task_running(false);
         self.bottom_pane.set_active_model(None);
         self.bottom_pane.set_active_reasoning_effort(None);
+        self.bottom_pane.set_active_mode(None);
         self.pending_active_turn_context = None;
         self.active_turn_context = None;
         self.running_commands.clear();
@@ -3562,6 +3566,7 @@ impl ChatWidget {
             model: effective_model.to_string(),
             reasoning_effort: effective_effort,
             model_family: session.model_family.clone(),
+            mode: session.mode,
         });
 
         let restore_model = apply_model.as_ref().map(|_| session.model.clone());

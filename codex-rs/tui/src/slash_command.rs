@@ -95,9 +95,6 @@ impl SlashCommand {
             | SlashCommand::Approvals
             | SlashCommand::Experimental
             | SlashCommand::Review
-            | SlashCommand::Plan
-            | SlashCommand::Ask
-            | SlashCommand::Normal
             | SlashCommand::Logout => false,
             SlashCommand::Diff
             | SlashCommand::Mention
@@ -107,7 +104,10 @@ impl SlashCommand {
             | SlashCommand::Mcp
             | SlashCommand::Feedback
             | SlashCommand::Quit
-            | SlashCommand::Exit => true,
+            | SlashCommand::Exit
+            | SlashCommand::Plan
+            | SlashCommand::Ask
+            | SlashCommand::Normal => true,
             SlashCommand::Rollout => true,
             SlashCommand::TestApproval => true,
         }
