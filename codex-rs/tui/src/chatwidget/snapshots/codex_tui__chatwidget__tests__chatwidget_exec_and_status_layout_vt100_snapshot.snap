@@ -41,4 +41,4 @@ expression: term.backend().vt100().screen().contents()
 
 › Summarize recent commits
 
-  100% context left · latency 0ms
+  100% context left · cwd ~/Developer/Projects/codex/codex-rs/tui

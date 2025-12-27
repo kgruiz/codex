@@ -35,6 +35,7 @@ members = [
     "otel",
     "tui",
     "utils/absolute-path",
+    "utils/cargo-bin",
     "utils/git",
     "utils/cache",
     "utils/image",
@@ -48,7 +49,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.18.5"
+version = "0.19.0"
 # Track the edition for all workspace crates in one place. Individual
 # crates can still override this value, but keeping it here means new
 # crates created with `cargo new -w ...` automatically inherit the 2024
@@ -91,6 +92,7 @@ codex-stdio-to-uds = { path = "stdio-to-uds" }
 codex-tui = { path = "tui" }
 codex-utils-absolute-path = { path = "utils/absolute-path" }
 codex-utils-cache = { path = "utils/cache" }
+codex-utils-cargo-bin = { path = "utils/cargo-bin" }
 codex-utils-image = { path = "utils/image" }
 codex-utils-json-to-toml = { path = "utils/json-to-toml" }
 codex-utils-pty = { path = "utils/pty" }
@@ -144,7 +146,7 @@ indexmap = "2.12.0"
 insta = "1.44.3"
 itertools = "0.14.0"
 keyring = { version = "3.6", default-features = false }
-landlock = "0.4.1"
+landlock = "0.4.4"
 lazy_static = "1"
 libc = "0.2.177"
 log = "0.4"
@@ -176,7 +178,7 @@ ratatui-macros = "0.6.0"
 regex = "1.12.2"
 regex-lite = "0.1.7"
 reqwest = "0.12"
-rmcp = { version = "0.10.0", default-features = false }
+rmcp = { version = "0.12.0", default-features = false }
 schemars = "0.8.22"
 seccompiler = "0.5.0"
 sentry = "0.46.0"
@@ -196,7 +198,7 @@ strum_macros = "0.27.2"
 supports-color = "3.0.2"
 sys-locale = "0.3.2"
 tempfile = "3.23.0"
-test-log = "0.2.18"
+test-log = "0.2.19"
 textwrap = "0.16.2"
 thiserror = "2.0.17"
 time = "0.3"

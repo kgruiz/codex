@@ -8,11 +8,11 @@ use codex_common::approval_presets::builtin_approval_presets;
 use codex_core::AuthManager;
 use codex_core::CodexAuth;
 use codex_core::config::Config;
+use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigOverrides;
-use codex_core::config::ConfigToml;
 use codex_core::config::Constrained;
 use codex_core::config::ConstraintError;
-use codex_core::openai_models::models_manager::ModelsManager;
+use codex_core::models_manager::manager::ModelsManager;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::AgentMessageEvent;
 use codex_core::protocol::AgentReasoningDeltaEvent;
@@ -75,15 +75,19 @@ fn set_windows_sandbox_enabled(enabled: bool) {
     codex_core::set_windows_sandbox_enabled(enabled);
 }
 
-fn test_config() -> Config {
+async fn test_config_async() -> Config {
     // Use base defaults to avoid depending on host state.
+    ConfigBuilder::default()
+        .codex_home(std::env::temp_dir())
+        .harness_overrides(ConfigOverrides::default())
+        .build()
+        .await
+        .expect("config")
+}
 
-    Config::load_from_base_config_with_overrides(
-        ConfigToml::default(),
-        ConfigOverrides::default(),
-        std::env::temp_dir(),
-    )
-    .expect("config")
+fn test_config() -> Config {
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    runtime.block_on(test_config_async())
 }
 
 fn snapshot(percent: f64) -> RateLimitSnapshot {
@@ -339,7 +343,7 @@ fn context_indicator_shows_used_tokens_when_window_unknown() {
 async fn helpers_are_available_and_do_not_panic() {
     let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
     let tx = AppEventSender::new(tx_raw);
-    let cfg = test_config();
+    let cfg = test_config_async().await;
     let resolved_model = ModelsManager::get_model_offline(cfg.model.as_deref());
     let model_family = ModelsManager::construct_model_family_offline(&resolved_model, &cfg);
     let conversation_manager = Arc::new(ConversationManager::with_models_provider(
@@ -373,10 +377,30 @@ fn make_chatwidget_manual(
     tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
     tokio::sync::mpsc::UnboundedReceiver<Op>,
 ) {
+    make_chatwidget_manual_with_config(test_config(), model_override)
+}
+
+async fn make_chatwidget_manual_async(
+    model_override: Option<&str>,
+) -> (
+    ChatWidget,
+    tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+    tokio::sync::mpsc::UnboundedReceiver<Op>,
+) {
+    make_chatwidget_manual_with_config(test_config_async().await, model_override)
+}
+
+fn make_chatwidget_manual_with_config(
+    mut cfg: Config,
+    model_override: Option<&str>,
+) -> (
+    ChatWidget,
+    tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+    tokio::sync::mpsc::UnboundedReceiver<Op>,
+) {
     let (tx_raw, rx) = unbounded_channel::<AppEvent>();
     let app_event_tx = AppEventSender::new(tx_raw);
     let (op_tx, op_rx) = unbounded_channel::<Op>();
-    let mut cfg = test_config();
     let resolved_model = model_override
         .map(str::to_owned)
         .unwrap_or_else(|| ModelsManager::get_model_offline(cfg.model.as_deref()));
@@ -458,6 +482,7 @@ fn make_chatwidget_manual(
         feedback: codex_feedback::CodexFeedback::new(),
         current_rollout_path: None,
         session_title: None,
+        external_editor_state: ExternalEditorState::Closed,
         pending_active_turn_context: None,
         active_turn_context: None,
     };
@@ -477,6 +502,17 @@ pub(crate) fn make_chatwidget_manual_with_sender() -> (
     tokio::sync::mpsc::UnboundedReceiver<Op>,
 ) {
     let (widget, rx, op_rx) = make_chatwidget_manual(None);
+    let app_event_tx = widget.app_event_tx.clone();
+    (widget, app_event_tx, rx, op_rx)
+}
+
+pub(crate) async fn make_chatwidget_manual_with_sender_async() -> (
+    ChatWidget,
+    AppEventSender,
+    tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+    tokio::sync::mpsc::UnboundedReceiver<Op>,
+) {
+    let (widget, rx, op_rx) = make_chatwidget_manual_async(None).await;
     let app_event_tx = widget.app_event_tx.clone();
     (widget, app_event_tx, rx, op_rx)
 }
@@ -1597,18 +1633,6 @@ fn slash_resume_opens_picker() {
 }
 
 #[test]
-fn slash_undo_sends_op() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None);
-
-    chat.dispatch_command(SlashCommand::Undo, None);
-
-    match rx.try_recv() {
-        Ok(AppEvent::CodexOp(Op::Undo)) => {}
-        other => panic!("expected AppEvent::CodexOp(Op::Undo), got {other:?}"),
-    }
-}
-
-#[test]
 fn slash_rollout_displays_current_path() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None);
     let rollout_path = PathBuf::from("/tmp/codex-test-rollout.jsonl");
@@ -1956,7 +1980,7 @@ fn review_custom_prompt_escape_navigates_back_then_dismisses() {
 /// parent popup, pressing Esc again dismisses all panels (back to normal mode).
 #[tokio::test]
 async fn review_branch_picker_escape_navigates_back_then_dismisses() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None);
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual_async(None).await;
 
     // Open the Review presets parent popup.
     chat.open_review_popup();
@@ -2461,9 +2485,10 @@ fn approvals_popup_shows_disabled_presets() {
     chat.config.approval_policy =
         Constrained::new(AskForApproval::OnRequest, |candidate| match candidate {
             AskForApproval::OnRequest => Ok(()),
-            _ => Err(ConstraintError {
-                message: "this message should be printed in the description".to_string(),
-            }),
+            _ => Err(ConstraintError::invalid_value(
+                "disallowed",
+                "this message should be printed in the description",
+            )),
         })
         .expect("construct constrained approval policy");
 
@@ -2497,9 +2522,10 @@ fn approvals_popup_navigation_skips_disabled() {
     chat.config.approval_policy =
         Constrained::new(AskForApproval::OnRequest, |candidate| match candidate {
             AskForApproval::OnRequest => Ok(()),
-            _ => Err(ConstraintError {
-                message: "disabled preset".to_string(),
-            }),
+            _ => Err(ConstraintError::invalid_value(
+                "disallowed",
+                "disabled preset",
+            )),
         })
         .expect("construct constrained approval policy");
 
@@ -3437,6 +3463,7 @@ fn stream_error_updates_status_indicator() {
         msg: EventMsg::StreamError(StreamErrorEvent {
             message: msg.to_string(),
             codex_error_info: Some(CodexErrorInfo::Other),
+            additional_details: None,
         }),
     });
 
@@ -3486,6 +3513,7 @@ fn stream_recovery_restores_previous_status_header() {
         msg: EventMsg::StreamError(StreamErrorEvent {
             message: "Reconnecting... 1/5".to_string(),
             codex_error_info: Some(CodexErrorInfo::Other),
+            additional_details: None,
         }),
     });
     drain_insert_history(&mut rx);

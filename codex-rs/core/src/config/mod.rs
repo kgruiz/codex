@@ -5,14 +5,17 @@ use crate::config::types::History;
 use crate::config::types::McpServerConfig;
 use crate::config::types::Notice;
 use crate::config::types::Notifications;
+use crate::config::types::OneOrManyStrings;
 use crate::config::types::OtelConfig;
 use crate::config::types::OtelConfigToml;
 use crate::config::types::OtelExporterKind;
 use crate::config::types::SandboxWorkspaceWrite;
+use crate::config::types::ScrollInputMode;
 use crate::config::types::ShellEnvironmentPolicy;
 use crate::config::types::ShellEnvironmentPolicyToml;
 use crate::config::types::Tui;
 use crate::config::types::UriBasedFileOpener;
+use crate::config_loader::ConfigLayerStack;
 use crate::config_loader::ConfigRequirements;
 use crate::config_loader::LoaderOverrides;
 use crate::config_loader::load_config_layers_state;
@@ -37,12 +40,12 @@ use codex_protocol::config_types::SandboxMode;
 use codex_protocol::config_types::TrustLevel;
 use codex_protocol::config_types::Verbosity;
 use codex_protocol::openai_models::ReasoningEffort;
-use codex_protocol::openai_models::ReasoningSummaryFormat;
 use codex_rmcp_client::OAuthCredentialsStoreMode;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::AbsolutePathBufGuard;
 use dirs::home_dir;
 use serde::Deserialize;
+use serde::Serialize;
 use similar::DiffableStr;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -94,6 +97,10 @@ pub(crate) fn test_config() -> Config {
 /// Application configuration loaded from disk and merged with overrides.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
+    /// Provenance for how this [`Config`] was derived (merged layers + enforced
+    /// requirements).
+    pub config_layer_stack: ConfigLayerStack,
+
     /// Optional override of model selection.
     pub model: Option<String>,
 
@@ -115,7 +122,7 @@ pub struct Config {
     /// Approval policy for executing commands.
     pub approval_policy: Constrained<AskForApproval>,
 
-    pub sandbox_policy: SandboxPolicy,
+    pub sandbox_policy: Constrained<SandboxPolicy>,
 
     /// True if the user passed in an override or set a value in config.toml
     /// for either of approval_policy or sandbox_mode.
@@ -192,6 +199,58 @@ pub struct Config {
     /// Keybinding overrides loaded from `[keybindings]` in `config.toml`.
     pub keybindings: HashMap<String, Vec<String>>,
 
+    /// Override the events-per-wheel-tick factor for TUI2 scroll normalization.
+    ///
+    /// This is the same `tui.scroll_events_per_tick` value from `config.toml`, plumbed through the
+    /// merged [`Config`] object (see [`Tui`]) so TUI2 can normalize scroll event density per
+    /// terminal.
+    pub tui_scroll_events_per_tick: Option<u16>,
+
+    /// Override the number of lines applied per wheel tick in TUI2.
+    ///
+    /// This is the same `tui.scroll_wheel_lines` value from `config.toml` (see [`Tui`]). TUI2
+    /// applies it to wheel-like scroll streams. Trackpad-like scrolling uses a separate
+    /// `tui.scroll_trackpad_lines` setting.
+    pub tui_scroll_wheel_lines: Option<u16>,
+
+    /// Override the number of lines per tick-equivalent used for trackpad scrolling in TUI2.
+    ///
+    /// This is the same `tui.scroll_trackpad_lines` value from `config.toml` (see [`Tui`]).
+    pub tui_scroll_trackpad_lines: Option<u16>,
+
+    /// Trackpad acceleration: approximate number of events required to gain +1x speed in TUI2.
+    ///
+    /// This is the same `tui.scroll_trackpad_accel_events` value from `config.toml` (see [`Tui`]).
+    pub tui_scroll_trackpad_accel_events: Option<u16>,
+
+    /// Trackpad acceleration: maximum multiplier applied to trackpad-like streams in TUI2.
+    ///
+    /// This is the same `tui.scroll_trackpad_accel_max` value from `config.toml` (see [`Tui`]).
+    pub tui_scroll_trackpad_accel_max: Option<u16>,
+
+    /// Control how TUI2 interprets mouse scroll input (wheel vs trackpad).
+    ///
+    /// This is the same `tui.scroll_mode` value from `config.toml` (see [`Tui`]).
+    pub tui_scroll_mode: ScrollInputMode,
+
+    /// Override the wheel tick detection threshold (ms) for TUI2 auto scroll mode.
+    ///
+    /// This is the same `tui.scroll_wheel_tick_detect_max_ms` value from `config.toml` (see
+    /// [`Tui`]).
+    pub tui_scroll_wheel_tick_detect_max_ms: Option<u64>,
+
+    /// Override the wheel-like end-of-stream threshold (ms) for TUI2 auto scroll mode.
+    ///
+    /// This is the same `tui.scroll_wheel_like_max_duration_ms` value from `config.toml` (see
+    /// [`Tui`]).
+    pub tui_scroll_wheel_like_max_duration_ms: Option<u64>,
+
+    /// Invert mouse scroll direction for TUI2.
+    ///
+    /// This is the same `tui.scroll_invert` value from `config.toml` (see [`Tui`]) and is applied
+    /// consistently to both mouse wheels and trackpads.
+    pub tui_scroll_invert: bool,
+
     /// The directory that should be treated as the current working directory
     /// for the session. All relative paths inside the business-logic layer are
     /// resolved against this path.
@@ -258,9 +317,6 @@ pub struct Config {
     /// Optional override to force-enable reasoning summaries for the configured model.
     pub model_supports_reasoning_summaries: Option<bool>,
 
-    /// Optional override to force reasoning summary format for the configured model.
-    pub model_reasoning_summary_format: Option<ReasoningSummaryFormat>,
-
     /// Optional verbosity control for GPT-5 models (Responses API `text.verbosity`).
     pub model_verbosity: Option<Verbosity>,
 
@@ -282,10 +338,6 @@ pub struct Config {
 
     /// If set to `true`, used only the experimental unified exec tool.
     pub use_experimental_unified_exec_tool: bool,
-
-    /// If set to `true`, use the experimental official Rust MCP client.
-    /// https://github.com/modelcontextprotocol/rust-sdk
-    pub use_experimental_use_rmcp_client: bool,
 
     /// Settings for ghost snapshots (used for undo).
     pub ghost_snapshot: GhostSnapshotConfig,
@@ -360,8 +412,13 @@ impl ConfigBuilder {
         let cli_overrides = cli_overrides.unwrap_or_default();
         let harness_overrides = harness_overrides.unwrap_or_default();
         let loader_overrides = loader_overrides.unwrap_or_default();
+        let cwd = match harness_overrides.cwd.as_deref() {
+            Some(path) => AbsolutePathBuf::try_from(path)?,
+            None => AbsolutePathBuf::current_dir()?,
+        };
         let config_layer_stack =
-            load_config_layers_state(&codex_home, &cli_overrides, loader_overrides).await?;
+            load_config_layers_state(&codex_home, Some(cwd), &cli_overrides, loader_overrides)
+                .await?;
         let merged_toml = config_layer_stack.effective_config();
 
         // Note that each layer in ConfigLayerStack should have resolved
@@ -371,11 +428,11 @@ impl ConfigBuilder {
         let config_toml: ConfigToml = merged_toml
             .try_into()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        Config::load_config_with_requirements(
+        Config::load_config_with_layer_stack(
             config_toml,
             harness_overrides,
             codex_home,
-            config_layer_stack.requirements().clone(),
+            config_layer_stack,
         )
     }
 }
@@ -415,10 +472,16 @@ impl Config {
 /// applied yet, which risks failing to enforce required constraints.
 pub async fn load_config_as_toml_with_cli_overrides(
     codex_home: &Path,
+    cwd: &AbsolutePathBuf,
     cli_overrides: Vec<(String, TomlValue)>,
 ) -> std::io::Result<ConfigToml> {
-    let config_layer_stack =
-        load_config_layers_state(codex_home, &cli_overrides, LoaderOverrides::default()).await?;
+    let config_layer_stack = load_config_layers_state(
+        codex_home,
+        Some(cwd.clone()),
+        &cli_overrides,
+        LoaderOverrides::default(),
+    )
+    .await?;
 
     let merged_toml = config_layer_stack.effective_config();
     let cfg = deserialize_config_toml_with_base(merged_toml, codex_home).map_err(|e| {
@@ -452,8 +515,12 @@ pub async fn load_global_mcp_servers(
     // config layers for deprecated fields rather than reporting on the merged
     // result.
     let cli_overrides = Vec::<(String, TomlValue)>::new();
+    // There is no cwd/project context for this query, so this will not include
+    // MCP servers defined in in-repo .codex/ folders.
+    let cwd: Option<AbsolutePathBuf> = None;
     let config_layer_stack =
-        load_config_layers_state(codex_home, &cli_overrides, LoaderOverrides::default()).await?;
+        load_config_layers_state(codex_home, cwd, &cli_overrides, LoaderOverrides::default())
+            .await?;
     let merged_toml = config_layer_stack.effective_config();
     let Some(servers_value) = merged_toml.get("mcp_servers") else {
         return Ok(BTreeMap::new());
@@ -614,7 +681,7 @@ pub fn set_default_oss_provider(codex_home: &Path, provider: &str) -> std::io::R
 }
 
 /// Base config deserialized from ~/.codex/config.toml.
-#[derive(Deserialize, Debug, Clone, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 pub struct ConfigToml {
     /// Optional override of model selection.
     pub model: Option<String>,
@@ -716,7 +783,7 @@ pub struct ConfigToml {
 
     /// Keybinding overrides loaded from `[keybindings]` in `config.toml`.
     #[serde(default)]
-    pub keybindings: HashMap<String, crate::config::types::OneOrManyStrings>,
+    pub keybindings: HashMap<String, OneOrManyStrings>,
 
     /// When set to `true`, `AgentReasoning` events will be hidden from the
     /// UI/output. Defaults to `false`.
@@ -734,9 +801,6 @@ pub struct ConfigToml {
     /// Override to force-enable reasoning summaries for the configured model.
     pub model_supports_reasoning_summaries: Option<bool>,
 
-    /// Override to force reasoning summary format for the configured model.
-    pub model_reasoning_summary_format: Option<ReasoningSummaryFormat>,
-
     /// Base URL for requests to ChatGPT (as opposed to the OpenAI API).
     pub chatgpt_base_url: Option<String>,
 
@@ -752,6 +816,11 @@ pub struct ConfigToml {
     /// Settings for ghost snapshots (used for undo).
     #[serde(default)]
     pub ghost_snapshot: Option<GhostSnapshotToml>,
+
+    /// Markers used to detect the project root when searching parent
+    /// directories for `.codex` folders. Defaults to [".git"] when unset.
+    #[serde(default)]
+    pub project_root_markers: Option<Vec<String>>,
 
     /// When `true`, checks for Codex updates on startup and surfaces update prompts.
     /// Set to `false` only if your Codex updates are centrally managed.
@@ -777,7 +846,6 @@ pub struct ConfigToml {
     pub experimental_instructions_file: Option<AbsolutePathBuf>,
     pub experimental_compact_prompt_file: Option<AbsolutePathBuf>,
     pub experimental_use_unified_exec_tool: Option<bool>,
-    pub experimental_use_rmcp_client: Option<bool>,
     pub experimental_use_freeform_apply_patch: Option<bool>,
     /// Preferred OSS provider for local models, e.g. "lmstudio" or "ollama".
     pub oss_provider: Option<String>,
@@ -808,7 +876,7 @@ impl From<ConfigToml> for UserSavedConfig {
     }
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ProjectConfig {
     pub trust_level: Option<TrustLevel>,
 }
@@ -823,7 +891,7 @@ impl ProjectConfig {
     }
 }
 
-#[derive(Deserialize, Debug, Clone, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 pub struct ToolsToml {
     #[serde(default, alias = "web_search_request")]
     pub web_search: Option<bool>,
@@ -842,7 +910,7 @@ impl From<ToolsToml> for Tools {
     }
 }
 
-#[derive(Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct GhostSnapshotToml {
     /// Exclude untracked files larger than this many bytes from ghost snapshots.
     #[serde(alias = "ignore_untracked_files_over_bytes")]
@@ -1010,24 +1078,24 @@ pub fn resolve_oss_provider(
 }
 
 impl Config {
-    /// Meant to be used exclusively for tests. For new tests, prefer using
-    /// [ConfigBuilder::build()], if possible, so ultimately we can make this
-    /// method private to this file.
-    pub fn load_from_base_config_with_overrides(
+    #[cfg(test)]
+    fn load_from_base_config_with_overrides(
         cfg: ConfigToml,
         overrides: ConfigOverrides,
         codex_home: PathBuf,
     ) -> std::io::Result<Self> {
-        let requirements = ConfigRequirements::default();
-        Self::load_config_with_requirements(cfg, overrides, codex_home, requirements)
+        // Note this ignores requirements.toml enforcement for tests.
+        let config_layer_stack = ConfigLayerStack::default();
+        Self::load_config_with_layer_stack(cfg, overrides, codex_home, config_layer_stack)
     }
 
-    fn load_config_with_requirements(
+    fn load_config_with_layer_stack(
         cfg: ConfigToml,
         overrides: ConfigOverrides,
         codex_home: PathBuf,
-        requirements: ConfigRequirements,
+        config_layer_stack: ConfigLayerStack,
     ) -> std::io::Result<Self> {
+        let requirements = config_layer_stack.requirements().clone();
         let user_instructions = Self::load_instructions(Some(&codex_home));
 
         // Destructure ConfigOverrides fully to ensure all overrides are applied.
@@ -1194,7 +1262,6 @@ impl Config {
         let include_apply_patch_tool_flag = features.enabled(Feature::ApplyPatchFreeform);
         let tools_web_search_request = features.enabled(Feature::WebSearchRequest);
         let use_experimental_unified_exec_tool = features.enabled(Feature::UnifiedExec);
-        let use_experimental_use_rmcp_client = features.enabled(Feature::RmcpClient);
 
         let forced_chatgpt_workspace_id =
             cfg.forced_chatgpt_workspace_id.as_ref().and_then(|value| {
@@ -1254,10 +1321,14 @@ impl Config {
         // Config.
         let ConfigRequirements {
             approval_policy: mut constrained_approval_policy,
+            sandbox_policy: mut constrained_sandbox_policy,
         } = requirements;
 
         constrained_approval_policy
             .set(approval_policy)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{e}")))?;
+        constrained_sandbox_policy
+            .set(sandbox_policy)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{e}")))?;
 
         let config = Self {
@@ -1269,7 +1340,7 @@ impl Config {
             model_provider,
             cwd: resolved_cwd,
             approval_policy: constrained_approval_policy,
-            sandbox_policy,
+            sandbox_policy: constrained_sandbox_policy,
             did_user_set_custom_approval_policy_or_sandbox_mode,
             forced_auto_mode_downgraded_on_windows,
             shell_environment_policy,
@@ -1302,6 +1373,7 @@ impl Config {
                 .collect(),
             tool_output_token_limit: cfg.tool_output_token_limit,
             codex_home,
+            config_layer_stack,
             history,
             file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
             codex_linux_sandbox_exe,
@@ -1319,7 +1391,6 @@ impl Config {
                 .or(cfg.model_reasoning_summary)
                 .unwrap_or_default(),
             model_supports_reasoning_summaries: cfg.model_supports_reasoning_summaries,
-            model_reasoning_summary_format: cfg.model_reasoning_summary_format.clone(),
             model_verbosity: config_profile.model_verbosity.or(cfg.model_verbosity),
             chatgpt_base_url: config_profile
                 .chatgpt_base_url
@@ -1330,7 +1401,6 @@ impl Config {
             include_apply_patch_tool: include_apply_patch_tool_flag,
             tools_web_search_request,
             use_experimental_unified_exec_tool,
-            use_experimental_use_rmcp_client,
             ghost_snapshot,
             features,
             active_profile: active_profile_name,
@@ -1362,6 +1432,27 @@ impl Config {
                 .into_iter()
                 .map(|(key, value)| (key, value.into_vec()))
                 .collect(),
+            tui_scroll_events_per_tick: cfg.tui.as_ref().and_then(|t| t.scroll_events_per_tick),
+            tui_scroll_wheel_lines: cfg.tui.as_ref().and_then(|t| t.scroll_wheel_lines),
+            tui_scroll_trackpad_lines: cfg.tui.as_ref().and_then(|t| t.scroll_trackpad_lines),
+            tui_scroll_trackpad_accel_events: cfg
+                .tui
+                .as_ref()
+                .and_then(|t| t.scroll_trackpad_accel_events),
+            tui_scroll_trackpad_accel_max: cfg
+                .tui
+                .as_ref()
+                .and_then(|t| t.scroll_trackpad_accel_max),
+            tui_scroll_mode: cfg.tui.as_ref().map(|t| t.scroll_mode).unwrap_or_default(),
+            tui_scroll_wheel_tick_detect_max_ms: cfg
+                .tui
+                .as_ref()
+                .and_then(|t| t.scroll_wheel_tick_detect_max_ms),
+            tui_scroll_wheel_like_max_duration_ms: cfg
+                .tui
+                .as_ref()
+                .and_then(|t| t.scroll_wheel_like_max_duration_ms),
+            tui_scroll_invert: cfg.tui.as_ref().map(|t| t.scroll_invert).unwrap_or(false),
             otel: {
                 let t: OtelConfigToml = cfg.otel.unwrap_or_default();
                 let log_user_prompt = t.log_user_prompt.unwrap_or(false);
@@ -1381,6 +1472,15 @@ impl Config {
         Ok(config)
     }
 
+    fn default_status_line_items() -> Vec<StatusLineItem> {
+        vec![
+            StatusLineItem::Model,
+            StatusLineItem::Context,
+            StatusLineItem::Cwd,
+            StatusLineItem::GitBranch,
+        ]
+    }
+
     fn load_instructions(codex_dir: Option<&Path>) -> Option<String> {
         let base = codex_dir?;
         for candidate in [LOCAL_PROJECT_DOC_FILENAME, DEFAULT_PROJECT_DOC_FILENAME] {
@@ -1394,17 +1494,6 @@ impl Config {
             }
         }
         None
-    }
-
-    fn default_status_line_items() -> Vec<StatusLineItem> {
-        vec![
-            StatusLineItem::Model,
-            StatusLineItem::Context,
-            StatusLineItem::TokensPerSec,
-            StatusLineItem::Latency,
-            StatusLineItem::ToolTime,
-            StatusLineItem::Cost,
-        ]
     }
 
     /// If `path` is `Some`, attempts to read the file at the given path and
@@ -1545,8 +1634,26 @@ persistence = "none"
             .expect("TUI config without notifications should succeed");
         let tui = parsed.tui.expect("config should include tui section");
 
-        assert_eq!(tui.notifications, Notifications::Enabled(true));
-        assert!(tui.show_tooltips);
+        assert_eq!(
+            tui,
+            Tui {
+                notifications: Notifications::Enabled(true),
+                animations: true,
+                show_tooltips: true,
+                status_line: None,
+                keep_queue_on_branch: false,
+                diff_view: DiffView::Line,
+                scroll_events_per_tick: None,
+                scroll_wheel_lines: None,
+                scroll_trackpad_lines: None,
+                scroll_trackpad_accel_events: None,
+                scroll_trackpad_accel_max: None,
+                scroll_mode: ScrollInputMode::Auto,
+                scroll_wheel_tick_detect_max_ms: None,
+                scroll_wheel_like_max_duration_ms: None,
+                scroll_invert: false,
+            }
+        );
     }
 
     #[test]
@@ -1718,12 +1825,12 @@ trust_level = "trusted"
                 config.forced_auto_mode_downgraded_on_windows,
                 "expected workspace-write request to be downgraded on Windows"
             );
-            match config.sandbox_policy {
-                SandboxPolicy::ReadOnly => {}
+            match config.sandbox_policy.get() {
+                &SandboxPolicy::ReadOnly => {}
                 other => panic!("expected read-only policy on Windows, got {other:?}"),
             }
         } else {
-            match config.sandbox_policy {
+            match config.sandbox_policy.get() {
                 SandboxPolicy::WorkspaceWrite { writable_roots, .. } => {
                     assert_eq!(
                         writable_roots
@@ -1855,8 +1962,8 @@ trust_level = "trusted"
         )?;
 
         assert!(matches!(
-            config.sandbox_policy,
-            SandboxPolicy::DangerFullAccess
+            config.sandbox_policy.get(),
+            &SandboxPolicy::DangerFullAccess
         ));
         assert!(config.did_user_set_custom_approval_policy_or_sandbox_mode);
 
@@ -1892,11 +1999,14 @@ trust_level = "trusted"
         )?;
 
         if cfg!(target_os = "windows") {
-            assert!(matches!(config.sandbox_policy, SandboxPolicy::ReadOnly));
+            assert!(matches!(
+                config.sandbox_policy.get(),
+                SandboxPolicy::ReadOnly
+            ));
             assert!(config.forced_auto_mode_downgraded_on_windows);
         } else {
             assert!(matches!(
-                config.sandbox_policy,
+                config.sandbox_policy.get(),
                 SandboxPolicy::WorkspaceWrite { .. }
             ));
             assert!(!config.forced_auto_mode_downgraded_on_windows);
@@ -1932,7 +2042,6 @@ trust_level = "trusted"
         let codex_home = TempDir::new()?;
         let cfg = ConfigToml {
             experimental_use_unified_exec_tool: Some(true),
-            experimental_use_rmcp_client: Some(true),
             experimental_use_freeform_apply_patch: Some(true),
             ..Default::default()
         };
@@ -1945,12 +2054,10 @@ trust_level = "trusted"
 
         assert!(config.features.enabled(Feature::ApplyPatchFreeform));
         assert!(config.features.enabled(Feature::UnifiedExec));
-        assert!(config.features.enabled(Feature::RmcpClient));
 
         assert!(config.include_apply_patch_tool);
 
         assert!(config.use_experimental_unified_exec_tool);
-        assert!(config.use_experimental_use_rmcp_client);
 
         Ok(())
     }
@@ -1992,8 +2099,9 @@ trust_level = "trusted"
             managed_preferences_base64: None,
         };
 
+        let cwd = AbsolutePathBuf::try_from(codex_home.path())?;
         let config_layer_stack =
-            load_config_layers_state(codex_home.path(), &Vec::new(), overrides).await?;
+            load_config_layers_state(codex_home.path(), Some(cwd), &Vec::new(), overrides).await?;
         let cfg = deserialize_config_toml_with_base(
             config_layer_stack.effective_config(),
             codex_home.path(),
@@ -2111,8 +2219,10 @@ trust_level = "trusted"
             managed_preferences_base64: None,
         };
 
+        let cwd = AbsolutePathBuf::try_from(codex_home.path())?;
         let config_layer_stack = load_config_layers_state(
             codex_home.path(),
+            Some(cwd),
             &[("model".to_string(), TomlValue::String("cli".to_string()))],
             overrides,
         )
@@ -3094,7 +3204,7 @@ model_verbosity = "high"
                 model_provider_id: "openai".to_string(),
                 model_provider: fixture.openai_provider.clone(),
                 approval_policy: Constrained::allow_any(AskForApproval::Never),
-                sandbox_policy: SandboxPolicy::new_read_only_policy(),
+                sandbox_policy: Constrained::allow_any(SandboxPolicy::new_read_only_policy()),
                 did_user_set_custom_approval_policy_or_sandbox_mode: true,
                 forced_auto_mode_downgraded_on_windows: false,
                 shell_environment_policy: ShellEnvironmentPolicy::default(),
@@ -3109,6 +3219,7 @@ model_verbosity = "high"
                 project_doc_fallback_filenames: Vec::new(),
                 tool_output_token_limit: None,
                 codex_home: fixture.codex_home(),
+                config_layer_stack: Default::default(),
                 history: History::default(),
                 file_opener: UriBasedFileOpener::VsCode,
                 codex_linux_sandbox_exe: None,
@@ -3117,7 +3228,6 @@ model_verbosity = "high"
                 model_reasoning_effort: Some(ReasoningEffort::High),
                 model_reasoning_summary: ReasoningSummary::Detailed,
                 model_supports_reasoning_summaries: None,
-                model_reasoning_summary_format: None,
                 model_verbosity: None,
                 chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
                 base_instructions: None,
@@ -3128,7 +3238,6 @@ model_verbosity = "high"
                 include_apply_patch_tool: false,
                 tools_web_search_request: false,
                 use_experimental_unified_exec_tool: false,
-                use_experimental_use_rmcp_client: false,
                 ghost_snapshot: GhostSnapshotConfig::default(),
                 features: Features::with_defaults(),
                 active_profile: Some("o3".to_string()),
@@ -3144,6 +3253,15 @@ model_verbosity = "high"
                 keep_queue_on_branch: false,
                 diff_view: DiffView::Line,
                 keybindings: HashMap::new(),
+                tui_scroll_events_per_tick: None,
+                tui_scroll_wheel_lines: None,
+                tui_scroll_trackpad_lines: None,
+                tui_scroll_trackpad_accel_events: None,
+                tui_scroll_trackpad_accel_max: None,
+                tui_scroll_mode: ScrollInputMode::Auto,
+                tui_scroll_wheel_tick_detect_max_ms: None,
+                tui_scroll_wheel_like_max_duration_ms: None,
+                tui_scroll_invert: false,
                 otel: OtelConfig::default(),
             },
             o3_profile_config
@@ -3173,7 +3291,7 @@ model_verbosity = "high"
             model_provider_id: "openai-chat-completions".to_string(),
             model_provider: fixture.openai_chat_completions_provider.clone(),
             approval_policy: Constrained::allow_any(AskForApproval::UnlessTrusted),
-            sandbox_policy: SandboxPolicy::new_read_only_policy(),
+            sandbox_policy: Constrained::allow_any(SandboxPolicy::new_read_only_policy()),
             did_user_set_custom_approval_policy_or_sandbox_mode: true,
             forced_auto_mode_downgraded_on_windows: false,
             shell_environment_policy: ShellEnvironmentPolicy::default(),
@@ -3188,6 +3306,7 @@ model_verbosity = "high"
             project_doc_fallback_filenames: Vec::new(),
             tool_output_token_limit: None,
             codex_home: fixture.codex_home(),
+            config_layer_stack: Default::default(),
             history: History::default(),
             file_opener: UriBasedFileOpener::VsCode,
             codex_linux_sandbox_exe: None,
@@ -3196,7 +3315,6 @@ model_verbosity = "high"
             model_reasoning_effort: None,
             model_reasoning_summary: ReasoningSummary::default(),
             model_supports_reasoning_summaries: None,
-            model_reasoning_summary_format: None,
             model_verbosity: None,
             chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
             base_instructions: None,
@@ -3207,7 +3325,6 @@ model_verbosity = "high"
             include_apply_patch_tool: false,
             tools_web_search_request: false,
             use_experimental_unified_exec_tool: false,
-            use_experimental_use_rmcp_client: false,
             ghost_snapshot: GhostSnapshotConfig::default(),
             features: Features::with_defaults(),
             active_profile: Some("gpt3".to_string()),
@@ -3223,6 +3340,15 @@ model_verbosity = "high"
             keep_queue_on_branch: false,
             diff_view: DiffView::Line,
             keybindings: HashMap::new(),
+            tui_scroll_events_per_tick: None,
+            tui_scroll_wheel_lines: None,
+            tui_scroll_trackpad_lines: None,
+            tui_scroll_trackpad_accel_events: None,
+            tui_scroll_trackpad_accel_max: None,
+            tui_scroll_mode: ScrollInputMode::Auto,
+            tui_scroll_wheel_tick_detect_max_ms: None,
+            tui_scroll_wheel_like_max_duration_ms: None,
+            tui_scroll_invert: false,
             otel: OtelConfig::default(),
         };
 
@@ -3267,7 +3393,7 @@ model_verbosity = "high"
             model_provider_id: "openai".to_string(),
             model_provider: fixture.openai_provider.clone(),
             approval_policy: Constrained::allow_any(AskForApproval::OnFailure),
-            sandbox_policy: SandboxPolicy::new_read_only_policy(),
+            sandbox_policy: Constrained::allow_any(SandboxPolicy::new_read_only_policy()),
             did_user_set_custom_approval_policy_or_sandbox_mode: true,
             forced_auto_mode_downgraded_on_windows: false,
             shell_environment_policy: ShellEnvironmentPolicy::default(),
@@ -3282,6 +3408,7 @@ model_verbosity = "high"
             project_doc_fallback_filenames: Vec::new(),
             tool_output_token_limit: None,
             codex_home: fixture.codex_home(),
+            config_layer_stack: Default::default(),
             history: History::default(),
             file_opener: UriBasedFileOpener::VsCode,
             codex_linux_sandbox_exe: None,
@@ -3290,7 +3417,6 @@ model_verbosity = "high"
             model_reasoning_effort: None,
             model_reasoning_summary: ReasoningSummary::default(),
             model_supports_reasoning_summaries: None,
-            model_reasoning_summary_format: None,
             model_verbosity: None,
             chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
             base_instructions: None,
@@ -3301,7 +3427,6 @@ model_verbosity = "high"
             include_apply_patch_tool: false,
             tools_web_search_request: false,
             use_experimental_unified_exec_tool: false,
-            use_experimental_use_rmcp_client: false,
             ghost_snapshot: GhostSnapshotConfig::default(),
             features: Features::with_defaults(),
             active_profile: Some("zdr".to_string()),
@@ -3317,6 +3442,15 @@ model_verbosity = "high"
             keep_queue_on_branch: false,
             diff_view: DiffView::Line,
             keybindings: HashMap::new(),
+            tui_scroll_events_per_tick: None,
+            tui_scroll_wheel_lines: None,
+            tui_scroll_trackpad_lines: None,
+            tui_scroll_trackpad_accel_events: None,
+            tui_scroll_trackpad_accel_max: None,
+            tui_scroll_mode: ScrollInputMode::Auto,
+            tui_scroll_wheel_tick_detect_max_ms: None,
+            tui_scroll_wheel_like_max_duration_ms: None,
+            tui_scroll_invert: false,
             otel: OtelConfig::default(),
         };
 
@@ -3347,7 +3481,7 @@ model_verbosity = "high"
             model_provider_id: "openai".to_string(),
             model_provider: fixture.openai_provider.clone(),
             approval_policy: Constrained::allow_any(AskForApproval::OnFailure),
-            sandbox_policy: SandboxPolicy::new_read_only_policy(),
+            sandbox_policy: Constrained::allow_any(SandboxPolicy::new_read_only_policy()),
             did_user_set_custom_approval_policy_or_sandbox_mode: true,
             forced_auto_mode_downgraded_on_windows: false,
             shell_environment_policy: ShellEnvironmentPolicy::default(),
@@ -3362,6 +3496,7 @@ model_verbosity = "high"
             project_doc_fallback_filenames: Vec::new(),
             tool_output_token_limit: None,
             codex_home: fixture.codex_home(),
+            config_layer_stack: Default::default(),
             history: History::default(),
             file_opener: UriBasedFileOpener::VsCode,
             codex_linux_sandbox_exe: None,
@@ -3370,7 +3505,6 @@ model_verbosity = "high"
             model_reasoning_effort: Some(ReasoningEffort::High),
             model_reasoning_summary: ReasoningSummary::Detailed,
             model_supports_reasoning_summaries: None,
-            model_reasoning_summary_format: None,
             model_verbosity: Some(Verbosity::High),
             chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
             base_instructions: None,
@@ -3381,7 +3515,6 @@ model_verbosity = "high"
             include_apply_patch_tool: false,
             tools_web_search_request: false,
             use_experimental_unified_exec_tool: false,
-            use_experimental_use_rmcp_client: false,
             ghost_snapshot: GhostSnapshotConfig::default(),
             features: Features::with_defaults(),
             active_profile: Some("gpt5".to_string()),
@@ -3397,6 +3530,15 @@ model_verbosity = "high"
             keep_queue_on_branch: false,
             diff_view: DiffView::Line,
             keybindings: HashMap::new(),
+            tui_scroll_events_per_tick: None,
+            tui_scroll_wheel_lines: None,
+            tui_scroll_trackpad_lines: None,
+            tui_scroll_trackpad_accel_events: None,
+            tui_scroll_trackpad_accel_max: None,
+            tui_scroll_mode: ScrollInputMode::Auto,
+            tui_scroll_wheel_tick_detect_max_ms: None,
+            tui_scroll_wheel_like_max_duration_ms: None,
+            tui_scroll_invert: false,
             otel: OtelConfig::default(),
         };
 
@@ -3696,12 +3838,15 @@ trust_level = "untrusted"
         // Verify that untrusted projects still get WorkspaceWrite sandbox (or ReadOnly on Windows)
         if cfg!(target_os = "windows") {
             assert!(
-                matches!(config.sandbox_policy, SandboxPolicy::ReadOnly),
+                matches!(config.sandbox_policy.get(), SandboxPolicy::ReadOnly),
                 "Expected ReadOnly on Windows"
             );
         } else {
             assert!(
-                matches!(config.sandbox_policy, SandboxPolicy::WorkspaceWrite { .. }),
+                matches!(
+                    config.sandbox_policy.get(),
+                    SandboxPolicy::WorkspaceWrite { .. }
+                ),
                 "Expected WorkspaceWrite sandbox for untrusted project"
             );
         }

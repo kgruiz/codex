@@ -9,7 +9,6 @@ use codex_protocol::openai_models::ModelPreset;
 
 use crate::app_backtrack::BacktrackAction;
 use crate::bottom_pane::ApprovalRequest;
-use crate::bottom_pane::ComposerAttachment;
 use crate::bottom_pane::RenameTarget;
 use crate::get_git_diff::GitDiffResult;
 use crate::history_cell::HistoryCell;
@@ -75,11 +74,8 @@ pub(crate) enum AppEvent {
         error: Option<String>,
     },
 
-    /// Open the external editor for the current composer contents.
-    OpenExternalEditor {
-        text: String,
-        attachments: Vec<ComposerAttachment>,
-    },
+    /// Launch the external editor after a normal draw has completed.
+    LaunchExternalEditor,
 
     /// Rename the current session.
     RenameSession {

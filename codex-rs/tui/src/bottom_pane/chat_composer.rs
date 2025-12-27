@@ -380,6 +380,85 @@ impl ChatComposer {
         }
     }
 
+    /// Replace the composer content with text from an external editor.
+    /// Clears pending paste placeholders and keeps only attachments whose
+    /// placeholder labels still appear in the new text. Cursor is placed at
+    /// the end after rebuilding elements.
+    pub(crate) fn apply_external_edit(&mut self, text: String) {
+        self.pending_pastes.clear();
+
+        // Count placeholder occurrences in the new text.
+        let mut placeholder_counts: HashMap<String, usize> = HashMap::new();
+        for placeholder in self.attached_images.iter().map(|img| &img.placeholder) {
+            if placeholder_counts.contains_key(placeholder) {
+                continue;
+            }
+            let count = text.match_indices(placeholder).count();
+            if count > 0 {
+                placeholder_counts.insert(placeholder.clone(), count);
+            }
+        }
+
+        // Keep attachments only while we have matching occurrences left.
+        let mut kept_images = Vec::new();
+        for img in self.attached_images.drain(..) {
+            if let Some(count) = placeholder_counts.get_mut(&img.placeholder)
+                && *count > 0
+            {
+                *count -= 1;
+                kept_images.push(img);
+            }
+        }
+        self.attached_images = kept_images;
+
+        // Rebuild textarea so placeholders become elements again.
+        self.textarea.set_text("");
+        let mut remaining: HashMap<&str, usize> = HashMap::new();
+        for img in &self.attached_images {
+            *remaining.entry(img.placeholder.as_str()).or_insert(0) += 1;
+        }
+
+        let mut occurrences: Vec<(usize, &str)> = Vec::new();
+        for placeholder in remaining.keys() {
+            for (pos, _) in text.match_indices(placeholder) {
+                occurrences.push((pos, *placeholder));
+            }
+        }
+        occurrences.sort_unstable_by_key(|(pos, _)| *pos);
+
+        let mut idx = 0usize;
+        for (pos, ph) in occurrences {
+            let Some(count) = remaining.get_mut(ph) else {
+                continue;
+            };
+            if *count == 0 {
+                continue;
+            }
+            if pos > idx {
+                self.textarea.insert_str(&text[idx..pos]);
+            }
+            self.textarea.insert_element(ph);
+            *count -= 1;
+            idx = pos + ph.len();
+        }
+        if idx < text.len() {
+            self.textarea.insert_str(&text[idx..]);
+        }
+
+        self.textarea.set_cursor(self.textarea.text().len());
+        self.sync_popups();
+    }
+
+    pub(crate) fn current_text_with_pending(&self) -> String {
+        let mut text = self.textarea.text().to_string();
+        for (placeholder, actual) in &self.pending_pastes {
+            if text.contains(placeholder) {
+                text = text.replace(placeholder, actual);
+            }
+        }
+        text
+    }
+
     pub(crate) fn set_commands_enabled(&mut self, enabled: bool) {
         self.commands_enabled = enabled;
         self.sync_popups();
@@ -1470,14 +1549,6 @@ impl ChatComposer {
             self.footer_mode = reset_mode_after_activity(self.footer_mode);
         }
 
-        if Self::is_external_editor_trigger(&key_event) {
-            let text = self.expand_pending_pastes_in_text(self.textarea.text());
-            let attachments = self.current_attachments();
-            self.app_event_tx
-                .send(AppEvent::OpenExternalEditor { text, attachments });
-            return (InputResult::None, true);
-        }
-
         match key_event {
             KeyEvent {
                 code: KeyCode::Char('d'),
@@ -2159,18 +2230,6 @@ impl ChatComposer {
     }
 
     fn is_reverse_search_cancel(key_event: &KeyEvent) -> bool {
-        matches!(
-            (key_event.code, key_event.modifiers),
-            (KeyCode::Char('g'), KeyModifiers::CONTROL)
-                | (KeyCode::Char('\u{0007}'), KeyModifiers::NONE)
-        )
-    }
-
-    fn is_external_editor_trigger(key_event: &KeyEvent) -> bool {
-        if key_event.kind != KeyEventKind::Press {
-            return false;
-        }
-
         matches!(
             (key_event.code, key_event.modifiers),
             (KeyCode::Char('g'), KeyModifiers::CONTROL)
@@ -2905,42 +2964,6 @@ mod tests {
         let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(!composer.reverse_search_active());
         assert_eq!(composer.current_text(), "draft");
-    }
-
-    #[test]
-    fn ctrl_g_opens_external_editor_with_expanded_paste() {
-        use crossterm::event::KeyCode;
-        use crossterm::event::KeyEvent;
-        use crossterm::event::KeyModifiers;
-
-        let (tx, mut rx) = unbounded_channel::<AppEvent>();
-        let sender = AppEventSender::new(tx);
-        let mut composer = ChatComposer::new(
-            true,
-            sender,
-            false,
-            "Ask Codex to do anything".to_string(),
-            false,
-            default_keybindings(false),
-        );
-
-        let large = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 5);
-        let _ = composer.handle_paste(large.clone());
-        assert!(composer.textarea.text().contains("[Pasted Content"));
-
-        let (result, needs_redraw) =
-            composer.handle_key_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
-        assert_eq!(result, InputResult::None);
-        assert!(needs_redraw);
-
-        match rx.try_recv() {
-            Ok(AppEvent::OpenExternalEditor { text, attachments }) => {
-                assert_eq!(text, large);
-                assert!(attachments.is_empty());
-            }
-            Ok(event) => panic!("unexpected event: {event:?}"),
-            Err(err) => panic!("expected external editor event: {err:?}"),
-        }
     }
 
     #[test]

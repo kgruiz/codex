@@ -1086,7 +1086,6 @@ mod tests {
     use crossterm::event::KeyModifiers;
     use insta::assert_snapshot;
     use serde_json::json;
-    use std::future::Future;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::Mutex;
@@ -1154,14 +1153,6 @@ mod tests {
             num_scanned_files,
             reached_scan_cap,
         }
-    }
-
-    fn block_on_future<F: Future<Output = T>, T>(future: F) -> T {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(future)
     }
 
     #[test]
@@ -1331,8 +1322,8 @@ mod tests {
         assert_snapshot!("resume_picker_table", snapshot);
     }
 
-    #[test]
-    fn resume_picker_screen_snapshot() {
+    #[tokio::test]
+    async fn resume_picker_screen_snapshot() {
         use crate::custom_terminal::Terminal;
         use crate::test_backend::VT100Backend;
         use uuid::Uuid;
@@ -1424,14 +1415,15 @@ mod tests {
             None,
         );
 
-        let page = block_on_future(RolloutRecorder::list_conversations(
+        let page = RolloutRecorder::list_conversations(
             &state.codex_home,
             PAGE_SIZE,
             None,
             INTERACTIVE_SESSION_SOURCES,
             Some(&[String::from("openai")]),
             "openai",
-        ))
+        )
+        .await
         .expect("list conversations");
 
         let rows = rows_from_items(page.items);
@@ -1590,8 +1582,8 @@ mod tests {
         assert!(guard[0].search_token.is_none());
     }
 
-    #[test]
-    fn page_navigation_uses_view_rows() {
+    #[tokio::test]
+    async fn page_navigation_uses_view_rows() {
         let loader: PageLoader = Arc::new(|_| {});
         let mut state = PickerState::new(
             PathBuf::from("/tmp"),
@@ -1615,33 +1607,27 @@ mod tests {
         state.update_view_rows(5);
 
         assert_eq!(state.selected, 0);
-        block_on_future(async {
-            state
-                .handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
-                .await
-                .unwrap();
-        });
+        state
+            .handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
+            .await
+            .unwrap();
         assert_eq!(state.selected, 5);
 
-        block_on_future(async {
-            state
-                .handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
-                .await
-                .unwrap();
-        });
+        state
+            .handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
+            .await
+            .unwrap();
         assert_eq!(state.selected, 10);
 
-        block_on_future(async {
-            state
-                .handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE))
-                .await
-                .unwrap();
-        });
+        state
+            .handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE))
+            .await
+            .unwrap();
         assert_eq!(state.selected, 5);
     }
 
-    #[test]
-    fn up_at_bottom_does_not_scroll_when_visible() {
+    #[tokio::test]
+    async fn up_at_bottom_does_not_scroll_when_visible() {
         let loader: PageLoader = Arc::new(|_| {});
         let mut state = PickerState::new(
             PathBuf::from("/tmp"),
@@ -1670,12 +1656,10 @@ mod tests {
         let initial_top = state.scroll_top;
         assert_eq!(initial_top, state.filtered_rows.len().saturating_sub(5));
 
-        block_on_future(async {
-            state
-                .handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
-                .await
-                .unwrap();
-        });
+        state
+            .handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
+            .await
+            .unwrap();
 
         assert_eq!(state.scroll_top, initial_top);
         assert_eq!(state.selected, state.filtered_rows.len().saturating_sub(2));

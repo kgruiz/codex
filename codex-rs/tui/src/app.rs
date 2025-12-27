@@ -3,13 +3,14 @@ use crate::app_backtrack::EditVersionState;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::ApprovalRequest;
-use crate::bottom_pane::ComposerAttachment;
 use crate::chatwidget::ChatWidget;
+use crate::chatwidget::ExternalEditorState;
 use crate::diff_render::DiffSummary;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::external_editor;
 use crate::file_search::FileSearchManager;
 use crate::get_git_diff::GitDiffResult;
+use crate::history_cell;
 use crate::history_cell::HistoryCell;
 use crate::model_migration::ModelMigrationOutcome;
 use crate::model_migration::migration_copy_for_models;
@@ -29,9 +30,10 @@ use codex_core::config::edit::ConfigEdit;
 use codex_core::config::edit::ConfigEditsBuilder;
 #[cfg(target_os = "windows")]
 use codex_core::features::Feature;
-use codex_core::openai_models::model_presets::HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG;
-use codex_core::openai_models::model_presets::HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG;
-use codex_core::openai_models::models_manager::ModelsManager;
+use codex_core::models_manager::manager::ModelsManager;
+use codex_core::models_manager::model_family::ModelFamily;
+use codex_core::models_manager::model_presets::HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG;
+use codex_core::models_manager::model_presets::HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG;
 use codex_core::protocol::EventMsg;
 use codex_core::protocol::FinalOutput;
 use codex_core::protocol::ListSkillsResponseEvent;
@@ -64,6 +66,8 @@ use tokio::select;
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::session_manager::paths_match;
+
+const EXTERNAL_EDITOR_HINT: &str = "Save and close external editor to continue.";
 
 #[cfg(not(debug_assertions))]
 use crate::history_cell::UpdateAvailableHistoryCell;
@@ -337,7 +341,7 @@ impl App {
 
     async fn resume_from_rollout(
         &mut self,
-        model_family: &codex_core::openai_models::model_family::ModelFamily,
+        model_family: &ModelFamily,
         frame_requester: crate::tui::FrameRequester,
         path: PathBuf,
     ) {
@@ -523,7 +527,7 @@ impl App {
         {
             let should_check = codex_core::get_platform_sandbox().is_some()
                 && matches!(
-                    app.config.sandbox_policy,
+                    app.config.sandbox_policy.get(),
                     codex_core::protocol::SandboxPolicy::WorkspaceWrite { .. }
                         | codex_core::protocol::SandboxPolicy::ReadOnly
                 )
@@ -537,7 +541,7 @@ impl App {
                 let env_map: std::collections::HashMap<String, String> = std::env::vars().collect();
                 let tx = app.app_event_tx.clone();
                 let logs_base_dir = app.config.codex_home.clone();
-                let sandbox_policy = app.config.sandbox_policy.clone();
+                let sandbox_policy = app.config.sandbox_policy.get().clone();
                 Self::spawn_world_writable_scan(cwd, env_map, logs_base_dir, sandbox_policy, tx);
             }
         }
@@ -612,6 +616,11 @@ impl App {
                             }
                         },
                     )?;
+                    if self.chat_widget.external_editor_state() == ExternalEditorState::Requested {
+                        self.chat_widget
+                            .set_external_editor_state(ExternalEditorState::Active);
+                        self.app_event_tx.send(AppEvent::LaunchExternalEditor);
+                    }
                 }
             }
         }
@@ -818,8 +827,8 @@ impl App {
                     );
                 }
             }
-            AppEvent::OpenExternalEditor { text, attachments } => {
-                self.open_external_editor(tui, text, attachments).await;
+            AppEvent::LaunchExternalEditor => {
+                self.launch_external_editor(tui).await;
             }
             AppEvent::RenameSession { title } => {
                 self.chat_widget.rename_session(title);
@@ -1085,7 +1094,9 @@ impl App {
                         | codex_core::protocol::SandboxPolicy::ReadOnly
                 );
 
-                self.config.sandbox_policy = policy.clone();
+                if let Err(err) = self.config.sandbox_policy.set(policy.clone()) {
+                    tracing::warn!(%err, "failed to set sandbox_policy on app config");
+                }
                 #[cfg(target_os = "windows")]
                 if !matches!(policy, codex_core::protocol::SandboxPolicy::ReadOnly)
                     || codex_core::get_platform_sandbox().is_some()
@@ -1112,7 +1123,7 @@ impl App {
                             std::env::vars().collect();
                         let tx = self.app_event_tx.clone();
                         let logs_base_dir = self.config.codex_home.clone();
-                        let sandbox_policy = self.config.sandbox_policy.clone();
+                        let sandbox_policy = self.config.sandbox_policy.get().clone();
                         Self::spawn_world_writable_scan(
                             cwd,
                             env_map,
@@ -1319,65 +1330,65 @@ impl App {
         self.config.model_reasoning_effort = effort;
     }
 
-    async fn open_external_editor(
-        &mut self,
-        tui: &mut tui::Tui,
-        text: String,
-        attachments: Vec<ComposerAttachment>,
-    ) {
-        let cwd = self.chat_widget.config_ref().cwd.clone();
-        let was_alt_screen = tui.is_alt_screen_active();
-
-        tui.pause_events();
-
-        if was_alt_screen {
-            let _ = tui.leave_alt_screen();
-        }
-
-        if let Err(err) = tui::restore() {
-            if was_alt_screen {
-                let _ = tui.enter_alt_screen();
-            }
-            tui.resume_events();
-            self.chat_widget.add_error_message(format!(
-                "Failed to prepare terminal for external editor: {err}"
-            ));
-            tui.frame_requester().schedule_frame();
-            return;
-        }
-
-        let edit_result = tokio::task::spawn_blocking(move || {
-            external_editor::edit_text_in_external_editor(&text, &cwd)
-        })
-        .await;
-
-        if let Err(err) = tui::set_modes() {
-            self.chat_widget.add_error_message(format!(
-                "Failed to restore terminal after external editor: {err}"
-            ));
-        }
-
-        if was_alt_screen {
-            let _ = tui.enter_alt_screen();
-        }
-
-        tui.resume_events();
-
-        match edit_result {
-            Ok(Ok(edited)) => {
+    async fn launch_external_editor(&mut self, tui: &mut tui::Tui) {
+        let editor_cmd = match external_editor::resolve_editor_command() {
+            Ok(cmd) => cmd,
+            Err(external_editor::EditorError::MissingEditor) => {
                 self.chat_widget
-                    .set_composer_text_with_attachments(edited, attachments);
-            }
-            Ok(Err(err)) => {
-                self.chat_widget
-                    .add_error_message(format!("External editor failed: {err}"));
+                    .add_to_history(history_cell::new_error_event(
+                        "Cannot open external editor: set $VISUAL or $EDITOR".to_string(),
+                    ));
+                self.reset_external_editor_state(tui);
+                return;
             }
             Err(err) => {
                 self.chat_widget
-                    .add_error_message(format!("External editor task failed: {err}"));
+                    .add_to_history(history_cell::new_error_event(format!(
+                        "Failed to open editor: {err}",
+                    )));
+                self.reset_external_editor_state(tui);
+                return;
+            }
+        };
+
+        let seed = self.chat_widget.composer_text_with_pending();
+        let editor_result = tui
+            .with_restored(tui::RestoreMode::KeepRaw, || async {
+                external_editor::run_editor(&seed, &editor_cmd).await
+            })
+            .await;
+        self.reset_external_editor_state(tui);
+
+        match editor_result {
+            Ok(new_text) => {
+                // Trim trailing whitespace
+                let cleaned = new_text.trim_end().to_string();
+                self.chat_widget.apply_external_edit(cleaned);
+            }
+            Err(err) => {
+                self.chat_widget
+                    .add_to_history(history_cell::new_error_event(format!(
+                        "Failed to open editor: {err}",
+                    )));
             }
         }
+        tui.frame_requester().schedule_frame();
+    }
 
+    fn request_external_editor_launch(&mut self, tui: &mut tui::Tui) {
+        self.chat_widget
+            .set_external_editor_state(ExternalEditorState::Requested);
+        self.chat_widget.set_footer_hint_override(Some(vec![(
+            EXTERNAL_EDITOR_HINT.to_string(),
+            String::new(),
+        )]));
+        tui.frame_requester().schedule_frame();
+    }
+
+    fn reset_external_editor_state(&mut self, tui: &mut tui::Tui) {
+        self.chat_widget
+            .set_external_editor_state(ExternalEditorState::Closed);
+        self.chat_widget.set_footer_hint_override(None);
         tui.frame_requester().schedule_frame();
     }
 
@@ -1393,6 +1404,21 @@ impl App {
                 let _ = tui.enter_alt_screen();
                 self.overlay = Some(Overlay::new_transcript(self.transcript_cells.clone()));
                 tui.frame_requester().schedule_frame();
+            }
+            KeyEvent {
+                code: KeyCode::Char('g'),
+                modifiers: crossterm::event::KeyModifiers::CONTROL,
+                kind: KeyEventKind::Press,
+                ..
+            } => {
+                // Only launch the external editor if there is no overlay and the bottom pane is not in use.
+                // Note that it can be launched while a task is running to enable editing while the previous turn is ongoing.
+                if self.overlay.is_none()
+                    && self.chat_widget.can_launch_external_editor()
+                    && self.chat_widget.external_editor_state() == ExternalEditorState::Closed
+                {
+                    self.request_external_editor_launch(tui);
+                }
             }
             KeyEvent {
                 code: KeyCode::Left,
@@ -1551,6 +1577,7 @@ mod tests {
     use crate::app_backtrack::BacktrackState;
     use crate::app_backtrack::user_count;
     use crate::chatwidget::tests::make_chatwidget_manual_with_sender;
+    use crate::chatwidget::tests::make_chatwidget_manual_with_sender_async;
     use crate::file_search::FileSearchManager;
     use crate::history_cell::AgentMessageCell;
     use crate::history_cell::HistoryCell;
@@ -1608,12 +1635,13 @@ mod tests {
         }
     }
 
-    fn make_test_app_with_channels() -> (
+    async fn make_test_app_with_channels_async() -> (
         App,
         tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
         tokio::sync::mpsc::UnboundedReceiver<Op>,
     ) {
-        let (chat_widget, app_event_tx, rx, op_rx) = make_chatwidget_manual_with_sender();
+        let (chat_widget, app_event_tx, rx, op_rx) =
+            make_chatwidget_manual_with_sender_async().await;
         let config = chat_widget.config_ref().clone();
         let current_model = chat_widget.get_model_family().get_model_slug().to_string();
         let server = Arc::new(ConversationManager::with_models_provider(
@@ -1654,7 +1682,7 @@ mod tests {
     }
 
     fn all_model_presets() -> Vec<ModelPreset> {
-        codex_core::openai_models::model_presets::all_model_presets().clone()
+        codex_core::models_manager::model_presets::all_model_presets().clone()
     }
 
     #[test]
@@ -1852,7 +1880,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_session_requests_shutdown_for_previous_conversation() {
-        let (mut app, mut app_event_rx, mut op_rx) = make_test_app_with_channels();
+        let (mut app, mut app_event_rx, mut op_rx) = make_test_app_with_channels_async().await;
 
         let conversation_id = ConversationId::new();
         let event = SessionConfiguredEvent {

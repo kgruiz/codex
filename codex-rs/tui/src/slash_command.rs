@@ -27,7 +27,7 @@ pub enum SlashCommand {
     Export,
     Init,
     Compact,
-    Undo,
+    // Undo,
     Diff,
     Mention,
     Status,
@@ -57,7 +57,6 @@ impl SlashCommand {
             SlashCommand::Session => "manage saved chats",
             SlashCommand::Rename => "rename this chat",
             SlashCommand::Export => "export this chat as Markdown",
-            SlashCommand::Undo => "ask Codex to undo a turn",
             SlashCommand::Quit | SlashCommand::Exit => "exit Codex",
             SlashCommand::Diff => "show git diff (including untracked files)",
             SlashCommand::Mention => "mention a file",
@@ -90,7 +89,6 @@ impl SlashCommand {
             | SlashCommand::Export
             | SlashCommand::Init
             | SlashCommand::Compact
-            | SlashCommand::Undo
             | SlashCommand::Model
             | SlashCommand::Approvals
             | SlashCommand::Experimental

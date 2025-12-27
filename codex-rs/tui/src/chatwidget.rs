@@ -16,8 +16,8 @@ use codex_core::features::FEATURES;
 use codex_core::features::Feature;
 use codex_core::git_info::current_branch_name;
 use codex_core::git_info::local_git_branches;
-use codex_core::openai_models::model_family::ModelFamily;
-use codex_core::openai_models::models_manager::ModelsManager;
+use codex_core::models_manager::manager::ModelsManager;
+use codex_core::models_manager::model_family::ModelFamily;
 use codex_core::project_doc::DEFAULT_PROJECT_DOC_FILENAME;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::AgentMessageEvent;
@@ -379,6 +379,14 @@ enum RateLimitSwitchPromptState {
     Shown,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ExternalEditorState {
+    #[default]
+    Closed,
+    Requested,
+    Active,
+}
+
 pub(crate) struct ChatWidget {
     app_event_tx: AppEventSender,
     codex_op_tx: UnboundedSender<Op>,
@@ -450,6 +458,7 @@ pub(crate) struct ChatWidget {
     // Current session rollout path (if known)
     current_rollout_path: Option<PathBuf>,
     session_title: Option<String>,
+    external_editor_state: ExternalEditorState,
 
     pending_active_turn_context: Option<PendingTurnContext>,
     active_turn_context: Option<PendingTurnContext>,
@@ -565,9 +574,18 @@ impl ChatWidget {
         }
     }
 
-    fn set_status_header(&mut self, header: String) {
+    /// Update the status indicator header and details.
+    ///
+    /// Passing `None` clears any existing details.
+    fn set_status(&mut self, header: String, details: Option<String>) {
         self.current_status_header = header.clone();
-        self.bottom_pane.update_status_header(header);
+        self.bottom_pane.update_status(header, details);
+    }
+
+    /// Convenience wrapper around [`Self::set_status`];
+    /// updates the status indicator header and clears any existing details.
+    fn set_status_header(&mut self, header: String) {
+        self.set_status(header, None);
     }
 
     fn sync_status_line_metrics(&mut self) {
@@ -880,7 +898,6 @@ impl ChatWidget {
     }
 
     fn on_agent_reasoning_final(&mut self) {
-        let reasoning_summary_format = self.get_model_family().reasoning_summary_format;
         // At the end of a reasoning block, record transcript-only content.
         self.full_reasoning_buffer.push_str(&self.reasoning_buffer);
         if self.stream_paused {
@@ -893,10 +910,8 @@ impl ChatWidget {
             return;
         }
         if !self.full_reasoning_buffer.is_empty() {
-            let cell = history_cell::new_reasoning_summary_block(
-                self.full_reasoning_buffer.clone(),
-                reasoning_summary_format,
-            );
+            let cell =
+                history_cell::new_reasoning_summary_block(self.full_reasoning_buffer.clone());
             self.add_boxed_history(cell);
         }
         self.reasoning_buffer.clear();
@@ -1439,11 +1454,11 @@ impl ChatWidget {
         }
     }
 
-    fn on_stream_error(&mut self, message: String) {
+    fn on_stream_error(&mut self, message: String, additional_details: Option<String>) {
         if self.retry_status_header.is_none() {
             self.retry_status_header = Some(self.current_status_header.clone());
         }
-        self.set_status_header(message);
+        self.set_status(message, additional_details);
     }
 
     /// Periodic tick to commit at most one queued line to history with a small delay,
@@ -1873,6 +1888,7 @@ impl ChatWidget {
             feedback,
             current_rollout_path: None,
             session_title: None,
+            external_editor_state: ExternalEditorState::Closed,
             pending_active_turn_context: None,
             active_turn_context: None,
         };
@@ -1993,6 +2009,7 @@ impl ChatWidget {
             feedback,
             current_rollout_path: None,
             session_title: None,
+            external_editor_state: ExternalEditorState::Closed,
             pending_active_turn_context: None,
             active_turn_context: None,
         };
@@ -3182,12 +3199,8 @@ impl ChatWidget {
             }
 
             if !self.paused_reasoning_blocks.is_empty() {
-                let reasoning_summary_format = self.get_model_family().reasoning_summary_format;
                 for block in std::mem::take(&mut self.paused_reasoning_blocks) {
-                    let cell = history_cell::new_reasoning_summary_block(
-                        block,
-                        reasoning_summary_format.clone(),
-                    );
+                    let cell = history_cell::new_reasoning_summary_block(block);
                     self.add_boxed_history(cell);
                 }
             }
@@ -3231,6 +3244,31 @@ impl ChatWidget {
         self.bottom_pane
             .attach_image(path, width, height, format_label);
         self.request_redraw();
+    }
+
+    pub(crate) fn composer_text_with_pending(&self) -> String {
+        self.bottom_pane.composer_text_with_pending()
+    }
+
+    pub(crate) fn apply_external_edit(&mut self, text: String) {
+        self.bottom_pane.apply_external_edit(text);
+        self.request_redraw();
+    }
+
+    pub(crate) fn external_editor_state(&self) -> ExternalEditorState {
+        self.external_editor_state
+    }
+
+    pub(crate) fn set_external_editor_state(&mut self, state: ExternalEditorState) {
+        self.external_editor_state = state;
+    }
+
+    pub(crate) fn set_footer_hint_override(&mut self, items: Option<Vec<(String, String)>>) {
+        self.bottom_pane.set_footer_hint_override(items);
+    }
+
+    pub(crate) fn can_launch_external_editor(&self) -> bool {
+        self.bottom_pane.can_launch_external_editor()
     }
 
     fn dispatch_command(&mut self, cmd: SlashCommand, command_input: Option<String>) {
@@ -3315,9 +3353,9 @@ impl ChatWidget {
                 }
                 self.request_exit();
             }
-            SlashCommand::Undo => {
-                self.app_event_tx.send(AppEvent::CodexOp(Op::Undo));
-            }
+            // SlashCommand::Undo => {
+            //     self.app_event_tx.send(AppEvent::CodexOp(Op::Undo));
+            // }
             SlashCommand::Diff => {
                 let diff_view =
                     match diff_view_override(command_input.as_deref(), self.config.diff_view) {
@@ -3516,7 +3554,7 @@ impl ChatWidget {
         }
     }
 
-    fn add_to_history(&mut self, cell: impl HistoryCell + 'static) {
+    pub(crate) fn add_to_history(&mut self, cell: impl HistoryCell + 'static) {
         self.add_boxed_history(Box::new(cell));
     }
 
@@ -3810,9 +3848,11 @@ impl ChatWidget {
             }
             EventMsg::UndoStarted(ev) => self.on_undo_started(ev),
             EventMsg::UndoCompleted(ev) => self.on_undo_completed(ev),
-            EventMsg::StreamError(StreamErrorEvent { message, .. }) => {
-                self.on_stream_error(message)
-            }
+            EventMsg::StreamError(StreamErrorEvent {
+                message,
+                additional_details,
+                ..
+            }) => self.on_stream_error(message, additional_details),
             EventMsg::UserMessage(ev) => {
                 if from_replay {
                     self.on_user_message_event(ev);
@@ -4697,7 +4737,7 @@ impl ChatWidget {
     /// Open a popup to choose the approvals mode (ask for approval policy + sandbox policy).
     pub(crate) fn open_approvals_popup(&mut self) {
         let current_approval = self.config.approval_policy.value();
-        let current_sandbox = self.config.sandbox_policy.clone();
+        let current_sandbox = self.config.sandbox_policy.get().clone();
         let mut items: Vec<SelectionItem> = Vec::new();
         let presets: Vec<ApprovalPreset> = builtin_approval_presets();
         for preset in presets.into_iter() {
@@ -4852,7 +4892,7 @@ impl ChatWidget {
             self.config.codex_home.as_path(),
             cwd.as_path(),
             &env_map,
-            &self.config.sandbox_policy,
+            self.config.sandbox_policy.get(),
             Some(self.config.codex_home.as_path()),
         ) {
             Ok(_) => None,
@@ -4951,7 +4991,7 @@ impl ChatWidget {
         let mode_label = preset
             .as_ref()
             .map(|p| describe_policy(&p.sandbox))
-            .unwrap_or_else(|| describe_policy(&self.config.sandbox_policy));
+            .unwrap_or_else(|| describe_policy(self.config.sandbox_policy.get()));
         let info_line = if failed_scan {
             Line::from(vec![
                 "We couldn't complete the world-writable scan, so protections cannot be verified. "
@@ -5129,7 +5169,9 @@ impl ChatWidget {
         let should_clear_downgrade = !matches!(policy, SandboxPolicy::ReadOnly)
             || codex_core::get_platform_sandbox().is_some();
 
-        self.config.sandbox_policy = policy;
+        if let Err(err) = self.config.sandbox_policy.set(policy) {
+            tracing::warn!(%err, "failed to set sandbox_policy on chat config");
+        }
 
         #[cfg(target_os = "windows")]
         if should_clear_downgrade {
@@ -5774,6 +5816,7 @@ fn skills_for_cwd(cwd: &Path, skills_entries: &[SkillsListEntry]) -> Vec<SkillMe
                 .map(|skill| SkillMetadata {
                     name: skill.name.clone(),
                     description: skill.description.clone(),
+                    short_description: skill.short_description.clone(),
                     path: skill.path.clone(),
                     scope: skill.scope,
                 })
