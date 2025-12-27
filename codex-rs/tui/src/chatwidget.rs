@@ -268,6 +268,7 @@ fn is_standard_tool_call(parsed_cmd: &[ParsedCommand]) -> bool {
 const RATE_LIMIT_WARNING_THRESHOLDS: [f64; 3] = [75.0, 90.0, 95.0];
 const NUDGE_MODEL_SLUG: &str = "gpt-5.1-codex-mini";
 const RATE_LIMIT_SWITCH_PROMPT_THRESHOLD: f64 = 90.0;
+const MIN_ACTIVE_CELL_HEIGHT: u16 = 6;
 
 #[derive(Default)]
 struct RateLimitWarningState {
@@ -5603,6 +5604,19 @@ impl ChatWidget {
 
     pub(crate) fn clear_token_usage(&mut self) {
         self.token_info = None;
+    }
+
+    pub(crate) fn update_layout_for_screen(&mut self, width: u16, height: u16) {
+        if self.queued_edit_state.is_some() {
+            let cap = self.bottom_pane.composer_height_cap_for_screen(
+                width,
+                height,
+                MIN_ACTIVE_CELL_HEIGHT,
+            );
+            self.bottom_pane.set_composer_height_cap(Some(cap));
+        } else {
+            self.bottom_pane.set_composer_height_cap(None);
+        }
     }
 
     fn as_renderable(&self) -> RenderableItem<'_> {

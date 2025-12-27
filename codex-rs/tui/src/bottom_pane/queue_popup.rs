@@ -9,6 +9,8 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::widgets::Block;
 use ratatui::widgets::Widget;
+use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -172,7 +174,16 @@ impl QueuePopup {
         }
     }
 
-    fn build_rows(&self) -> Vec<GenericDisplayRow> {
+    fn build_rows(&self, rows_width: u16) -> Vec<GenericDisplayRow> {
+        let max_meta_width = self
+            .items
+            .iter()
+            .filter_map(|item| item.meta.as_ref())
+            .map(|meta| UnicodeWidthStr::width(meta.as_str()))
+            .max()
+            .unwrap_or(0);
+        let max_name_width = rows_width.saturating_sub(max_meta_width as u16 + 2).max(1) as usize;
+
         self.items
             .iter()
             .enumerate()
@@ -181,7 +192,11 @@ impl QueuePopup {
                 let prefix = if is_selected { '›' } else { ' ' };
                 let n = idx + 1;
                 let next_marker = if idx == 0 { "→ " } else { "  " };
-                let name = format!("{prefix} {n}. {next_marker}{}", item.preview);
+                let prefix_text = format!("{prefix} {n}. {next_marker}");
+                let prefix_width = UnicodeWidthStr::width(prefix_text.as_str());
+                let available_preview_width = max_name_width.saturating_sub(prefix_width);
+                let preview = truncate_to_width(item.preview.as_str(), available_preview_width);
+                let name = format!("{prefix_text}{preview}");
                 GenericDisplayRow {
                     name,
                     display_shortcut: None,
@@ -360,8 +375,8 @@ impl BottomPaneView for QueuePopup {
 
 impl Renderable for QueuePopup {
     fn desired_height(&self, width: u16) -> u16 {
-        let rows = self.build_rows();
         let rows_width = Self::rows_width(width);
+        let rows = self.build_rows(rows_width);
         let rows_height = measure_rows_height(
             &rows,
             &self.state,
@@ -420,7 +435,7 @@ impl Renderable for QueuePopup {
             );
         }
 
-        let rows = self.build_rows();
+        let rows = self.build_rows(Self::rows_width(content_area.width));
         if list_area.height > 0 {
             let render_area = Rect {
                 x: list_area.x.saturating_sub(2),
@@ -446,4 +461,32 @@ impl Renderable for QueuePopup {
         };
         self.footer_hint().dim().render(hint_area, buf);
     }
+}
+
+fn truncate_to_width(text: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+
+    let width = UnicodeWidthStr::width(text);
+    if width <= max_width {
+        return text.to_string();
+    }
+
+    if max_width == 1 {
+        return "…".to_string();
+    }
+
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in text.chars() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used.saturating_add(ch_width) > max_width.saturating_sub(1) {
+            break;
+        }
+        out.push(ch);
+        used = used.saturating_add(ch_width);
+    }
+    out.push('…');
+    out
 }

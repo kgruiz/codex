@@ -1084,6 +1084,34 @@ fn alt_up_edits_most_recent_queued_message() {
 }
 
 #[test]
+fn queue_edit_limits_composer_height_for_screen() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None);
+
+    chat.bottom_pane.set_task_running(true);
+    chat.queued_user_messages.push_back(QueuedUserMessage {
+        id: 1,
+        text: "line\n".repeat(200),
+        attachments: Vec::new(),
+        model_override: None,
+        effort_override: None,
+    });
+    chat.refresh_queued_user_messages();
+
+    chat.start_queue_edit(1);
+
+    let width = 80;
+    let height = 40;
+    chat.update_layout_for_screen(width, height);
+
+    let bottom_height = chat.bottom_pane.desired_height(width);
+    let max_bottom_height = height.saturating_sub(MIN_ACTIVE_CELL_HEIGHT);
+    assert!(
+        bottom_height <= max_bottom_height,
+        "expected bottom pane height {bottom_height} to be <= {max_bottom_height}"
+    );
+}
+
+#[test]
 fn ctrl_y_sends_next_queued_message_when_idle() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(None);
 

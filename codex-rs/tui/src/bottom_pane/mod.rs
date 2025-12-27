@@ -106,6 +106,28 @@ pub(crate) struct BottomPane {
     queued_user_messages: QueuedUserMessages,
     context_window_percent: Option<i64>,
     context_window_used_tokens: Option<i64>,
+    composer_height_cap: Option<u16>,
+}
+
+const MIN_COMPOSER_HEIGHT: u16 = 3;
+
+struct HeightClamped<'a, R: Renderable + ?Sized> {
+    child: &'a R,
+    max_height: u16,
+}
+
+impl<R: Renderable + ?Sized> Renderable for HeightClamped<'_, R> {
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        self.child.render(area, buf);
+    }
+
+    fn desired_height(&self, width: u16) -> u16 {
+        self.child.desired_height(width).min(self.max_height)
+    }
+
+    fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
+        self.child.cursor_pos(area)
+    }
 }
 
 pub(crate) struct BottomPaneParams {
@@ -164,6 +186,7 @@ impl BottomPane {
             animations_enabled,
             context_window_percent: None,
             context_window_used_tokens: None,
+            composer_height_cap: None,
         }
     }
 
@@ -359,6 +382,29 @@ impl BottomPane {
     ) {
         self.composer.set_footer_hint_override(items);
         self.request_redraw();
+    }
+
+    pub(crate) fn set_composer_height_cap(&mut self, cap: Option<u16>) {
+        let cap = cap.filter(|cap| *cap > 0);
+        if self.composer_height_cap != cap {
+            self.composer_height_cap = cap;
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn composer_height_cap_for_screen(
+        &self,
+        width: u16,
+        screen_height: u16,
+        min_active_height: u16,
+    ) -> u16 {
+        let max_bottom_height = screen_height
+            .saturating_sub(min_active_height)
+            .max(MIN_COMPOSER_HEIGHT);
+        let non_composer_height = self.non_composer_height(width);
+        max_bottom_height
+            .saturating_sub(non_composer_height)
+            .max(MIN_COMPOSER_HEIGHT)
     }
 
     pub(crate) fn set_status_line_git_branch(&mut self, branch: Option<String>) {
@@ -799,9 +845,36 @@ impl BottomPane {
             }
             let mut flex2 = FlexRenderable::new();
             flex2.push(1, RenderableItem::Owned(flex.into()));
-            flex2.push(0, RenderableItem::Borrowed(&self.composer));
+            let composer_renderable: RenderableItem<'_> =
+                if let Some(max_height) = self.composer_height_cap {
+                    RenderableItem::Owned(Box::new(HeightClamped {
+                        child: &self.composer,
+                        max_height,
+                    }))
+                } else {
+                    RenderableItem::Borrowed(&self.composer)
+                };
+            flex2.push(0, composer_renderable);
             RenderableItem::Owned(Box::new(flex2))
         }
+    }
+
+    fn non_composer_height(&self, width: u16) -> u16 {
+        let mut height: u16 = 0;
+        if let Some(status) = &self.status {
+            height = height.saturating_add(status.desired_height(width));
+        }
+        if !self.unified_exec_footer.is_empty() {
+            height = height.saturating_add(self.unified_exec_footer.desired_height(width));
+        }
+        height = height.saturating_add(self.queued_user_messages.desired_height(width));
+        if self.status.is_some()
+            || !self.unified_exec_footer.is_empty()
+            || !self.queued_user_messages.messages.is_empty()
+        {
+            height = height.saturating_add(1);
+        }
+        height
     }
 }
 
