@@ -5306,15 +5306,6 @@ impl ChatWidget {
         self.bottom_pane.set_composer_text(text);
     }
 
-    pub(crate) fn set_composer_text_with_attachments(
-        &mut self,
-        text: String,
-        attachments: Vec<ComposerAttachment>,
-    ) {
-        self.bottom_pane
-            .set_composer_text_with_attachments(text, attachments);
-    }
-
     pub(crate) fn show_esc_backtrack_hint(&mut self) {
         self.bottom_pane.show_esc_backtrack_hint();
     }

@@ -542,20 +542,6 @@ impl ChatComposer {
             .collect()
     }
 
-    fn expand_pending_pastes_in_text(&self, text: &str) -> String {
-        if self.pending_pastes.is_empty() {
-            return text.to_string();
-        }
-
-        let mut expanded = text.to_string();
-        for (placeholder, actual) in &self.pending_pastes {
-            if expanded.contains(placeholder) {
-                expanded = expanded.replace(placeholder, actual);
-            }
-        }
-        expanded
-    }
-
     fn reverse_search_active(&self) -> bool {
         self.reverse_search.is_some()
     }
