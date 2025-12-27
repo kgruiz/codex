@@ -90,3 +90,6 @@ CHANGELOG.ignore.md
 __pycache__/
 *.pyc
 
+# Allow assets directories even if globally ignored.
+!**/assets/
+!**/assets/**
