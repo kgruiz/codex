@@ -75,3 +75,4 @@ Add new items below as you think of them.
     - Likely touchpoints: backtrack action picker (edit/branch menu), backtrack action handling, model/thinking picker flow, and user-message metadata display.
 27. [ ] Allow planning and interacting in editor like Cursor and Antigravity use
 28. [ ] Investigate whether background terminal checks are too frequent (possible token usage impact)
+29. [ ] Fix attached image placeholder (`[<filename> <size>]`) turning into plain text when editing messages (edit flow or queue editor)
