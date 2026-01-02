@@ -791,10 +791,8 @@ fn render_side_by_side_rows(
                 .get(idx)
                 .cloned()
                 .unwrap_or_else(|| blank_line(right_width));
-            let mut left_line = pad_line_to_width(left_line, left_width);
-            let right_line = pad_line_to_width(right_line, right_width);
             let mut spans = Vec::new();
-            spans.append(&mut left_line.spans);
+            spans.extend(left_line.spans);
             spans.push(separator.clone());
             spans.extend(right_line.spans);
             out.push(RtLine::from(spans));
@@ -810,17 +808,32 @@ fn wrap_column_line(
     let gutter_width = line_number_width.max(1);
     let ln_str = line.line_number.map(|n| n.to_string()).unwrap_or_default();
     let gutter = RtSpan::styled(format!("{ln_str:>gutter_width$} "), style_gutter());
-    let indent_first = RtLine::from(vec![gutter.clone()]);
     let spacer = RtSpan::styled(format!("{:gutter_width$} ", ""), style_gutter());
-    let indent_sub = RtLine::from(vec![spacer]);
+    let content_width = width.saturating_sub(gutter_width + 1).max(1);
 
     let content = RtLine::from(line.spans);
-    let opts = RtOptions::new(width)
-        .initial_indent(indent_first)
-        .subsequent_indent(indent_sub);
-    word_wrap_line(&content, opts)
-        .iter()
-        .map(line_to_static)
+    let wrapped = word_wrap_line(&content, RtOptions::new(content_width));
+    if wrapped.is_empty() {
+        return vec![pad_line_to_width(RtLine::from(vec![gutter]), width)];
+    }
+
+    wrapped
+        .into_iter()
+        .enumerate()
+        .map(|(idx, line)| {
+            let mut spans = Vec::with_capacity(line.spans.len() + 1);
+            spans.push(if idx == 0 {
+                gutter.clone()
+            } else {
+                spacer.clone()
+            });
+            spans.extend(
+                line.spans
+                    .into_iter()
+                    .map(|span| RtSpan::styled(span.content.to_string(), span.style)),
+            );
+            pad_line_to_width(RtLine::from(spans), width)
+        })
         .collect()
 }
 
@@ -998,6 +1011,7 @@ fn style_del() -> Style {
 mod tests {
     use super::*;
     use insta::assert_snapshot;
+    use pretty_assertions::assert_eq;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::text::Text;
@@ -1249,5 +1263,47 @@ mod tests {
         let lines = create_diff_summary(&changes, &cwd, 80, DiffView::Line);
 
         snapshot_lines("apply_update_block_relativizes_path", lines, 80, 10);
+    }
+
+    #[test]
+    fn side_by_side_separator_stays_aligned() {
+        let original = concat!(
+            "const detailQuery = useRegulatorDetailQuery(selectedId);\n",
+            "const lineTwo = fooBarBaz;\n",
+        );
+        let modified = concat!(
+            "const detailQuery = useRegulatorDetailQuery(selectedId);\n",
+            "const lineTwo = useRegulatorDetailQuerySelectedIdAndSomethingLonger;\n",
+        );
+        let patch = diffy::create_patch(original, modified).to_string();
+
+        let mut changes: HashMap<PathBuf, FileChange> = HashMap::new();
+        changes.insert(
+            PathBuf::from("example.ts"),
+            FileChange::Update {
+                unified_diff: patch,
+                move_path: None,
+            },
+        );
+
+        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 60, DiffView::SideBySide);
+        let positions = lines
+            .iter()
+            .filter_map(|line| {
+                let text = line
+                    .spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>();
+                text.find('│')
+                    .map(|idx| UnicodeWidthStr::width(&text[..idx]))
+            })
+            .collect::<Vec<_>>();
+
+        assert!(!positions.is_empty(), "expected side-by-side separator");
+        let first = positions[0];
+        for pos in positions.iter().skip(1) {
+            assert_eq!(*pos, first, "separator drift: {positions:?}");
+        }
     }
 }
