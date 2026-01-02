@@ -67,3 +67,4 @@ Add new items below as you think of them.
 22. [ ] Allow switching modes via keybind while output is running and while typing a prompt
 23. [ ] Allow switching models while output is running and while typing a prompt
 24. [ ] Allow slash commands while typing in the prompt area
+25. [ ] Make assistant output easier to copy (toggleable code blocks, no-indent/plain transcript)
