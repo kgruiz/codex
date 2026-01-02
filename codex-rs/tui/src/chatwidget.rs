@@ -2081,6 +2081,39 @@ impl ChatWidget {
                 return;
             }
             KeyEvent {
+                code: KeyCode::Char('p' | 'P'),
+                modifiers: KeyModifiers::ALT,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view()
+                && !self.bottom_pane.composer_popup_active() =>
+            {
+                self.set_session_mode(SessionMode::Plan);
+                return;
+            }
+            KeyEvent {
+                code: KeyCode::Char('a' | 'A'),
+                modifiers: KeyModifiers::ALT,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view()
+                && !self.bottom_pane.composer_popup_active() =>
+            {
+                self.set_session_mode(SessionMode::Ask);
+                return;
+            }
+            KeyEvent {
+                code: KeyCode::Char('n' | 'N'),
+                modifiers: KeyModifiers::ALT,
+                kind: KeyEventKind::Press,
+                ..
+            } if !self.bottom_pane.has_active_view()
+                && !self.bottom_pane.composer_popup_active() =>
+            {
+                self.set_session_mode(SessionMode::Normal);
+                return;
+            }
+            KeyEvent {
                 code: KeyCode::Char('p'),
                 modifiers: KeyModifiers::CONTROL,
                 kind: KeyEventKind::Press,
@@ -2120,7 +2153,6 @@ impl ChatWidget {
                 ..
             } if !self.bottom_pane.has_active_view()
                 && !self.bottom_pane.composer_popup_active()
-                && !self.bottom_pane.is_task_running()
                 && self.queued_edit_state.is_none() =>
             {
                 self.open_model_popup();
@@ -2133,7 +2165,6 @@ impl ChatWidget {
                 ..
             } if !self.bottom_pane.has_active_view()
                 && !self.bottom_pane.composer_popup_active()
-                && !self.bottom_pane.is_task_running()
                 && self.queued_edit_state.is_none() =>
             {
                 self.open_model_popup();

@@ -2,10 +2,11 @@
 source: tui/src/bottom_pane/footer.rs
 expression: terminal.backend()
 ---
-"  / for commands                               ⇧ + enter for newline            "
-"  ⌃ + ⇧ + ← / ⌃ + ⇧ + → to change model        tab / ⇧ + tab to change thinking "
-"  @ for file paths                             ⌘ + v to paste from clipboard    "
-"  ⌥ + c to copy prompt                         ⌃ + g to edit in external editor "
-"  ⌃ + r to search history                      esc again to edit or branch previ"
-"  ⌃ + c to exit                                                                 "
-"                                               ⌃ + t to view transcript         "
+"  / for commands                                      ⇧ + enter for newline     "
+"  ⌃ + ⇧ + ← / ⌃ + ⇧ + → to change model               tab / ⇧ + tab to change th"
+"  ⌥ + p / ⌥ + a / ⌥ + n to switch mode                @ for file paths          "
+"  ⌘ + v to paste from clipboard                       ⌥ + c to copy prompt      "
+"  ⌃ + g to edit in external editor                    ⌃ + r to search history   "
+"  esc again to edit or branch previous message        ⌃ + c to exit             "
+"                                                                                "
+"  ⌃ + t to view transcript                                                      "

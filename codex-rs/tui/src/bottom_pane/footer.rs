@@ -250,6 +250,15 @@ fn shortcut_overlay_lines(state: ShortcutsState<'_>) -> Vec<Line<'static>> {
         " to change thinking".into(),
     ]);
 
+    let mode = Line::from(vec![
+        key_hint::alt(KeyCode::Char('p')).into(),
+        " / ".into(),
+        key_hint::alt(KeyCode::Char('a')).into(),
+        " / ".into(),
+        key_hint::alt(KeyCode::Char('n')).into(),
+        " to switch mode".into(),
+    ]);
+
     let file_paths = Line::from(vec![
         key_hint::plain(KeyCode::Char('@')).into(),
         " for file paths".into(),
@@ -284,6 +293,7 @@ fn shortcut_overlay_lines(state: ShortcutsState<'_>) -> Vec<Line<'static>> {
         Line::from(vec![newline.into(), " for newline".into()]),
         model,
         thinking,
+        mode,
         file_paths,
         Line::from(vec![paste.into(), " to paste from clipboard".into()]),
         Line::from(vec![copy_prompt.into(), " to copy prompt".into()]),

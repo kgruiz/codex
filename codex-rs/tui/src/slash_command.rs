@@ -89,7 +89,6 @@ impl SlashCommand {
             | SlashCommand::Export
             | SlashCommand::Init
             | SlashCommand::Compact
-            | SlashCommand::Model
             | SlashCommand::Approvals
             | SlashCommand::Experimental
             | SlashCommand::Review
@@ -105,7 +104,8 @@ impl SlashCommand {
             | SlashCommand::Exit
             | SlashCommand::Plan
             | SlashCommand::Ask
-            | SlashCommand::Normal => true,
+            | SlashCommand::Normal
+            | SlashCommand::Model => true,
             SlashCommand::Rollout => true,
             SlashCommand::TestApproval => true,
         }
