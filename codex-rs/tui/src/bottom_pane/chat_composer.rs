@@ -969,18 +969,27 @@ impl ChatComposer {
                 // Ensure popup filtering/selection reflects the latest composer text
                 // before applying completion.
                 let line = self.current_line_snapshot();
-                let inline_context = self.line_has_other_content(line.start, line.end);
+                let full_text = self.textarea.text();
+                let cursor = self.textarea.cursor().min(full_text.len());
+                let cursor_in_line = cursor.saturating_sub(line.start);
+                let command_start = Self::slash_command_under_cursor(&line.text, cursor_in_line)
+                    .map(|(start, _name, _rest)| start)
+                    .unwrap_or(0);
+                let prefix = &line.text[..command_start];
+                let command_segment = line.text[command_start..].to_string();
+                let inline_context =
+                    self.line_has_other_content(line.start, line.end) || !prefix.trim().is_empty();
                 let selection = {
                     let ActivePopup::Command(popup) = &mut self.active_popup else {
                         unreachable!();
                     };
-                    popup.on_composer_text_change(line.text.clone());
+                    popup.on_composer_text_change(command_segment.clone());
                     match popup.selected_item() {
                         Some(CommandItem::Builtin(cmd)) => Some(SelectedCommand::Builtin(cmd)),
                         Some(CommandItem::UserPrompt(idx)) => popup.prompt(idx).map(|prompt| {
                             SelectedCommand::Prompt(prompt_selection_action(
                                 prompt,
-                                &line.text,
+                                &command_segment,
                                 PromptSelectionMode::Completion,
                             ))
                         }),
@@ -991,22 +1000,22 @@ impl ChatComposer {
                     match sel {
                         SelectedCommand::Builtin(cmd) => {
                             if cmd == SlashCommand::Skills {
-                                self.last_command_input = Some(format!("/{}", cmd.command()));
+                                self.last_command_input =
+                                    Some(format!("/{cmd}", cmd = cmd.command()));
                                 if inline_context {
-                                    self.remove_line(line.start, line.end);
+                                    self.remove_command_segment(&line, command_start);
                                 } else {
                                     self.textarea.set_text("");
                                 }
                                 return (InputResult::Command(cmd), true);
                             }
 
-                            let starts_with_cmd = line
-                                .text
-                                .trim_start()
-                                .starts_with(&format!("/{}", cmd.command()));
+                            let starts_with_cmd = command_segment
+                                .starts_with(&format!("/{cmd}", cmd = cmd.command()));
                             if !starts_with_cmd {
-                                let new_line = format!("/{} ", cmd.command());
-                                let target = new_line.len();
+                                let new_command = format!("/{cmd} ", cmd = cmd.command());
+                                let new_line = format!("{prefix}{new_command}");
+                                let target = prefix.len() + new_command.len();
                                 self.replace_line(line.start, line.end, &new_line, Some(target));
                             } else {
                                 self.textarea.set_cursor(line.start + line.text.len());
@@ -1015,7 +1024,9 @@ impl ChatComposer {
                         SelectedCommand::Prompt(action) => match action {
                             PromptSelectionAction::Insert { text, cursor } => {
                                 let target = cursor.unwrap_or(text.len());
-                                self.replace_line(line.start, line.end, &text, Some(target));
+                                let new_line = format!("{prefix}{text}");
+                                let target = prefix.len() + target;
+                                self.replace_line(line.start, line.end, &new_line, Some(target));
                             }
                             PromptSelectionAction::Submit { .. } => {}
                         },
@@ -1032,16 +1043,24 @@ impl ChatComposer {
                 // positional args for a numeric-style template, expand and submit
                 // immediately regardless of the popup selection.
                 let line = self.current_line_snapshot();
-                let inline_context = self.line_has_other_content(line.start, line.end);
-                if let Some((name, _rest)) = parse_slash_name(&line.text)
+                let full_text = self.textarea.text();
+                let cursor = self.textarea.cursor().min(full_text.len());
+                let cursor_in_line = cursor.saturating_sub(line.start);
+                let command_start = Self::slash_command_under_cursor(&line.text, cursor_in_line)
+                    .map(|(start, _name, _rest)| start)
+                    .unwrap_or(0);
+                let prefix = &line.text[..command_start];
+                let command_segment = line.text[command_start..].trim_end().to_string();
+                let inline_context =
+                    self.line_has_other_content(line.start, line.end) || !prefix.trim().is_empty();
+                if let Some((name, _rest)) = parse_slash_name(&command_segment)
                     && let Some(prompt_name) = name.strip_prefix(&format!("{PROMPTS_CMD_PREFIX}:"))
                     && let Some(prompt) = self.custom_prompts.iter().find(|p| p.name == prompt_name)
                     && let Some(expanded) =
-                        expand_if_numeric_with_positional_args(prompt, &line.text)
+                        expand_if_numeric_with_positional_args(prompt, &command_segment)
                 {
                     if inline_context {
-                        let target = expanded.len();
-                        self.replace_line(line.start, line.end, &expanded, Some(target));
+                        self.replace_command_segment(&line, command_start, &expanded);
                         return (InputResult::None, true);
                     } else {
                         self.textarea.set_text("");
@@ -1058,7 +1077,7 @@ impl ChatComposer {
                         Some(CommandItem::UserPrompt(idx)) => popup.prompt(idx).map(|prompt| {
                             SelectedCommand::Prompt(prompt_selection_action(
                                 prompt,
-                                &line.text,
+                                &command_segment,
                                 PromptSelectionMode::Submit,
                             ))
                         }),
@@ -1068,18 +1087,16 @@ impl ChatComposer {
                 if let Some(sel) = selection {
                     match sel {
                         SelectedCommand::Builtin(cmd) => {
-                            let command_text = if line
-                                .text
-                                .trim_start()
-                                .starts_with(&format!("/{}", cmd.command()))
+                            let command_text = if command_segment
+                                .starts_with(&format!("/{cmd}", cmd = cmd.command()))
                             {
-                                line.text.clone()
+                                command_segment
                             } else {
-                                format!("/{}", cmd.command())
+                                format!("/{cmd}", cmd = cmd.command())
                             };
                             self.last_command_input = Some(command_text);
                             if inline_context {
-                                self.remove_line(line.start, line.end);
+                                self.remove_command_segment(&line, command_start);
                             } else {
                                 self.textarea.set_text("");
                             }
@@ -1088,8 +1105,7 @@ impl ChatComposer {
                         SelectedCommand::Prompt(action) => match action {
                             PromptSelectionAction::Submit { text } => {
                                 if inline_context {
-                                    let target = text.len();
-                                    self.replace_line(line.start, line.end, &text, Some(target));
+                                    self.replace_command_segment(&line, command_start, &text);
                                     return (InputResult::None, true);
                                 }
                                 self.textarea.set_text("");
@@ -1097,7 +1113,9 @@ impl ChatComposer {
                             }
                             PromptSelectionAction::Insert { text, cursor } => {
                                 let target = cursor.unwrap_or(text.len());
-                                self.replace_line(line.start, line.end, &text, Some(target));
+                                let new_line = format!("{prefix}{text}");
+                                let target = prefix.len() + target;
+                                self.replace_line(line.start, line.end, &new_line, Some(target));
                                 return (InputResult::None, true);
                             }
                         },
@@ -1642,13 +1660,24 @@ impl ChatComposer {
             return None;
         }
         let line = self.current_line_snapshot();
-        if !self.line_has_other_content(line.start, line.end) {
+        let full_text = self.textarea.text();
+        let cursor = self.textarea.cursor().min(full_text.len());
+        let cursor_in_line = cursor.saturating_sub(line.start);
+        let token_cursor = Self::cursor_for_token(&line.text, cursor_in_line);
+        let token_start = line.text[..token_cursor]
+            .rfind(char::is_whitespace)
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
+        let command_text = line.text[token_start..].trim_end();
+        if !command_text.starts_with('/') {
             return None;
         }
-        if line.text.starts_with(' ') {
+        let has_other_content = self.line_has_other_content(line.start, line.end)
+            || !line.text[..token_start].trim().is_empty();
+        if !has_other_content {
             return None;
         }
-        let (name, _rest) = parse_slash_name(line.text.trim_end())?;
+        let (name, _rest) = parse_slash_name(command_text)?;
         if name.contains('/') {
             return None;
         }
@@ -1656,12 +1685,13 @@ impl ChatComposer {
             .into_iter()
             .find(|(command_name, _)| *command_name == name)
         {
-            self.last_command_input = Some(line.text.clone());
-            self.remove_line(line.start, line.end);
+            self.last_command_input = Some(command_text.trim_start().to_string());
+            self.remove_command_segment(&line, token_start);
             return Some((InputResult::Command(cmd), true));
         }
 
-        let expanded_prompt = match expand_custom_prompt(line.text.trim(), &self.custom_prompts) {
+        let expanded_prompt = match expand_custom_prompt(command_text.trim(), &self.custom_prompts)
+        {
             Ok(expanded) => expanded,
             Err(err) => {
                 self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
@@ -1671,8 +1701,7 @@ impl ChatComposer {
             }
         };
         if let Some(expanded) = expanded_prompt {
-            let target = expanded.len();
-            self.replace_line(line.start, line.end, &expanded, Some(target));
+            self.replace_command_segment(&line, token_start, &expanded);
             return Some((InputResult::None, true));
         }
 
@@ -2428,6 +2457,18 @@ impl ChatComposer {
         self.sync_placeholders_after_text_mutation();
     }
 
+    fn replace_command_segment(
+        &mut self,
+        line: &LineSnapshot,
+        command_start: usize,
+        replacement: &str,
+    ) {
+        let prefix = &line.text[..command_start];
+        let new_line = format!("{prefix}{replacement}");
+        let target = prefix.len() + replacement.len();
+        self.replace_line(line.start, line.end, &new_line, Some(target));
+    }
+
     fn remove_line(&mut self, line_start: usize, line_end: usize) {
         let text = self.textarea.text();
         let mut start = line_start;
@@ -2442,22 +2483,52 @@ impl ChatComposer {
         self.sync_placeholders_after_text_mutation();
     }
 
+    fn remove_command_segment(&mut self, line: &LineSnapshot, command_start: usize) {
+        if line.text[..command_start].trim().is_empty() {
+            self.remove_line(line.start, line.end);
+            return;
+        }
+
+        let mut remove_start = command_start;
+        if remove_start > 0 && line.text[..remove_start].ends_with(' ') {
+            remove_start = remove_start.saturating_sub(1);
+        }
+        let global_start = line.start + remove_start;
+        self.textarea
+            .replace_range(global_start..line.start + line.text.len(), "");
+        self.textarea.set_cursor(global_start);
+        self.sync_placeholders_after_text_mutation();
+    }
+
+    fn cursor_for_token(line: &str, cursor: usize) -> usize {
+        let mut pos = cursor.min(line.len());
+        while pos > 0 && line.as_bytes()[pos - 1].is_ascii_whitespace() {
+            pos = pos.saturating_sub(1);
+        }
+        pos
+    }
+
     fn current_line_starts_with_slash(&self) -> bool {
         let text = self.textarea.text();
         let cursor = self.textarea.cursor().min(text.len());
         let (start, end) = Self::line_bounds(text, cursor);
-        text[start..end].starts_with('/')
+        text[start..end].trim_start().starts_with('/')
     }
 
-    /// If the cursor is currently within a slash command on the current line,
-    /// extract the command name and the rest of the line after it.
-    /// Returns None if the cursor is outside a slash command.
-    fn slash_command_under_cursor(line: &str, cursor: usize) -> Option<(&str, &str)> {
-        if !line.starts_with('/') {
+    /// If the cursor is currently within a slash command token on the current line,
+    /// extract the token start, command name, and the rest of the line after it.
+    /// Returns None if the cursor is outside a slash command token.
+    fn slash_command_under_cursor(line: &str, cursor: usize) -> Option<(usize, &str, &str)> {
+        let cursor = cursor.min(line.len());
+        let token_start = line[..cursor]
+            .rfind(char::is_whitespace)
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
+        if !line[token_start..].starts_with('/') {
             return None;
         }
 
-        let name_start = 1usize;
+        let name_start = token_start + 1;
         let name_end = line[name_start..]
             .find(char::is_whitespace)
             .map(|idx| name_start + idx)
@@ -2474,7 +2545,7 @@ impl ChatComposer {
             .unwrap_or(name_end);
         let rest = &line[rest_start..];
 
-        Some((name, rest))
+        Some((token_start, name, rest))
     }
 
     /// Heuristic for whether the typed slash command looks like a valid
@@ -2509,15 +2580,17 @@ impl ChatComposer {
             }
             return;
         }
-        // Determine whether the caret is inside the initial '/name' token on the current line.
+        // Determine whether the caret is inside a '/name' token on the current line.
         let text = self.textarea.text();
         let cursor = self.textarea.cursor().min(text.len());
         let (line_start, line_end) = Self::line_bounds(text, cursor);
         let line = &text[line_start..line_end];
         let cursor_in_line = cursor.saturating_sub(line_start);
 
-        let is_editing_slash_command_name = Self::slash_command_under_cursor(line, cursor_in_line)
-            .is_some_and(|(name, rest)| self.looks_like_slash_prefix(name, rest));
+        let slash_match = Self::slash_command_under_cursor(line, cursor_in_line);
+        let is_editing_slash_command_name = slash_match
+            .as_ref()
+            .is_some_and(|(_start, name, rest)| self.looks_like_slash_prefix(name, rest));
 
         // If the cursor is currently positioned within an `@token`, prefer the
         // file-search popup over the slash popup so users can insert a file path
@@ -2530,18 +2603,22 @@ impl ChatComposer {
         }
         match &mut self.active_popup {
             ActivePopup::Command(popup) => {
-                if is_editing_slash_command_name {
-                    popup.on_composer_text_change(line.to_string());
+                if let Some((token_start, _name, _rest)) =
+                    slash_match.filter(|_| is_editing_slash_command_name)
+                {
+                    popup.on_composer_text_change(line[token_start..].to_string());
                 } else {
                     self.active_popup = ActivePopup::None;
                 }
             }
             _ => {
-                if is_editing_slash_command_name {
+                if let Some((token_start, _name, _rest)) =
+                    slash_match.filter(|_| is_editing_slash_command_name)
+                {
                     let skills_enabled = self.skills_enabled();
                     let mut command_popup =
                         CommandPopup::new(self.custom_prompts.clone(), skills_enabled);
-                    command_popup.on_composer_text_change(line.to_string());
+                    command_popup.on_composer_text_change(line[token_start..].to_string());
                     self.active_popup = ActivePopup::Command(command_popup);
                 }
             }
@@ -4573,6 +4650,38 @@ mod tests {
             panic!("expected Submitted");
         }
         assert!(composer.textarea.is_empty());
+        match rx.try_recv() {
+            Ok(event) => panic!("unexpected event: {event:?}"),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+            Err(err) => panic!("unexpected channel state: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn inline_slash_command_keeps_draft_text() {
+        use crossterm::event::KeyCode;
+        use crossterm::event::KeyEvent;
+        use crossterm::event::KeyModifiers;
+
+        let (tx, mut rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            true,
+            sender,
+            false,
+            "Ask Codex to do anything".to_string(),
+            false,
+            default_keybindings(false),
+        );
+
+        composer.textarea.set_text("Draft a response /plan");
+        composer.textarea.set_cursor(composer.textarea.text().len());
+
+        let (result, _needs_redraw) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(result, InputResult::Command(SlashCommand::Plan));
+        assert_eq!(composer.textarea.text(), "Draft a response");
         match rx.try_recv() {
             Ok(event) => panic!("unexpected event: {event:?}"),
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
