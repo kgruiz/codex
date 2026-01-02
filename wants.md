@@ -73,3 +73,4 @@ Add new items below as you think of them.
     - Add a "resend with different model/thinking" action that lets users pick overrides before reissuing.
     - Ensure resend reissues the same prompt without editing (no manual copy/paste).
     - Likely touchpoints: backtrack action picker (edit/branch menu), backtrack action handling, model/thinking picker flow, and user-message metadata display.
+27. [ ] Allow planning and interacting in editor like Cursor and Antigravity use
