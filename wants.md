@@ -64,3 +64,6 @@ Add new items below as you think of them.
     - Add modes that generate a concise implementation plan or answer questions without making changes.
 21. [ ] Allow configurable output path for `/export`
     - Let users choose the export destination filename/path (via CLI flags, prompt, or config).
+22. [ ] Allow switching modes via keybind while output is running and while typing a prompt
+23. [ ] Allow switching models while output is running and while typing a prompt
+24. [ ] Allow slash commands while typing in the prompt area
