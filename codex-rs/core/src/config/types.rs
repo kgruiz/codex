@@ -432,6 +432,15 @@ pub struct Tui {
     #[serde(default)]
     pub diff_view: DiffView,
 
+    /// Default directory for chat exports. When set, `/export` writes here.
+    pub export_dir: Option<PathBuf>,
+
+    /// Default base name (no extension) for chat exports. When unset, the rollout stem is used.
+    pub export_name: Option<String>,
+
+    /// Default export format for `/export` when no format flag is provided.
+    pub export_format: Option<ExportFormat>,
+
     /// Override the *wheel* event density used to normalize TUI2 scrolling.
     ///
     /// Terminals generally deliver both mouse wheels and trackpads as discrete `scroll up/down`
@@ -551,6 +560,14 @@ pub enum StatusLineItem {
     Latency,
     ToolTime,
     Cost,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExportFormat {
+    #[serde(alias = "md")]
+    Markdown,
+    Json,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Deserialize)]

@@ -64,6 +64,7 @@ use crossterm::event::KeyModifiers;
 use insta::assert_snapshot;
 use pretty_assertions::assert_eq;
 use std::collections::HashSet;
+use std::path::Path;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use tempfile::tempdir;
@@ -2540,6 +2541,49 @@ fn approvals_popup_shows_disabled_presets() {
     assert!(
         collapsed.contains("this message should be printed in the description"),
         "disabled preset reason should be shown"
+    );
+}
+
+#[test]
+fn export_args_parse_directory_and_format() {
+    let cwd = Path::new("/tmp");
+    let parsed = parse_export_args(Some("/export --format json -C exports"), cwd)
+        .expect("parse")
+        .expect("args");
+
+    assert_eq!(parsed.format, Some(ChatExportFormat::Json));
+    assert_eq!(parsed.overrides.output_dir, Some(PathBuf::from("exports")));
+    assert_eq!(parsed.overrides.output_path, None);
+}
+
+#[test]
+fn export_args_parse_positional_path() {
+    let cwd = Path::new("/tmp");
+    let parsed = parse_export_args(Some("/export logs/"), cwd)
+        .expect("parse")
+        .expect("args");
+
+    assert_eq!(parsed.overrides.output_dir, Some(PathBuf::from("logs")));
+    assert_eq!(parsed.overrides.output_path, None);
+}
+
+#[test]
+fn export_destination_uses_defaults() {
+    let defaults = ExportDefaults {
+        cwd: PathBuf::from("/home/user"),
+        export_dir: Some(PathBuf::from("exports")),
+        export_name: Some("codex-chat".to_string()),
+        export_format: Some(ChatExportFormat::Json),
+    };
+    let rollout_path = PathBuf::from("/tmp/rollout-1.jsonl");
+    let destination =
+        resolve_export_destination(&rollout_path, &defaults, None, &ExportOverrides::default())
+            .expect("resolve");
+
+    assert_eq!(destination.format, ChatExportFormat::Json);
+    assert_eq!(
+        destination.path,
+        PathBuf::from("/home/user/exports/codex-chat.json")
     );
 }
 

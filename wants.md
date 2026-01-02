@@ -62,7 +62,7 @@ Add new items below as you think of them.
     - Surface live command output in a scrollable area so users can follow along.
 20. [x] Add plan/ask modes
     - Add modes that generate a concise implementation plan or answer questions without making changes.
-21. [ ] Allow configurable output path for `/export`
+21. [x] Allow configurable output path for `/export`
     - Let users choose the export destination filename/path (via CLI flags, prompt, or config).
 22. [x] Allow switching modes via keybind while output is running and while typing a prompt
 23. [x] Allow switching models while output is running and while typing a prompt

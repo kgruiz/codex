@@ -25,6 +25,29 @@ pub(crate) enum ChatExportFormat {
     Json,
 }
 
+impl ChatExportFormat {
+    pub(crate) const fn extension(self) -> &'static str {
+        match self {
+            Self::Markdown => "md",
+            Self::Json => "json",
+        }
+    }
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Markdown => "Markdown",
+            Self::Json => "JSON",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ExportOverrides {
+    pub output_path: Option<PathBuf>,
+    pub output_dir: Option<PathBuf>,
+    pub name: Option<String>,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum AppEvent {
@@ -64,6 +87,12 @@ pub(crate) enum AppEvent {
 
     /// Export the current chat in the selected format.
     ExportChat {
+        format: Option<ChatExportFormat>,
+        overrides: ExportOverrides,
+    },
+
+    /// Prompt for a custom export path.
+    OpenExportPathPrompt {
         format: ChatExportFormat,
     },
 
@@ -72,6 +101,7 @@ pub(crate) enum AppEvent {
         path: PathBuf,
         messages: usize,
         error: Option<String>,
+        format: ChatExportFormat,
     },
 
     /// Launch the external editor after a normal draw has completed.

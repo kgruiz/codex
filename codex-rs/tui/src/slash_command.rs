@@ -56,7 +56,7 @@ impl SlashCommand {
             SlashCommand::Resume => "resume a saved chat",
             SlashCommand::Session => "manage saved chats",
             SlashCommand::Rename => "rename this chat",
-            SlashCommand::Export => "export this chat as Markdown",
+            SlashCommand::Export => "export this chat",
             SlashCommand::Quit | SlashCommand::Exit => "exit Codex",
             SlashCommand::Diff => "show git diff (including untracked files)",
             SlashCommand::Mention => "mention a file",

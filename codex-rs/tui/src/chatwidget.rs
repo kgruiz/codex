@@ -11,6 +11,7 @@ use codex_app_server_protocol::AuthMode;
 use codex_backend_client::Client as BackendClient;
 use codex_core::config::Config;
 use codex_core::config::types::DiffView;
+use codex_core::config::types::ExportFormat;
 use codex_core::config::types::Notifications;
 use codex_core::features::FEATURES;
 use codex_core::features::Feature;
@@ -93,6 +94,7 @@ use tracing::debug;
 use crate::app_backtrack::BacktrackAction;
 use crate::app_event::AppEvent;
 use crate::app_event::ChatExportFormat;
+use crate::app_event::ExportOverrides;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::BetaFeatureItem;
@@ -3334,7 +3336,17 @@ impl ChatWidget {
                 self.open_rename_chat_view();
             }
             SlashCommand::Export => {
-                self.open_export_picker();
+                match parse_export_args(command_input.as_deref(), &self.config.cwd) {
+                    Ok(Some(args)) => {
+                        self.start_export(args.format, args.overrides);
+                    }
+                    Ok(None) => {
+                        self.open_export_picker();
+                    }
+                    Err(message) => {
+                        self.add_error_message(message);
+                    }
+                }
             }
             SlashCommand::Init => {
                 let init_target = self.config.cwd.join(DEFAULT_PROJECT_DOC_FILENAME);
@@ -3485,12 +3497,29 @@ impl ChatWidget {
             return;
         }
 
+        let subtitle = match self.config.tui_export_dir.as_ref() {
+            Some(dir) => format!("Creates a file in {}.", dir.display()),
+            None => "Creates a file next to the rollout (.jsonl).".to_string(),
+        };
+
         let items = vec![
             SelectionItem {
                 name: "Markdown (.md)".to_string(),
                 description: Some("Readable transcript for sharing.".to_string()),
                 actions: vec![Box::new(|tx| {
                     tx.send(AppEvent::ExportChat {
+                        format: Some(ChatExportFormat::Markdown),
+                        overrides: ExportOverrides::default(),
+                    });
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+            SelectionItem {
+                name: "Markdown (custom path...)".to_string(),
+                description: Some("Choose a destination path.".to_string()),
+                actions: vec![Box::new(|tx| {
+                    tx.send(AppEvent::OpenExportPathPrompt {
                         format: ChatExportFormat::Markdown,
                     });
                 })],
@@ -3502,6 +3531,18 @@ impl ChatWidget {
                 description: Some("Structured messages for tooling.".to_string()),
                 actions: vec![Box::new(|tx| {
                     tx.send(AppEvent::ExportChat {
+                        format: Some(ChatExportFormat::Json),
+                        overrides: ExportOverrides::default(),
+                    });
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+            SelectionItem {
+                name: "JSON (custom path...)".to_string(),
+                description: Some("Choose a destination path.".to_string()),
+                actions: vec![Box::new(|tx| {
+                    tx.send(AppEvent::OpenExportPathPrompt {
                         format: ChatExportFormat::Json,
                     });
                 })],
@@ -3512,7 +3553,7 @@ impl ChatWidget {
 
         self.bottom_pane.show_selection_view(SelectionViewParams {
             title: Some("Export Chat".to_string()),
-            subtitle: Some("Creates a file next to the rollout (.jsonl).".to_string()),
+            subtitle: Some(subtitle),
             footer_hint: Some(standard_popup_hint_line()),
             completion_behavior: ViewCompletionBehavior::Pop,
             items,
@@ -3520,38 +3561,104 @@ impl ChatWidget {
         });
     }
 
-    pub(crate) fn start_export(&mut self, format: ChatExportFormat) {
+    pub(crate) fn open_export_path_prompt(&mut self, format: ChatExportFormat) {
         let Some(rollout_path) = self.current_rollout_path.clone() else {
             self.add_info_message("Export is not available yet.".to_string(), None);
             return;
         };
 
-        let out_path = match format {
-            ChatExportFormat::Markdown => rollout_path.with_extension("md"),
-            ChatExportFormat::Json => rollout_path.with_extension("json"),
+        let defaults = ExportDefaults::from_config(&self.config);
+        let default_path = match resolve_export_destination(
+            &rollout_path,
+            &defaults,
+            Some(format),
+            &ExportOverrides::default(),
+        ) {
+            Ok(destination) => destination.path,
+            Err(message) => {
+                self.add_error_message(message);
+                return;
+            }
         };
+
+        let placeholder = format!("Path (default: {})", default_path.display());
+        let context_label = Some(format!("Format: {}", format.label()));
+        let tx = self.app_event_tx.clone();
+        let cwd = self.config.cwd.clone();
+        let view = CustomPromptView::new(
+            "Export path".to_string(),
+            placeholder,
+            context_label,
+            Box::new(move |input: String| {
+                let trimmed = input.trim();
+                if trimmed.is_empty() {
+                    return;
+                }
+
+                let overrides = export_overrides_from_path_input(trimmed, &cwd);
+                tx.send(AppEvent::ExportChat {
+                    format: Some(format),
+                    overrides,
+                });
+            }),
+        );
+        self.bottom_pane.show_view(Box::new(view));
+        self.request_redraw();
+    }
+
+    pub(crate) fn start_export(
+        &mut self,
+        format: Option<ChatExportFormat>,
+        overrides: ExportOverrides,
+    ) {
+        let Some(rollout_path) = self.current_rollout_path.clone() else {
+            self.add_info_message("Export is not available yet.".to_string(), None);
+            return;
+        };
+
+        let defaults = ExportDefaults::from_config(&self.config);
+        let destination =
+            match resolve_export_destination(&rollout_path, &defaults, format, &overrides) {
+                Ok(destination) => destination,
+                Err(message) => {
+                    self.add_error_message(message);
+                    return;
+                }
+            };
+
+        let out_path = destination.path;
+        let format = destination.format;
 
         let tx = self.app_event_tx.clone();
         tokio::spawn(async move {
-            let result = match format {
-                ChatExportFormat::Markdown => {
-                    export_markdown::export_rollout_as_markdown(&rollout_path, &out_path).await
+            let result = async {
+                if let Some(parent) = out_path.parent() {
+                    tokio::fs::create_dir_all(parent).await?;
                 }
-                ChatExportFormat::Json => {
-                    export_markdown::export_rollout_as_json(&rollout_path, &out_path).await
+
+                match format {
+                    ChatExportFormat::Markdown => {
+                        export_markdown::export_rollout_as_markdown(&rollout_path, &out_path).await
+                    }
+                    ChatExportFormat::Json => {
+                        export_markdown::export_rollout_as_json(&rollout_path, &out_path).await
+                    }
                 }
-            };
+            }
+            .await;
 
             match result {
                 Ok(messages) => tx.send(AppEvent::ExportResult {
                     path: out_path,
                     messages,
                     error: None,
+                    format,
                 }),
                 Err(e) => tx.send(AppEvent::ExportResult {
                     path: out_path,
                     messages: 0,
                     error: Some(e.to_string()),
+                    format,
                 }),
             };
         });
@@ -5875,6 +5982,305 @@ fn find_skill_mentions(text: &str, skills: &[SkillMetadata]) -> Vec<SkillMetadat
         }
     }
     matches
+}
+
+#[derive(Debug, Default)]
+struct ParsedExportArgs {
+    format: Option<ChatExportFormat>,
+    overrides: ExportOverrides,
+}
+
+#[derive(Debug, Clone)]
+struct ExportDefaults {
+    cwd: PathBuf,
+    export_dir: Option<PathBuf>,
+    export_name: Option<String>,
+    export_format: Option<ChatExportFormat>,
+}
+
+impl ExportDefaults {
+    fn from_config(config: &Config) -> Self {
+        Self {
+            cwd: config.cwd.clone(),
+            export_dir: config.tui_export_dir.clone(),
+            export_name: config.tui_export_name.clone(),
+            export_format: config.tui_export_format.map(|format| match format {
+                ExportFormat::Markdown => ChatExportFormat::Markdown,
+                ExportFormat::Json => ChatExportFormat::Json,
+            }),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ExportDestination {
+    path: PathBuf,
+    format: ChatExportFormat,
+}
+
+#[derive(Debug)]
+enum ExportPathSpec {
+    File(PathBuf),
+    Dir(PathBuf),
+}
+
+fn parse_export_args(input: Option<&str>, cwd: &Path) -> Result<Option<ParsedExportArgs>, String> {
+    let Some(input) = input else {
+        return Ok(None);
+    };
+    let Some((name, rest)) = parse_slash_name(input) else {
+        return Ok(None);
+    };
+    if name != SlashCommand::Export.command() {
+        return Ok(None);
+    }
+
+    let args = parse_positional_args(rest);
+    if args.is_empty() {
+        return Ok(None);
+    }
+
+    let mut parsed = ParsedExportArgs::default();
+    let mut positional: Option<String> = None;
+    let mut args_iter = args.into_iter().peekable();
+    while let Some(arg) = args_iter.next() {
+        if arg == "--" {
+            let remaining: Vec<String> = args_iter.collect();
+            if remaining.is_empty() {
+                return Err("Expected a path after --.".to_string());
+            }
+            if remaining.len() > 1 {
+                return Err(format!(
+                    "Unexpected /export arguments: {}",
+                    remaining.join(" ")
+                ));
+            }
+            positional = Some(remaining[0].clone());
+            break;
+        }
+
+        if let Some(value) = arg.strip_prefix("--format=") {
+            parsed.format = Some(parse_export_format(value)?);
+            continue;
+        }
+        if arg == "--format" {
+            let Some(value) = args_iter.next() else {
+                return Err("Expected a value after --format.".to_string());
+            };
+            parsed.format = Some(parse_export_format(&value)?);
+            continue;
+        }
+        if arg == "--json" {
+            parsed.format = Some(ChatExportFormat::Json);
+            continue;
+        }
+        if arg == "--markdown" || arg == "--md" {
+            parsed.format = Some(ChatExportFormat::Markdown);
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--name=") {
+            parsed.overrides.name = Some(value.to_string());
+            continue;
+        }
+        if arg == "--name" {
+            let Some(value) = args_iter.next() else {
+                return Err("Expected a value after --name.".to_string());
+            };
+            parsed.overrides.name = Some(value);
+            continue;
+        }
+        if arg == "-C" {
+            let Some(value) = args_iter.next() else {
+                return Err("Expected a directory after -C.".to_string());
+            };
+            parsed.overrides.output_dir = Some(PathBuf::from(value));
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--output=") {
+            if value.ends_with('/') || value.ends_with('\\') {
+                return Err("Expected a file path after --output.".to_string());
+            }
+            parsed.overrides.output_path = Some(PathBuf::from(value));
+            continue;
+        }
+        if arg == "-o" || arg == "--output" {
+            let Some(value) = args_iter.next() else {
+                return Err("Expected a path after -o/--output.".to_string());
+            };
+            if value.ends_with('/') || value.ends_with('\\') {
+                return Err("Expected a file path after -o/--output.".to_string());
+            }
+            parsed.overrides.output_path = Some(PathBuf::from(value));
+            continue;
+        }
+        if arg.starts_with('-') {
+            return Err(format!("Unknown /export flag: {arg}"));
+        }
+        if positional.is_some() {
+            return Err(format!("Unexpected /export argument: {arg}"));
+        }
+        positional = Some(arg);
+    }
+
+    if let Some(positional) = positional {
+        if parsed.overrides.output_path.is_some() || parsed.overrides.output_dir.is_some() {
+            return Err(
+                "Provide only one export path (use -o, -C, or a single positional path)."
+                    .to_string(),
+            );
+        }
+        match classify_export_path(&positional, cwd) {
+            ExportPathSpec::File(path) => parsed.overrides.output_path = Some(path),
+            ExportPathSpec::Dir(path) => parsed.overrides.output_dir = Some(path),
+        }
+    }
+
+    Ok(Some(parsed))
+}
+
+fn parse_export_format(value: &str) -> Result<ChatExportFormat, String> {
+    match value.to_ascii_lowercase().as_str() {
+        "md" | "markdown" => Ok(ChatExportFormat::Markdown),
+        "json" => Ok(ChatExportFormat::Json),
+        _ => Err(format!(
+            "Unknown export format: {value} (expected md or json)."
+        )),
+    }
+}
+
+fn export_overrides_from_path_input(value: &str, cwd: &Path) -> ExportOverrides {
+    match classify_export_path(value, cwd) {
+        ExportPathSpec::File(path) => ExportOverrides {
+            output_path: Some(path),
+            ..Default::default()
+        },
+        ExportPathSpec::Dir(path) => ExportOverrides {
+            output_dir: Some(path),
+            ..Default::default()
+        },
+    }
+}
+
+fn classify_export_path(value: &str, cwd: &Path) -> ExportPathSpec {
+    let ends_with_separator = value.ends_with('/') || value.ends_with('\\');
+    let path = PathBuf::from(value);
+    if ends_with_separator {
+        return ExportPathSpec::Dir(path);
+    }
+
+    let resolved = resolve_relative_path(cwd, &path);
+    if resolved.is_dir() {
+        ExportPathSpec::Dir(path)
+    } else {
+        ExportPathSpec::File(path)
+    }
+}
+
+fn resolve_export_destination(
+    rollout_path: &Path,
+    defaults: &ExportDefaults,
+    format_override: Option<ChatExportFormat>,
+    overrides: &ExportOverrides,
+) -> Result<ExportDestination, String> {
+    let output_path = overrides
+        .output_path
+        .as_ref()
+        .map(|path| resolve_relative_path(&defaults.cwd, path));
+    let output_dir = overrides
+        .output_dir
+        .as_ref()
+        .map(|path| resolve_relative_path(&defaults.cwd, path))
+        .or_else(|| {
+            defaults
+                .export_dir
+                .as_ref()
+                .map(|path| resolve_relative_path(&defaults.cwd, path))
+        });
+
+    let format = format_override
+        .or_else(|| {
+            output_path
+                .as_ref()
+                .and_then(|path| format_from_extension(path))
+        })
+        .or(defaults.export_format)
+        .unwrap_or(ChatExportFormat::Markdown);
+
+    if let Some(mut output_path) = output_path {
+        if output_path.is_dir() {
+            return Err(format!(
+                "Export path is a directory: {}",
+                output_path.display()
+            ));
+        }
+        if output_path.extension().is_none() {
+            output_path.set_extension(format.extension());
+        }
+        return Ok(ExportDestination {
+            path: output_path,
+            format,
+        });
+    }
+
+    let default_dir = rollout_path.parent().unwrap_or_else(|| Path::new("."));
+    let output_dir = output_dir.unwrap_or_else(|| default_dir.to_path_buf());
+    if output_dir.is_file() {
+        return Err(format!(
+            "Export directory is a file: {}",
+            output_dir.display()
+        ));
+    }
+
+    let name = if let Some(name) = overrides.name.as_deref() {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err("Export name cannot be empty.".to_string());
+        }
+        trimmed.to_string()
+    } else if let Some(name) = defaults.export_name.as_deref() {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err("Default export name cannot be empty.".to_string());
+        }
+        trimmed.to_string()
+    } else {
+        default_export_name(rollout_path)?
+    };
+
+    if name.contains('/') || name.contains('\\') {
+        return Err("Export name must not contain path separators.".to_string());
+    }
+
+    let mut path = output_dir.join(name);
+    path.set_extension(format.extension());
+    Ok(ExportDestination { path, format })
+}
+
+fn default_export_name(rollout_path: &Path) -> Result<String, String> {
+    let Some(stem) = rollout_path.file_stem().and_then(|stem| stem.to_str()) else {
+        return Err("Failed to derive export name from rollout path.".to_string());
+    };
+    if stem.is_empty() {
+        return Err("Failed to derive export name from rollout path.".to_string());
+    }
+    Ok(stem.to_string())
+}
+
+fn format_from_extension(path: &Path) -> Option<ChatExportFormat> {
+    let ext = path.extension()?.to_string_lossy().to_ascii_lowercase();
+    match ext.as_str() {
+        "md" | "markdown" => Some(ChatExportFormat::Markdown),
+        "json" => Some(ChatExportFormat::Json),
+        _ => None,
+    }
+}
+
+fn resolve_relative_path(base: &Path, value: &Path) -> PathBuf {
+    if value.is_absolute() {
+        value.to_path_buf()
+    } else {
+        base.join(value)
+    }
 }
 
 fn diff_view_override(input: Option<&str>, default_view: DiffView) -> Result<DiffView, String> {

@@ -905,6 +905,17 @@ keep_queue_on_branch = false
 # Valid values: "line", "inline", "side-by-side"
 diff_view = "line"
 
+# Default export directory used by /export.
+# Relative paths resolve against the current working directory.
+export_dir = "exports"
+
+# Default base filename (no extension) for /export.
+export_name = "codex-chat"
+
+# Default export format for /export when no format flag is provided.
+# Valid values: "markdown", "json"
+export_format = "markdown"
+
 # TUI2 mouse scrolling (wheel + trackpad)
 #
 # Terminals emit different numbers of raw scroll events per physical wheel notch (commonly 1, 3,
@@ -1086,6 +1097,9 @@ Valid values:
 | `tui.status_line`                                | array<string>                                                     | Ordered status line items (default: ["model", "context", "cwd", "git-branch"]).                                                  |
 | `tui.keep_queue_on_branch`                       | boolean                                                           | Keep queued messages when branching from Esc backtrack (default: false).                                                        |
 | `tui.diff_view`                                  | `line` \| `inline` \| `side-by-side`                              | Default diff format for the TUI (default: `line`).                                                                              |
+| `tui.export_dir`                                 | string                                                            | Default export directory for `/export` (default: rollout directory).                                                            |
+| `tui.export_name`                                | string                                                            | Default export base filename (no extension) for `/export` (default: rollout name).                                              |
+| `tui.export_format`                              | `markdown` \| `json`                                              | Default export format for `/export` (default: `markdown`).                                                                      |
 | `tui.scroll_events_per_tick`                     | number                                                            | Raw events per wheel notch (normalization input; default: terminal-specific; fallback: 3).                                      |
 | `tui.scroll_wheel_lines`                         | number                                                            | Lines per physical wheel notch in wheel-like mode (default: 3).                                                                 |
 | `tui.scroll_trackpad_lines`                      | number                                                            | Baseline trackpad sensitivity in trackpad-like mode (default: 1).                                                               |

@@ -21,6 +21,7 @@ Control Codex’s behavior during an interactive session with slash commands.
 | `/new`          | start a new chat during a conversation                                     |
 | `/resume`       | resume an old chat                                                         |
 | `/rename`       | rename the current chat                                                    |
+| `/export`       | export the current chat transcript                                         |
 | `/init`         | create an AGENTS.md file with instructions for Codex                       |
 | `/compact`      | summarize conversation to prevent hitting the context limit                |
 | `/diff`         | show git diff (including untracked files)                                  |
@@ -38,4 +39,11 @@ Control Codex’s behavior during an interactive session with slash commands.
 
 Notes:
 - `/diff` uses the configured diff view (`tui.diff_view`, or `--diff-view` on launch). Override per command with `--line`, `--inline`, `--side-by-side`, or `--view line|inline|side-by-side`.
+- `/export` supports POSIX-style arguments:
+  - `/export` opens the picker; defaults come from `tui.export_dir`, `tui.export_name`, and `tui.export_format`.
+  - `/export -C DIR` writes to a directory (filename comes from the rollout name or `tui.export_name`).
+  - `/export -o PATH` writes to an explicit file path.
+  - `/export --name NAME` sets the base filename (no extension).
+  - `/export --format md|json` (or `--md`, `--json`) chooses the format.
+  - `/export PATH` treats `PATH` as a directory if it ends with `/` or already exists; otherwise it is a file path.
 - Plan/ask/normal modes persist until you switch again.

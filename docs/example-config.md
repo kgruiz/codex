@@ -153,6 +153,16 @@ keep_queue_on_branch = false
 # Options: "line", "inline", or "side-by-side"
 diff_view = "line"
 
+# Default export directory for /export (relative to cwd). Optional.
+# export_dir = "exports"
+
+# Default export base filename (no extension). Optional.
+# export_name = "codex-chat"
+
+# Default export format for /export when no format flag is provided.
+# Options: "markdown" or "json"
+# export_format = "markdown"
+
 ################################################################################
 # UI Behavior (top-level)
 ################################################################################

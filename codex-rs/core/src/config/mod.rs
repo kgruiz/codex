@@ -1,6 +1,7 @@
 use crate::auth::AuthCredentialsStoreMode;
 use crate::config::types::DEFAULT_OTEL_ENVIRONMENT;
 use crate::config::types::DiffView;
+use crate::config::types::ExportFormat;
 use crate::config::types::History;
 use crate::config::types::McpServerConfig;
 use crate::config::types::Notice;
@@ -195,6 +196,15 @@ pub struct Config {
 
     /// Default diff format shown in the TUI.
     pub diff_view: DiffView,
+
+    /// Default export directory for `/export`.
+    pub tui_export_dir: Option<PathBuf>,
+
+    /// Default base name for `/export` outputs (no extension).
+    pub tui_export_name: Option<String>,
+
+    /// Default export format for `/export`.
+    pub tui_export_format: Option<ExportFormat>,
 
     /// Keybinding overrides loaded from `[keybindings]` in `config.toml`.
     pub keybindings: HashMap<String, Vec<String>>,
@@ -1427,6 +1437,9 @@ impl Config {
                 .map(|t| t.keep_queue_on_branch)
                 .unwrap_or(false),
             diff_view: cfg.tui.as_ref().map(|t| t.diff_view).unwrap_or_default(),
+            tui_export_dir: cfg.tui.as_ref().and_then(|t| t.export_dir.clone()),
+            tui_export_name: cfg.tui.as_ref().and_then(|t| t.export_name.clone()),
+            tui_export_format: cfg.tui.as_ref().and_then(|t| t.export_format),
             keybindings: cfg
                 .keybindings
                 .into_iter()
@@ -1643,6 +1656,9 @@ persistence = "none"
                 status_line: None,
                 keep_queue_on_branch: false,
                 diff_view: DiffView::Line,
+                export_dir: None,
+                export_name: None,
+                export_format: None,
                 scroll_events_per_tick: None,
                 scroll_wheel_lines: None,
                 scroll_trackpad_lines: None,
@@ -3252,6 +3268,9 @@ model_verbosity = "high"
                 status_line_items: Config::default_status_line_items(),
                 keep_queue_on_branch: false,
                 diff_view: DiffView::Line,
+                tui_export_dir: None,
+                tui_export_name: None,
+                tui_export_format: None,
                 keybindings: HashMap::new(),
                 tui_scroll_events_per_tick: None,
                 tui_scroll_wheel_lines: None,
@@ -3339,6 +3358,9 @@ model_verbosity = "high"
             status_line_items: Config::default_status_line_items(),
             keep_queue_on_branch: false,
             diff_view: DiffView::Line,
+            tui_export_dir: None,
+            tui_export_name: None,
+            tui_export_format: None,
             keybindings: HashMap::new(),
             tui_scroll_events_per_tick: None,
             tui_scroll_wheel_lines: None,
@@ -3441,6 +3463,9 @@ model_verbosity = "high"
             status_line_items: Config::default_status_line_items(),
             keep_queue_on_branch: false,
             diff_view: DiffView::Line,
+            tui_export_dir: None,
+            tui_export_name: None,
+            tui_export_format: None,
             keybindings: HashMap::new(),
             tui_scroll_events_per_tick: None,
             tui_scroll_wheel_lines: None,
@@ -3529,6 +3554,9 @@ model_verbosity = "high"
             status_line_items: Config::default_status_line_items(),
             keep_queue_on_branch: false,
             diff_view: DiffView::Line,
+            tui_export_dir: None,
+            tui_export_name: None,
+            tui_export_format: None,
             keybindings: HashMap::new(),
             tui_scroll_events_per_tick: None,
             tui_scroll_wheel_lines: None,
