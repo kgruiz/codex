@@ -787,6 +787,10 @@ impl App {
             AppEvent::BacktrackActionSelected { action } => {
                 self.handle_backtrack_action_selected(action);
             }
+            AppEvent::OpenBacktrackResendThinkingPicker { preset } => {
+                self.chat_widget
+                    .open_backtrack_resend_thinking_picker(preset);
+            }
             AppEvent::ExitRequest => {
                 return Ok(false);
             }

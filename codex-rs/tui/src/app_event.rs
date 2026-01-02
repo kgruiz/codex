@@ -7,7 +7,7 @@ use codex_core::protocol::RateLimitSnapshot;
 use codex_file_search::FileMatch;
 use codex_protocol::openai_models::ModelPreset;
 
-use crate::app_backtrack::BacktrackAction;
+use crate::app_backtrack::BacktrackActionRequest;
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::RenameTarget;
 use crate::get_git_diff::GitDiffResult;
@@ -273,7 +273,12 @@ pub(crate) enum AppEvent {
 
     /// Choose how to apply an Esc backtrack edit.
     BacktrackActionSelected {
-        action: BacktrackAction,
+        action: BacktrackActionRequest,
+    },
+
+    /// Open the resend thinking picker for a backtrack retry.
+    OpenBacktrackResendThinkingPicker {
+        preset: ModelPreset,
     },
 
     /// Open the branch picker option from the review popup.

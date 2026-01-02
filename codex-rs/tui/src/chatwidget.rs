@@ -91,7 +91,8 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tracing::debug;
 
-use crate::app_backtrack::BacktrackAction;
+use crate::app_backtrack::BacktrackActionRequest;
+use crate::app_backtrack::ResendOverrides;
 use crate::app_event::AppEvent;
 use crate::app_event::ChatExportFormat;
 use crate::app_event::ExportOverrides;
@@ -3795,6 +3796,62 @@ impl ChatWidget {
         }
     }
 
+    pub(crate) fn submit_backtrack_message(
+        &mut self,
+        text: String,
+        overrides: Option<ResendOverrides>,
+    ) {
+        if text.is_empty() {
+            return;
+        }
+
+        let Some(overrides) = overrides else {
+            self.submit_user_message(UserMessage {
+                text,
+                image_paths: Vec::new(),
+            });
+            return;
+        };
+
+        let session = self.session_turn_context();
+        let restore_model = session.model.clone();
+        let restore_effort = session.reasoning_effort;
+        let apply_effort = Some(overrides.effort);
+        let effective_effort = match apply_effort {
+            Some(effort) => effort,
+            None => session.reasoning_effort,
+        };
+        self.pending_active_turn_context = Some(PendingTurnContext {
+            model: overrides.model.clone(),
+            reasoning_effort: effective_effort,
+            model_family: session.model_family.clone(),
+            mode: session.mode,
+        });
+
+        self.submit_op(Op::OverrideTurnContext {
+            cwd: None,
+            approval_policy: None,
+            sandbox_policy: None,
+            model: Some(overrides.model),
+            effort: apply_effort,
+            summary: None,
+            mode: None,
+        });
+        self.submit_user_message(UserMessage {
+            text,
+            image_paths: Vec::new(),
+        });
+        self.submit_op(Op::OverrideTurnContext {
+            cwd: None,
+            approval_policy: None,
+            sandbox_policy: None,
+            model: Some(restore_model),
+            effort: Some(restore_effort),
+            summary: None,
+            mode: None,
+        });
+    }
+
     fn submit_user_message(&mut self, user_message: UserMessage) {
         let UserMessage { text, image_paths } = user_message;
         if text.is_empty() && image_paths.is_empty() {
@@ -5582,7 +5639,7 @@ impl ChatWidget {
             description: Some("Keep this chat and add edit versions.".into()),
             actions: vec![Box::new(|tx| {
                 tx.send(AppEvent::BacktrackActionSelected {
-                    action: BacktrackAction::EditInPlace,
+                    action: BacktrackActionRequest::EditInPlace,
                 });
             })],
             dismiss_on_select: true,
@@ -5591,11 +5648,35 @@ impl ChatWidget {
         });
 
         items.push(SelectionItem {
+            name: "Retry same message".to_string(),
+            description: Some("Keep this chat and resend immediately.".into()),
+            actions: vec![Box::new(|tx| {
+                tx.send(AppEvent::BacktrackActionSelected {
+                    action: BacktrackActionRequest::RetrySame,
+                });
+            })],
+            dismiss_on_select: true,
+            ..Default::default()
+        });
+
+        items.push(SelectionItem {
+            name: "Resend with different model/thinking".to_string(),
+            description: Some("Choose a model and reasoning level, then resend.".into()),
+            actions: vec![Box::new(|tx| {
+                tx.send(AppEvent::BacktrackActionSelected {
+                    action: BacktrackActionRequest::ResendWithDifferentModel,
+                });
+            })],
+            dismiss_on_select: true,
+            ..Default::default()
+        });
+
+        items.push(SelectionItem {
             name: "Branch to new chat".to_string(),
             description: Some("Start a new chat from this message.".into()),
             actions: vec![Box::new(|tx| {
                 tx.send(AppEvent::BacktrackActionSelected {
-                    action: BacktrackAction::Branch,
+                    action: BacktrackActionRequest::Branch,
                 });
             })],
             dismiss_on_select: true,
@@ -5604,7 +5685,123 @@ impl ChatWidget {
 
         self.bottom_pane.show_selection_view(SelectionViewParams {
             title: Some("Edit previous message".into()),
-            subtitle: Some("Choose how to apply the edit.".into()),
+            subtitle: Some("Choose how to edit or resend.".into()),
+            footer_hint: Some(standard_popup_hint_line()),
+            items,
+            ..Default::default()
+        });
+    }
+
+    pub(crate) fn open_backtrack_resend_model_picker(&mut self) {
+        let current_model = self.model_family.get_model_slug().to_string();
+        let mut presets = match self.models_manager.try_list_models(&self.config) {
+            Ok(presets) => presets,
+            Err(_) => {
+                self.add_info_message(
+                    "Models are being updated; please try again in a moment.".to_string(),
+                    None,
+                );
+                return;
+            }
+        };
+        presets.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+
+        let items: Vec<SelectionItem> = presets
+            .into_iter()
+            .map(|preset| {
+                let description =
+                    (!preset.description.is_empty()).then_some(preset.description.clone());
+                let is_current = preset.model == current_model;
+                let preset_for_action = preset.clone();
+                let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+                    tx.send(AppEvent::OpenBacktrackResendThinkingPicker {
+                        preset: preset_for_action.clone(),
+                    });
+                })];
+                SelectionItem {
+                    name: preset.display_name,
+                    description,
+                    is_current,
+                    actions,
+                    dismiss_on_select: true,
+                    ..Default::default()
+                }
+            })
+            .collect();
+
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some("Select model for resend".to_string()),
+            subtitle: Some("Choose a model and reasoning level for this retry.".to_string()),
+            footer_hint: Some(standard_popup_hint_line()),
+            items,
+            ..Default::default()
+        });
+    }
+
+    pub(crate) fn open_backtrack_resend_thinking_picker(&mut self, preset: ModelPreset) {
+        let model_slug = preset.model.clone();
+        let default_effort = preset.default_reasoning_effort;
+        let has_alternative = preset
+            .supported_reasoning_efforts
+            .iter()
+            .any(|option| option.effort != default_effort);
+
+        if !has_alternative {
+            self.app_event_tx.send(AppEvent::BacktrackActionSelected {
+                action: BacktrackActionRequest::ResendWithOverrides(ResendOverrides {
+                    model: model_slug,
+                    effort: None,
+                }),
+            });
+            return;
+        }
+
+        let mut items: Vec<SelectionItem> = Vec::new();
+        let model_for_default = model_slug.clone();
+        let default_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+            tx.send(AppEvent::BacktrackActionSelected {
+                action: BacktrackActionRequest::ResendWithOverrides(ResendOverrides {
+                    model: model_for_default.clone(),
+                    effort: None,
+                }),
+            });
+        })];
+        items.push(SelectionItem {
+            name: format!("Default ({})", Self::reasoning_effort_label(default_effort)),
+            description: Some("Use the model's default reasoning level.".to_string()),
+            actions: default_actions,
+            dismiss_on_select: true,
+            ..Default::default()
+        });
+
+        for option in preset.supported_reasoning_efforts {
+            let effort = option.effort;
+            let mut label = Self::reasoning_effort_label(effort).to_string();
+            if effort == default_effort {
+                label.push_str(" (default)");
+            }
+            let description = (!option.description.is_empty()).then_some(option.description);
+            let model_for_action = model_slug.clone();
+            let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+                tx.send(AppEvent::BacktrackActionSelected {
+                    action: BacktrackActionRequest::ResendWithOverrides(ResendOverrides {
+                        model: model_for_action.clone(),
+                        effort: Some(effort),
+                    }),
+                });
+            })];
+            items.push(SelectionItem {
+                name: label,
+                description,
+                actions,
+                dismiss_on_select: true,
+                ..Default::default()
+            });
+        }
+
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some("Select thinking for resend".to_string()),
+            subtitle: Some(format!("Model: {model_slug}")),
             footer_hint: Some(standard_popup_hint_line()),
             items,
             ..Default::default()

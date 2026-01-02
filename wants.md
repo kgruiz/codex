@@ -68,7 +68,7 @@ Add new items below as you think of them.
 23. [x] Allow switching models while output is running and while typing a prompt
 24. [x] Allow slash commands while typing in the prompt area
 25. [ ] Make assistant output easier to copy (toggleable code blocks, no-indent/plain transcript)
-26. [ ] Add retry/resend options in edit/branch menu (retry same message, resend with different model/thinking)
+26. [x] Add retry/resend options in edit/branch menu (retry same message, resend with different model/thinking)
     - Add a "resend with same model/thinking" action that shows which model/thinking will be reused.
     - Add a "resend with different model/thinking" action that lets users pick overrides before reissuing.
     - Ensure resend reissues the same prompt without editing (no manual copy/paste).

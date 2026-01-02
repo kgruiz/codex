@@ -11,6 +11,7 @@ use crate::tui;
 use crate::tui::TuiEvent;
 use codex_core::protocol::ConversationPathResponseEvent;
 use codex_protocol::ConversationId;
+use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use color_eyre::eyre::Result;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -21,6 +22,21 @@ use crossterm::event::KeyModifiers;
 pub(crate) enum BacktrackAction {
     Branch,
     EditInPlace,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ResendOverrides {
+    pub(crate) model: String,
+    pub(crate) effort: Option<ReasoningEffortConfig>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum BacktrackActionRequest {
+    EditInPlace,
+    Branch,
+    RetrySame,
+    ResendWithDifferentModel,
+    ResendWithOverrides(ResendOverrides),
 }
 
 #[derive(Clone, Debug)]
@@ -36,6 +52,16 @@ pub(crate) struct PendingBacktrack {
     pub(crate) selection: BacktrackSelection,
     pub(crate) action: BacktrackAction,
     pub(crate) queue_snapshot: Option<QueueSnapshot>,
+    pub(crate) resend_overrides: Option<ResendOverrides>,
+    pub(crate) auto_submit: bool,
+}
+
+#[derive(Clone, Debug)]
+struct BacktrackInstall {
+    selection: BacktrackSelection,
+    queue_snapshot: Option<QueueSnapshot>,
+    resend_overrides: Option<ResendOverrides>,
+    auto_submit: bool,
 }
 
 /// Aggregates all backtrack-related state used by the App.
@@ -225,7 +251,20 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_backtrack_action_selected(&mut self, action: BacktrackAction) {
+    pub(crate) fn handle_backtrack_action_selected(&mut self, action: BacktrackActionRequest) {
+        let (action, resend_overrides, auto_submit) = match action {
+            BacktrackActionRequest::ResendWithDifferentModel => {
+                self.chat_widget.open_backtrack_resend_model_picker();
+                return;
+            }
+            BacktrackActionRequest::EditInPlace => (BacktrackAction::EditInPlace, None, false),
+            BacktrackActionRequest::Branch => (BacktrackAction::Branch, None, false),
+            BacktrackActionRequest::RetrySame => (BacktrackAction::EditInPlace, None, true),
+            BacktrackActionRequest::ResendWithOverrides(overrides) => {
+                (BacktrackAction::EditInPlace, Some(overrides), true)
+            }
+        };
+
         let Some(selection) = self.backtrack.pending_selection.take() else {
             return;
         };
@@ -247,7 +286,13 @@ impl App {
             );
         }
 
-        self.request_backtrack(selection, action, queue_snapshot);
+        self.request_backtrack(
+            selection,
+            action,
+            queue_snapshot,
+            resend_overrides,
+            auto_submit,
+        );
     }
 
     pub(crate) async fn switch_edit_version(
@@ -382,11 +427,15 @@ impl App {
         selection: BacktrackSelection,
         action: BacktrackAction,
         queue_snapshot: Option<QueueSnapshot>,
+        resend_overrides: Option<ResendOverrides>,
+        auto_submit: bool,
     ) {
         self.backtrack.pending = Some(PendingBacktrack {
             selection: selection.clone(),
             action,
             queue_snapshot,
+            resend_overrides,
+            auto_submit,
         });
         let ev = ConversationPathResponseEvent {
             conversation_id: selection.base_id,
@@ -635,14 +684,8 @@ impl App {
         {
             match pending.action {
                 BacktrackAction::Branch => {
-                    self.fork_and_switch_to_new_conversation(
-                        tui,
-                        ev,
-                        pending.selection.nth_user_message,
-                        pending.selection.prefill,
-                        pending.queue_snapshot,
-                    )
-                    .await;
+                    self.fork_and_switch_to_new_conversation(tui, ev, pending)
+                        .await;
                 }
                 BacktrackAction::EditInPlace => {
                     self.fork_and_switch_to_edit_version(tui, ev, pending).await;
@@ -658,23 +701,31 @@ impl App {
         &mut self,
         tui: &mut tui::Tui,
         ev: ConversationPathResponseEvent,
-        nth_user_message: usize,
-        prefill: String,
-        queue_snapshot: Option<QueueSnapshot>,
+        pending: PendingBacktrack,
     ) {
+        let PendingBacktrack {
+            selection,
+            queue_snapshot,
+            resend_overrides,
+            auto_submit,
+            ..
+        } = pending;
         let cfg = self.chat_widget.config_ref().clone();
         // Perform the fork via a thin wrapper for clarity/testability.
         let result = self
-            .perform_fork(ev.path.clone(), nth_user_message, cfg.clone())
+            .perform_fork(ev.path.clone(), selection.nth_user_message, cfg.clone())
             .await;
         match result {
             Ok(new_conv) => self.install_forked_conversation(
                 tui,
                 cfg,
                 new_conv,
-                nth_user_message,
-                &prefill,
-                queue_snapshot,
+                BacktrackInstall {
+                    selection,
+                    queue_snapshot,
+                    resend_overrides,
+                    auto_submit,
+                },
             ),
             Err(e) => tracing::error!("error forking conversation: {e:#}"),
         }
@@ -686,7 +737,13 @@ impl App {
         ev: ConversationPathResponseEvent,
         pending: PendingBacktrack,
     ) {
-        let selection = pending.selection;
+        let PendingBacktrack {
+            selection,
+            queue_snapshot,
+            resend_overrides,
+            auto_submit,
+            ..
+        } = pending;
         let cfg = self.chat_widget.config_ref().clone();
         let result = self
             .perform_fork(ev.path.clone(), selection.nth_user_message, cfg.clone())
@@ -703,9 +760,12 @@ impl App {
                     tui,
                     cfg,
                     new_conv,
-                    selection.nth_user_message,
-                    &selection.prefill,
-                    pending.queue_snapshot,
+                    BacktrackInstall {
+                        selection,
+                        queue_snapshot,
+                        resend_overrides,
+                        auto_submit,
+                    },
                 );
             }
             Err(e) => tracing::error!("error forking conversation: {e:#}"),
@@ -730,10 +790,19 @@ impl App {
         tui: &mut tui::Tui,
         cfg: codex_core::config::Config,
         new_conv: codex_core::NewConversation,
-        nth_user_message: usize,
-        prefill: &str,
-        queue_snapshot: Option<QueueSnapshot>,
+        install: BacktrackInstall,
     ) {
+        let BacktrackInstall {
+            selection,
+            queue_snapshot,
+            resend_overrides,
+            auto_submit,
+        } = install;
+        let BacktrackSelection {
+            nth_user_message,
+            prefill,
+            ..
+        } = selection;
         let conv = new_conv.conversation;
         let session_configured = new_conv.session_configured;
         let model_family = self.chat_widget.get_model_family();
@@ -759,7 +828,12 @@ impl App {
         self.render_transcript_once(tui);
 
         if !prefill.is_empty() {
-            self.chat_widget.set_composer_text(prefill.to_string());
+            if auto_submit {
+                self.chat_widget
+                    .submit_backtrack_message(prefill, resend_overrides);
+            } else {
+                self.chat_widget.set_composer_text(prefill);
+            }
         }
 
         if let Some(snapshot) = queue_snapshot {
