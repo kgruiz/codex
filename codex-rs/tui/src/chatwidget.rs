@@ -3431,6 +3431,9 @@ impl ChatWidget {
             SlashCommand::Status => {
                 self.add_status_output();
             }
+            SlashCommand::Ps => {
+                self.add_ps_output();
+            }
             SlashCommand::Queue => {
                 if self.queued_user_messages.is_empty() {
                     self.add_info_message("Queue is empty.".to_string(), None);
@@ -4327,6 +4330,15 @@ impl ChatWidget {
             Local::now(),
             model_slug,
         ));
+    }
+
+    pub(crate) fn add_ps_output(&mut self) {
+        let sessions = self
+            .unified_exec_sessions
+            .iter()
+            .map(|session| session.command_display.clone())
+            .collect();
+        self.add_to_history(history_cell::new_unified_exec_sessions_output(sessions));
     }
     fn stop_rate_limit_poller(&mut self) {
         if let Some(handle) = self.rate_limit_poller.take() {

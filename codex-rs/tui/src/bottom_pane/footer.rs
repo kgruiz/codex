@@ -113,28 +113,6 @@ fn footer_lines(props: FooterProps<'_>) -> Vec<Line<'static>> {
                 key_hint::plain(KeyCode::Char('?')).into(),
                 " for shortcuts".dim(),
             ]);
-            line.push_span(" · ".dim());
-            line.extend(vec![
-                KeyBinding::new(
-                    KeyCode::Left,
-                    KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
-                )
-                .into(),
-                " / ".into(),
-                KeyBinding::new(
-                    KeyCode::Right,
-                    KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
-                )
-                .into(),
-                " model".dim(),
-            ]);
-            line.push_span(" · ".dim());
-            line.extend(vec![
-                key_hint::plain(KeyCode::Tab).into(),
-                " / ".into(),
-                key_hint::shift(KeyCode::Tab).into(),
-                " thinking".dim(),
-            ]);
             vec![line]
         }
         FooterMode::ShortcutOverlay => shortcut_overlay_lines(ShortcutsState {
