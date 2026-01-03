@@ -150,6 +150,7 @@ use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::unified_exec::UnifiedExecSessionManager;
 use crate::user_instructions::DeveloperInstructions;
 use crate::user_instructions::UserInstructions;
+use crate::user_notification::ApprovalNotification;
 use crate::user_notification::UserNotification;
 use crate::util::backoff;
 use codex_async_utils::OrCancelExt;
@@ -720,7 +721,12 @@ impl Session {
             mcp_connection_manager: Arc::new(RwLock::new(McpConnectionManager::default())),
             mcp_startup_cancellation_token: CancellationToken::new(),
             unified_exec_manager: UnifiedExecSessionManager::default(),
-            notifier: UserNotifier::new(config.notify.clone()),
+            notifier: UserNotifier::new(
+                config.approval_command.clone(),
+                config.completion_command.clone(),
+                config.approval_notify,
+                config.completion_notify,
+            ),
             rollout: Mutex::new(Some(rollout_recorder)),
             user_shell: Arc::new(default_shell),
             show_raw_agent_reasoning: config.show_raw_agent_reasoning,
@@ -806,6 +812,7 @@ impl Session {
                 tx_event.clone(),
                 sess.services.mcp_startup_cancellation_token.clone(),
                 sandbox_state,
+                sess.notifier().clone(),
             )
             .await;
 
@@ -1208,6 +1215,9 @@ impl Session {
             warn!("Overwriting existing pending approval for sub_id: {event_id}");
         }
 
+        let approval_command = command.clone();
+        let approval_reason = reason.clone();
+        let approval_cwd = cwd.display().to_string();
         let parsed_cmd = parse_command(&command);
         let event = EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
             call_id,
@@ -1219,6 +1229,16 @@ impl Session {
             parsed_cmd,
         });
         self.send_event(turn_context, event).await;
+        self.notifier()
+            .notify(&UserNotification::ApprovalRequested {
+                approval: ApprovalNotification::Exec {
+                    thread_id: self.conversation_id.to_string(),
+                    turn_id: turn_context.sub_id.clone(),
+                    cwd: approval_cwd,
+                    command: approval_command,
+                    reason: approval_reason,
+                },
+            });
         rx_approve.await.unwrap_or_default()
     }
 
@@ -1248,6 +1268,14 @@ impl Session {
             warn!("Overwriting existing pending approval for sub_id: {event_id}");
         }
 
+        let mut files = changes
+            .keys()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        files.sort();
+        let approval_reason = reason.clone();
+        let approval_grant_root = grant_root.as_ref().map(|path| path.display().to_string());
+        let approval_cwd = turn_context.cwd.display().to_string();
         let event = EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
             call_id,
             turn_id: turn_context.sub_id.clone(),
@@ -1256,6 +1284,17 @@ impl Session {
             grant_root,
         });
         self.send_event(turn_context, event).await;
+        self.notifier()
+            .notify(&UserNotification::ApprovalRequested {
+                approval: ApprovalNotification::ApplyPatch {
+                    thread_id: self.conversation_id.to_string(),
+                    turn_id: turn_context.sub_id.clone(),
+                    cwd: approval_cwd,
+                    files,
+                    reason: approval_reason,
+                    grant_root: approval_grant_root,
+                },
+            });
         rx_approve
     }
 
@@ -3307,7 +3346,7 @@ mod tests {
             mcp_connection_manager: Arc::new(RwLock::new(McpConnectionManager::default())),
             mcp_startup_cancellation_token: CancellationToken::new(),
             unified_exec_manager: UnifiedExecSessionManager::default(),
-            notifier: UserNotifier::new(None),
+            notifier: UserNotifier::new(None, None, false, false),
             rollout: Mutex::new(None),
             user_shell: Arc::new(default_user_shell()),
             show_raw_agent_reasoning: config.show_raw_agent_reasoning,
@@ -3394,7 +3433,7 @@ mod tests {
             mcp_connection_manager: Arc::new(RwLock::new(McpConnectionManager::default())),
             mcp_startup_cancellation_token: CancellationToken::new(),
             unified_exec_manager: UnifiedExecSessionManager::default(),
-            notifier: UserNotifier::new(None),
+            notifier: UserNotifier::new(None, None, false, false),
             rollout: Mutex::new(None),
             user_shell: Arc::new(default_user_shell()),
             show_raw_agent_reasoning: config.show_raw_agent_reasoning,

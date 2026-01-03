@@ -2,6 +2,8 @@
 
 use std::os::unix::fs::PermissionsExt;
 
+use codex_core::config::Constrained;
+use codex_core::protocol::AskForApproval;
 use codex_core::protocol::EventMsg;
 use codex_core::protocol::Op;
 use codex_protocol::user_input::UserInput;
@@ -18,6 +20,8 @@ use tempfile::TempDir;
 
 use responses::ev_assistant_message;
 use responses::ev_completed;
+use responses::ev_response_created;
+use responses::ev_shell_command_call;
 use responses::sse;
 use responses::start_mock_server;
 use std::time::Duration;
@@ -51,7 +55,7 @@ echo -n "${@: -1}" > $(dirname "${0}")/notify.txt"#,
     let notify_script_str = notify_script.to_str().unwrap().to_string();
 
     let TestCodex { codex, .. } = test_codex()
-        .with_config(move |cfg| cfg.notify = Some(vec![notify_script_str]))
+        .with_config(move |cfg| cfg.completion_command = Some(vec![notify_script_str]))
         .build(&server)
         .await?;
 
@@ -73,6 +77,86 @@ echo -n "${@: -1}" > $(dirname "${0}")/notify.txt"#,
     assert_eq!(payload["type"], json!("agent-turn-complete"));
     assert_eq!(payload["input-messages"], json!(["hello world"]));
     assert_eq!(payload["last-assistant-message"], json!("Done"));
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "flaky on ubuntu-24.04-arm - aarch64-unknown-linux-gnu"]
+async fn approval_command_notifies() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+
+    let sse1 = sse(vec![
+        ev_response_created("r1"),
+        ev_shell_command_call("call-1", "touch approval-notify.txt"),
+        ev_completed("r1"),
+    ]);
+
+    responses::mount_sse_once(&server, sse1).await;
+
+    let notify_dir = TempDir::new()?;
+    let notify_script = notify_dir.path().join("notify.sh");
+    std::fs::write(
+        &notify_script,
+        r#"#!/bin/bash
+set -e
+echo -n "${@: -1}" > $(dirname "${0}")/notify.txt"#,
+    )?;
+    std::fs::set_permissions(&notify_script, std::fs::Permissions::from_mode(0o755))?;
+
+    let notify_file = notify_dir.path().join("notify.txt");
+    let notify_script_str = notify_script.to_str().unwrap().to_string();
+
+    let TestCodex {
+        codex,
+        session_configured,
+        ..
+    } = test_codex()
+        .with_config(move |cfg| {
+            cfg.approval_command = Some(vec![notify_script_str]);
+            cfg.approval_policy = Constrained::allow_any(AskForApproval::UnlessTrusted);
+        })
+        .build(&server)
+        .await?;
+
+    codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "run a command".into(),
+            }],
+        })
+        .await?;
+
+    let event = wait_for_event(&codex, |event| {
+        matches!(
+            event,
+            EventMsg::ExecApprovalRequest(_) | EventMsg::TaskComplete(_)
+        )
+    })
+    .await;
+    let approval = match event {
+        EventMsg::ExecApprovalRequest(approval) => approval,
+        EventMsg::TaskComplete(_) => {
+            panic!("expected approval request before completion")
+        }
+        other => panic!("unexpected event: {other:?}"),
+    };
+
+    fs_wait::wait_for_path_exists(&notify_file, Duration::from_secs(5)).await?;
+    let notify_payload_raw = tokio::fs::read_to_string(&notify_file).await?;
+    let payload: Value = serde_json::from_str(&notify_payload_raw)?;
+
+    let expected = json!({
+        "type": "approval-requested",
+        "approval-type": "exec",
+        "thread-id": session_configured.session_id.to_string(),
+        "turn-id": approval.turn_id,
+        "cwd": approval.cwd.display().to_string(),
+        "command": approval.command,
+    });
+    assert_eq!(payload, expected);
 
     Ok(())
 }

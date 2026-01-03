@@ -179,9 +179,13 @@ disable_paste_burst = false
 # Track Windows onboarding acknowledgement (Windows only). Default: false
 windows_wsl_setup_acknowledged = false
 
-# External notifier program (argv array). When unset: disabled.
-# Example: notify = ["notify-send", "Codex"]
-# notify = []
+# External notifier programs (argv arrays). When unset: disabled.
+# approval_command = ["notify-send", "Codex approval"]
+# completion_command = ["notify-send", "Codex complete"]
+
+# Built-in cross-platform notifications. Default: false
+# approval_notify = true
+# completion_notify = true
 
 ################################################################################
 # Keybindings (TUI)

@@ -46,7 +46,12 @@ Use `codex mcp` to add/list/get/remove MCP server launchers defined in `config.t
 
 ### Notifications
 
-You can enable notifications by configuring a script that is run whenever the agent finishes a turn. The [notify documentation](../docs/config.md#notify) includes a detailed example that explains how to get desktop notifications via [terminal-notifier](https://github.com/julienXX/terminal-notifier) on macOS. When Codex detects that it is running under WSL 2 inside Windows Terminal (`WT_SESSION` is set), the TUI automatically falls back to native Windows toast notifications so approval prompts and completed turns surface even though Windows Terminal does not implement OSC 9.
+Codex can notify you in two ways:
+
+- **External commands**: configure `approval_command` and/or `completion_command` to run a script with a JSON payload.
+- **Built-in notifier**: set `approval_notify` and/or `completion_notify` to enable system notifications without extra setup.
+
+See the configuration guide for payload shapes and examples. When Codex detects that it is running under WSL 2 inside Windows Terminal (`WT_SESSION` is set), the TUI automatically falls back to native Windows toast notifications so approval prompts and completed turns surface even though Windows Terminal does not implement OSC 9.
 
 ### `codex exec` to run Codex programmatically/non-interactively
 

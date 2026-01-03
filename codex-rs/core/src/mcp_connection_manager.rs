@@ -64,6 +64,9 @@ use tracing::warn;
 use crate::codex::INITIAL_SUBMIT_ID;
 use crate::config::types::McpServerConfig;
 use crate::config::types::McpServerTransportConfig;
+use crate::user_notification::ApprovalNotification;
+use crate::user_notification::UserNotification;
+use crate::user_notification::UserNotifier;
 
 /// Delimiter used to separate the server name from the tool name in a fully
 /// qualified tool name.
@@ -144,18 +147,31 @@ impl ElicitationRequestManager {
             .map_err(|e| anyhow!("failed to send elicitation response: {e:?}"))
     }
 
-    fn make_sender(&self, server_name: String, tx_event: Sender<Event>) -> SendElicitation {
+    fn make_sender(
+        &self,
+        server_name: String,
+        tx_event: Sender<Event>,
+        notifier: UserNotifier,
+    ) -> SendElicitation {
         let elicitation_requests = self.requests.clone();
         Box::new(move |id, elicitation| {
             let elicitation_requests = elicitation_requests.clone();
             let tx_event = tx_event.clone();
             let server_name = server_name.clone();
+            let notifier = notifier.clone();
             async move {
                 let (tx, rx) = oneshot::channel();
                 {
                     let mut lock = elicitation_requests.lock().await;
                     lock.insert((server_name.clone(), id.clone()), tx);
                 }
+                notifier.notify(&UserNotification::ApprovalRequested {
+                    approval: ApprovalNotification::McpElicitation {
+                        server_name: server_name.clone(),
+                        request_id: format_request_id(&id),
+                        message: elicitation.message.clone(),
+                    },
+                });
                 let _ = tx_event
                     .send(Event {
                         id: "mcp_elicitation_request".to_string(),
@@ -171,6 +187,13 @@ impl ElicitationRequestManager {
             }
             .boxed()
         })
+    }
+}
+
+fn format_request_id(id: &RequestId) -> String {
+    match id {
+        RequestId::String(value) => value.clone(),
+        RequestId::Integer(value) => value.to_string(),
     }
 }
 
@@ -214,6 +237,7 @@ impl AsyncManagedClient {
         cancel_token: CancellationToken,
         tx_event: Sender<Event>,
         elicitation_requests: ElicitationRequestManager,
+        notifier: UserNotifier,
     ) -> Self {
         let tool_filter = ToolFilter::from_config(&config);
         let fut = async move {
@@ -231,6 +255,7 @@ impl AsyncManagedClient {
                 tool_filter,
                 tx_event,
                 elicitation_requests,
+                notifier,
             )
             .or_cancel(&cancel_token)
             .await
@@ -276,6 +301,7 @@ pub(crate) struct McpConnectionManager {
 }
 
 impl McpConnectionManager {
+    #[allow(clippy::too_many_arguments)]
     pub async fn initialize(
         &mut self,
         mcp_servers: HashMap<String, McpServerConfig>,
@@ -284,6 +310,7 @@ impl McpConnectionManager {
         tx_event: Sender<Event>,
         cancel_token: CancellationToken,
         initial_sandbox_state: SandboxState,
+        notifier: UserNotifier,
     ) {
         if cancel_token.is_cancelled() {
             return;
@@ -308,6 +335,7 @@ impl McpConnectionManager {
                 cancel_token.clone(),
                 tx_event.clone(),
                 elicitation_requests.clone(),
+                notifier.clone(),
             );
             clients.insert(server_name.clone(), async_managed_client.clone());
             let tx_event = tx_event.clone();
@@ -756,6 +784,7 @@ impl From<anyhow::Error> for StartupOutcomeError {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn start_server_task(
     server_name: String,
     client: Arc<RmcpClient>,
@@ -764,6 +793,7 @@ async fn start_server_task(
     tool_filter: ToolFilter,
     tx_event: Sender<Event>,
     elicitation_requests: ElicitationRequestManager,
+    notifier: UserNotifier,
 ) -> Result<ManagedClient, StartupOutcomeError> {
     let params = mcp_types::InitializeRequestParams {
         capabilities: ClientCapabilities {
@@ -786,7 +816,8 @@ async fn start_server_task(
         protocol_version: mcp_types::MCP_SCHEMA_VERSION.to_owned(),
     };
 
-    let send_elicitation = elicitation_requests.make_sender(server_name.clone(), tx_event);
+    let send_elicitation =
+        elicitation_requests.make_sender(server_name.clone(), tx_event, notifier);
 
     let initialize_result = client
         .initialize(params, startup_timeout, send_elicitation)

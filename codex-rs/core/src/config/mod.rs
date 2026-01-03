@@ -156,27 +156,21 @@ pub struct Config {
     /// Compact prompt override.
     pub compact_prompt: Option<String>,
 
-    /// Optional external notifier command. When set, Codex will spawn this
-    /// program after each completed *turn* (i.e. when the agent finishes
-    /// processing a user submission). The value must be the full command
-    /// broken into argv tokens **without** the trailing JSON argument - Codex
-    /// appends one extra argument containing a JSON payload describing the
-    /// event.
-    ///
-    /// Example `~/.codex/config.toml` snippet:
-    ///
-    /// ```toml
-    /// notify = ["notify-send", "Codex"]
-    /// ```
-    ///
-    /// which will be invoked as:
-    ///
-    /// ```shell
-    /// notify-send Codex '{"type":"agent-turn-complete","turn-id":"12345"}'
-    /// ```
-    ///
-    /// If unset the feature is disabled.
-    pub notify: Option<Vec<String>>,
+    /// Optional command to run when approval is needed. The command is provided
+    /// as argv tokens **without** the trailing JSON argument; Codex appends one
+    /// extra argument containing a JSON payload describing the event.
+    pub approval_command: Option<Vec<String>>,
+
+    /// Optional command to run when a turn completes. The command is provided
+    /// as argv tokens **without** the trailing JSON argument; Codex appends one
+    /// extra argument containing a JSON payload describing the event.
+    pub completion_command: Option<Vec<String>>,
+
+    /// Enable built-in approval notifications.
+    pub approval_notify: bool,
+
+    /// Enable built-in turn completion notifications.
+    pub completion_notify: bool,
 
     /// TUI notifications preference. When set, the TUI will send OSC 9 notifications on approvals
     /// and turn completions when not focused.
@@ -719,9 +713,19 @@ pub struct ConfigToml {
     /// Sandbox configuration to apply if `sandbox` is `WorkspaceWrite`.
     pub sandbox_workspace_write: Option<SandboxWorkspaceWrite>,
 
-    /// Optional external command to spawn for end-user notifications.
+    /// Optional command to run when approval is needed.
     #[serde(default)]
-    pub notify: Option<Vec<String>>,
+    pub approval_command: Option<Vec<String>>,
+
+    /// Optional command to run when a turn completes.
+    #[serde(default)]
+    pub completion_command: Option<Vec<String>>,
+
+    /// Enable built-in approval notifications.
+    pub approval_notify: Option<bool>,
+
+    /// Enable built-in turn completion notifications.
+    pub completion_notify: Option<bool>,
 
     /// System instructions.
     pub instructions: Option<String>,
@@ -1354,7 +1358,10 @@ impl Config {
             did_user_set_custom_approval_policy_or_sandbox_mode,
             forced_auto_mode_downgraded_on_windows,
             shell_environment_policy,
-            notify: cfg.notify,
+            approval_command: cfg.approval_command,
+            completion_command: cfg.completion_command,
+            approval_notify: cfg.approval_notify.unwrap_or(false),
+            completion_notify: cfg.completion_notify.unwrap_or(false),
             user_instructions,
             base_instructions,
             developer_instructions,
@@ -3225,7 +3232,10 @@ model_verbosity = "high"
                 forced_auto_mode_downgraded_on_windows: false,
                 shell_environment_policy: ShellEnvironmentPolicy::default(),
                 user_instructions: None,
-                notify: None,
+                approval_command: None,
+                completion_command: None,
+                approval_notify: false,
+                completion_notify: false,
                 cwd: fixture.cwd(),
                 cli_auth_credentials_store_mode: Default::default(),
                 mcp_servers: HashMap::new(),
@@ -3315,7 +3325,10 @@ model_verbosity = "high"
             forced_auto_mode_downgraded_on_windows: false,
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             user_instructions: None,
-            notify: None,
+            approval_command: None,
+            completion_command: None,
+            approval_notify: false,
+            completion_notify: false,
             cwd: fixture.cwd(),
             cli_auth_credentials_store_mode: Default::default(),
             mcp_servers: HashMap::new(),
@@ -3420,7 +3433,10 @@ model_verbosity = "high"
             forced_auto_mode_downgraded_on_windows: false,
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             user_instructions: None,
-            notify: None,
+            approval_command: None,
+            completion_command: None,
+            approval_notify: false,
+            completion_notify: false,
             cwd: fixture.cwd(),
             cli_auth_credentials_store_mode: Default::default(),
             mcp_servers: HashMap::new(),
@@ -3511,7 +3527,10 @@ model_verbosity = "high"
             forced_auto_mode_downgraded_on_windows: false,
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             user_instructions: None,
-            notify: None,
+            approval_command: None,
+            completion_command: None,
+            approval_notify: false,
+            completion_notify: false,
             cwd: fixture.cwd(),
             cli_auth_credentials_store_mode: Default::default(),
             mcp_servers: HashMap::new(),
@@ -3887,6 +3906,7 @@ trust_level = "untrusted"
 mod notifications_tests {
     use crate::config::types::Notifications;
     use assert_matches::assert_matches;
+    use pretty_assertions::assert_eq;
     use serde::Deserialize;
 
     #[derive(Deserialize, Debug, PartialEq)]
@@ -3921,5 +3941,39 @@ mod notifications_tests {
             parsed.tui.notifications,
             Notifications::Custom(ref v) if v == &vec!["foo".to_string()]
         );
+    }
+
+    #[test]
+    fn test_notification_commands_and_builtins() {
+        let toml = r#"
+            approval_command = ["notify-send", "Codex approval"]
+            completion_command = ["notify-send", "Codex complete"]
+            approval_notify = true
+            completion_notify = false
+        "#;
+        #[derive(Deserialize, Debug, PartialEq)]
+        struct RootToml {
+            approval_command: Option<Vec<String>>,
+            completion_command: Option<Vec<String>>,
+            approval_notify: Option<bool>,
+            completion_notify: Option<bool>,
+        }
+        let parsed: RootToml = toml::from_str(toml).expect("deserialize notify fields");
+        assert_eq!(
+            parsed.approval_command,
+            Some(vec![
+                "notify-send".to_string(),
+                "Codex approval".to_string()
+            ])
+        );
+        assert_eq!(
+            parsed.completion_command,
+            Some(vec![
+                "notify-send".to_string(),
+                "Codex complete".to_string()
+            ])
+        );
+        assert_eq!(parsed.approval_notify, Some(true));
+        assert_eq!(parsed.completion_notify, Some(false));
     }
 }
