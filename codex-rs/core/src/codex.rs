@@ -16,6 +16,8 @@ use crate::compact;
 use crate::compact::run_inline_auto_compact_task;
 use crate::compact::should_use_remote_compact_task;
 use crate::compact_remote::run_inline_remote_auto_compact_task;
+#[cfg(test)]
+use crate::config::types::NotificationFocusConfig;
 use crate::exec_policy::ExecPolicyManager;
 use crate::features::Feature;
 use crate::features::Features;
@@ -726,6 +728,7 @@ impl Session {
                 config.completion_command.clone(),
                 config.approval_notify,
                 config.completion_notify,
+                config.notification_focus.clone(),
             ),
             rollout: Mutex::new(Some(rollout_recorder)),
             user_shell: Arc::new(default_shell),
@@ -1782,6 +1785,9 @@ async fn submission_loop(sess: Arc<Session>, config: Arc<Config>, rx_sub: Receiv
                     },
                 )
                 .await;
+            }
+            Op::UpdateNotificationFocusFilter { enabled } => {
+                sess.notifier().set_focus_filter_override(enabled);
             }
             Op::UserInput { .. } | Op::UserTurn { .. } => {
                 handlers::user_input_or_turn(&sess, sub.id.clone(), sub.op, &mut previous_context)
@@ -3346,7 +3352,13 @@ mod tests {
             mcp_connection_manager: Arc::new(RwLock::new(McpConnectionManager::default())),
             mcp_startup_cancellation_token: CancellationToken::new(),
             unified_exec_manager: UnifiedExecSessionManager::default(),
-            notifier: UserNotifier::new(None, None, false, false),
+            notifier: UserNotifier::new(
+                None,
+                None,
+                false,
+                false,
+                NotificationFocusConfig::default(),
+            ),
             rollout: Mutex::new(None),
             user_shell: Arc::new(default_user_shell()),
             show_raw_agent_reasoning: config.show_raw_agent_reasoning,
@@ -3433,7 +3445,13 @@ mod tests {
             mcp_connection_manager: Arc::new(RwLock::new(McpConnectionManager::default())),
             mcp_startup_cancellation_token: CancellationToken::new(),
             unified_exec_manager: UnifiedExecSessionManager::default(),
-            notifier: UserNotifier::new(None, None, false, false),
+            notifier: UserNotifier::new(
+                None,
+                None,
+                false,
+                false,
+                NotificationFocusConfig::default(),
+            ),
             rollout: Mutex::new(None),
             user_shell: Arc::new(default_user_shell()),
             show_raw_agent_reasoning: config.show_raw_agent_reasoning,

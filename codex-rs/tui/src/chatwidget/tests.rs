@@ -475,6 +475,7 @@ fn make_chatwidget_manual_with_config(
         queued_auto_send_pending: false,
         suppress_session_configured_redraw: false,
         pending_notification: None,
+        notification_focus_override: None,
         is_review_mode: false,
         session_mode: SessionMode::Normal,
         pre_review_token_info: None,

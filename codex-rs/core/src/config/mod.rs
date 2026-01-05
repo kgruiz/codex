@@ -5,6 +5,7 @@ use crate::config::types::ExportFormat;
 use crate::config::types::History;
 use crate::config::types::McpServerConfig;
 use crate::config::types::Notice;
+use crate::config::types::NotificationFocusConfig;
 use crate::config::types::Notifications;
 use crate::config::types::OneOrManyStrings;
 use crate::config::types::OtelConfig;
@@ -171,6 +172,9 @@ pub struct Config {
 
     /// Enable built-in turn completion notifications.
     pub completion_notify: bool,
+
+    /// Optional focus-based filter for built-in/external notifications.
+    pub notification_focus: NotificationFocusConfig,
 
     /// TUI notifications preference. When set, the TUI will send OSC 9 notifications on approvals
     /// and turn completions when not focused.
@@ -726,6 +730,10 @@ pub struct ConfigToml {
 
     /// Enable built-in turn completion notifications.
     pub completion_notify: Option<bool>,
+
+    /// Focused-app filter for notifications.
+    #[serde(default)]
+    pub notification_focus: NotificationFocusConfig,
 
     /// System instructions.
     pub instructions: Option<String>,
@@ -1330,6 +1338,22 @@ impl Config {
             .unwrap_or_else(default_review_model);
 
         let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(true);
+        let normalize_focus_list = |list: Vec<String>| {
+            list.into_iter()
+                .filter_map(|entry| {
+                    let trimmed = entry.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                })
+                .collect::<Vec<String>>()
+        };
+        let notification_focus = NotificationFocusConfig {
+            whitelist: normalize_focus_list(cfg.notification_focus.whitelist),
+            blacklist: normalize_focus_list(cfg.notification_focus.blacklist),
+        };
 
         // Ensure that every field of ConfigRequirements is applied to the final
         // Config.
@@ -1362,6 +1386,7 @@ impl Config {
             completion_command: cfg.completion_command,
             approval_notify: cfg.approval_notify.unwrap_or(false),
             completion_notify: cfg.completion_notify.unwrap_or(false),
+            notification_focus,
             user_instructions,
             base_instructions,
             developer_instructions,
@@ -3236,6 +3261,7 @@ model_verbosity = "high"
                 completion_command: None,
                 approval_notify: false,
                 completion_notify: false,
+                notification_focus: NotificationFocusConfig::default(),
                 cwd: fixture.cwd(),
                 cli_auth_credentials_store_mode: Default::default(),
                 mcp_servers: HashMap::new(),
@@ -3329,6 +3355,7 @@ model_verbosity = "high"
             completion_command: None,
             approval_notify: false,
             completion_notify: false,
+            notification_focus: NotificationFocusConfig::default(),
             cwd: fixture.cwd(),
             cli_auth_credentials_store_mode: Default::default(),
             mcp_servers: HashMap::new(),
@@ -3437,6 +3464,7 @@ model_verbosity = "high"
             completion_command: None,
             approval_notify: false,
             completion_notify: false,
+            notification_focus: NotificationFocusConfig::default(),
             cwd: fixture.cwd(),
             cli_auth_credentials_store_mode: Default::default(),
             mcp_servers: HashMap::new(),
@@ -3531,6 +3559,7 @@ model_verbosity = "high"
             completion_command: None,
             approval_notify: false,
             completion_notify: false,
+            notification_focus: NotificationFocusConfig::default(),
             cwd: fixture.cwd(),
             cli_auth_credentials_store_mode: Default::default(),
             mcp_servers: HashMap::new(),
@@ -3904,6 +3933,7 @@ trust_level = "untrusted"
 
 #[cfg(test)]
 mod notifications_tests {
+    use crate::config::types::NotificationFocusConfig;
     use crate::config::types::Notifications;
     use assert_matches::assert_matches;
     use pretty_assertions::assert_eq;
@@ -3975,5 +4005,27 @@ mod notifications_tests {
         );
         assert_eq!(parsed.approval_notify, Some(true));
         assert_eq!(parsed.completion_notify, Some(false));
+    }
+
+    #[test]
+    fn test_notification_focus_lists() {
+        let toml = r#"
+            [notification_focus]
+            whitelist = ["Slack", "iTerm*"]
+            blacklist = ["Zoom"]
+        "#;
+        #[derive(Deserialize, Debug, PartialEq)]
+        struct RootToml {
+            notification_focus: NotificationFocusConfig,
+        }
+        let parsed: RootToml = toml::from_str(toml).expect("deserialize notification_focus");
+        assert_eq!(
+            parsed.notification_focus.whitelist,
+            vec!["Slack".to_string(), "iTerm*".to_string()]
+        );
+        assert_eq!(
+            parsed.notification_focus.blacklist,
+            vec!["Zoom".to_string()]
+        );
     }
 }

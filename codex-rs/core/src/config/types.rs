@@ -363,6 +363,17 @@ impl Default for Notifications {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct NotificationFocusConfig {
+    /// Only send notifications when the focused app matches one of these entries.
+    #[serde(default)]
+    pub whitelist: Vec<String>,
+
+    /// Suppress notifications when the focused app matches one of these entries.
+    #[serde(default)]
+    pub blacklist: Vec<String>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum DiffView {

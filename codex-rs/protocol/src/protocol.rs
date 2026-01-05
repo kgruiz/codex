@@ -149,6 +149,13 @@ pub enum Op {
         mode: Option<SessionMode>,
     },
 
+    /// Toggle focus-based notification filtering for the current session.
+    UpdateNotificationFocusFilter {
+        /// When set, overrides the config for this session. `None` restores the config default.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        enabled: Option<bool>,
+    },
+
     /// Update the session title stored alongside the rollout metadata.
     ///
     /// Use `None` or an empty string to clear the title.

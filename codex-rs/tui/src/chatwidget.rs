@@ -448,6 +448,7 @@ pub(crate) struct ChatWidget {
     queued_auto_send_pending: bool,
     // Pending notification to show when unfocused on next Draw
     pending_notification: Option<Notification>,
+    notification_focus_override: Option<bool>,
     // Simple review mode flag; used to adjust layout and banners.
     is_review_mode: bool,
     session_mode: SessionMode,
@@ -627,6 +628,11 @@ impl ChatWidget {
         {
             self.set_status_header(header);
         }
+    }
+
+    fn notification_focus_configured(&self) -> bool {
+        let focus = &self.config.notification_focus;
+        !focus.whitelist.is_empty() || !focus.blacklist.is_empty()
     }
 
     // --- Small event handlers ---
@@ -1884,6 +1890,7 @@ impl ChatWidget {
             show_welcome_banner: is_first_run,
             suppress_session_configured_redraw: false,
             pending_notification: None,
+            notification_focus_override: None,
             is_review_mode: false,
             session_mode: SessionMode::Normal,
             pre_review_token_info: None,
@@ -2005,6 +2012,7 @@ impl ChatWidget {
             show_welcome_banner: false,
             suppress_session_configured_redraw: true,
             pending_notification: None,
+            notification_focus_override: None,
             is_review_mode: false,
             session_mode,
             pre_review_token_info: None,
@@ -3383,6 +3391,9 @@ impl ChatWidget {
             SlashCommand::Approvals => {
                 self.open_approvals_popup();
             }
+            SlashCommand::Notifications => {
+                self.handle_notifications_command(command_input);
+            }
             SlashCommand::Experimental => {
                 self.open_experimental_popup();
             }
@@ -3493,6 +3504,48 @@ impl ChatWidget {
                 }));
             }
         }
+    }
+
+    fn handle_notifications_command(&mut self, command_input: Option<String>) {
+        let action = match parse_notification_focus_action(command_input.as_deref()) {
+            Ok(action) => action,
+            Err(message) => {
+                self.add_error_message(message);
+                return;
+            }
+        };
+        let configured = self.notification_focus_configured();
+        let current_effective = self.notification_focus_override.unwrap_or(configured);
+        let (override_after, effective_after) = match action {
+            NotificationFocusAction::Enable => (Some(true), true),
+            NotificationFocusAction::Disable => (Some(false), false),
+            NotificationFocusAction::Toggle => (Some(!current_effective), !current_effective),
+            NotificationFocusAction::Reset => (None, configured),
+            NotificationFocusAction::Status => {
+                (self.notification_focus_override, current_effective)
+            }
+        };
+        if action != NotificationFocusAction::Status {
+            self.notification_focus_override = override_after;
+            self.submit_op(Op::UpdateNotificationFocusFilter {
+                enabled: override_after,
+            });
+        }
+        let state = if effective_after {
+            "enabled"
+        } else {
+            "disabled"
+        };
+        let scope = if override_after.is_some() {
+            "session override"
+        } else {
+            "config default"
+        };
+        let mut message = format!("Focus-based notification filtering is {state} ({scope}).");
+        if !configured {
+            message.push_str(" Configure [notification_focus] in config.toml to use it.");
+        }
+        self.add_info_message(message, None);
     }
 
     fn open_export_picker(&mut self) {
@@ -6000,6 +6053,15 @@ enum Notification {
     ElicitationRequested { server_name: String },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NotificationFocusAction {
+    Enable,
+    Disable,
+    Toggle,
+    Reset,
+    Status,
+}
+
 impl Notification {
     fn display(&self) -> String {
         match self {
@@ -6057,6 +6119,31 @@ impl Notification {
         } else {
             Some(truncate_text(trimmed, AGENT_NOTIFICATION_PREVIEW_GRAPHEMES))
         }
+    }
+}
+
+fn parse_notification_focus_action(input: Option<&str>) -> Result<NotificationFocusAction, String> {
+    let tokens = input
+        .unwrap_or_default()
+        .split_whitespace()
+        .collect::<Vec<_>>();
+    let action = match tokens.as_slice() {
+        [] => Some(NotificationFocusAction::Toggle),
+        ["focus"] => Some(NotificationFocusAction::Toggle),
+        ["focus", action] | [action] => parse_notification_focus_action_token(action),
+        _ => None,
+    };
+    action.ok_or_else(|| "Usage: /notifications [focus] <on|off|toggle|reset|status>".to_string())
+}
+
+fn parse_notification_focus_action_token(token: &str) -> Option<NotificationFocusAction> {
+    match token.to_ascii_lowercase().as_str() {
+        "on" | "enable" => Some(NotificationFocusAction::Enable),
+        "off" | "disable" => Some(NotificationFocusAction::Disable),
+        "toggle" => Some(NotificationFocusAction::Toggle),
+        "reset" => Some(NotificationFocusAction::Reset),
+        "status" => Some(NotificationFocusAction::Status),
+        _ => None,
     }
 }
 

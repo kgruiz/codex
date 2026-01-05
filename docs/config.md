@@ -726,6 +726,34 @@ completion_notify = true
 > [!NOTE]
 > Built-in notifications are independent of `tui.notifications`. The TUI setting controls OSC 9 (or Windows toast under WSL) notifications when the terminal is unfocused. The built-in notifier uses platform tools (macOS: `osascript`, Linux: `notify-send`, Windows/WSL: PowerShell toast). If `notify-send` is missing, Codex warns once and skips built-in notifications on Linux.
 
+### notification_focus
+
+Optionally filter built-in/external notifications based on the currently focused app. Matching is case-insensitive and supports `*` and `?` wildcards. This does **not** affect `tui.notifications` (OSC 9 notifications).
+
+```toml
+[notification_focus]
+# Only notify when the focused app matches a whitelist entry.
+whitelist = ["Slack", "iTerm*"]
+
+# Never notify when the focused app matches a blacklist entry.
+blacklist = ["Zoom"]
+```
+
+Behavior notes:
+
+- If a blacklist entry matches, notifications are suppressed even if whitelisted.
+- If a whitelist is provided, notifications are sent only when the focused app matches it.
+- If focus detection fails, Codex sends notifications anyway.
+- macOS uses `System Events` to detect the frontmost app.
+- Windows/WSL uses PowerShell to query the foreground process.
+- Linux uses X11 tools (`xdotool` or `xprop`); Wayland desktops may not support this.
+
+You can toggle this per session (without saving config changes) via:
+
+```
+/notifications focus on|off|toggle|reset|status
+```
+
 ### hide_agent_reasoning
 
 Codex intermittently emits "reasoning" events that show the model's internal "thinking" before it produces a final answer. Some users may find these events distracting, especially in CI logs or minimal terminal output.
@@ -1037,6 +1065,8 @@ Valid values:
 | `completion_command`                             | array<string>                                                     | External program for turn-complete notifications.                                                                               |
 | `approval_notify`                                | boolean                                                           | Enable built-in approval notifications (default: false).                                                                        |
 | `completion_notify`                              | boolean                                                           | Enable built-in turn-complete notifications (default: false).                                                                   |
+| `notification_focus.whitelist`                   | array<string>                                                     | Allow notifications only when the focused app matches (case-insensitive, `*` and `?` wildcards).                                 |
+| `notification_focus.blacklist`                   | array<string>                                                     | Suppress notifications when the focused app matches (case-insensitive, `*` and `?` wildcards).                                   |
 | `tui.animations`                                 | boolean                                                           | Enable terminal animations (welcome screen, shimmer, spinner). Defaults to true; set to `false` to disable visual motion.       |
 | `instructions`                                   | string                                                            | Currently ignored; use `experimental_instructions_file` or `AGENTS.md`.                                                         |
 | `developer_instructions`                         | string                                                            | The additional developer instructions.                                                                                          |

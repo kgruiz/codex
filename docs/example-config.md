@@ -187,6 +187,11 @@ windows_wsl_setup_acknowledged = false
 # approval_notify = true
 # completion_notify = true
 
+# Focused-app filter for notifications (case-insensitive, supports * and ?).
+# [notification_focus]
+# whitelist = ["Slack", "iTerm*"]
+# blacklist = ["Zoom"]
+
 ################################################################################
 # Keybindings (TUI)
 ################################################################################
