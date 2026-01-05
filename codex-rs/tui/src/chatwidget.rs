@@ -3573,6 +3573,21 @@ impl ChatWidget {
                 ..Default::default()
             },
             SelectionItem {
+                name: "Markdown (.md) in current dir".to_string(),
+                description: Some("Creates a file in the current directory.".to_string()),
+                actions: vec![Box::new(|tx| {
+                    tx.send(AppEvent::ExportChat {
+                        format: Some(ChatExportFormat::Markdown),
+                        overrides: ExportOverrides {
+                            output_dir: Some(PathBuf::from(".")),
+                            ..Default::default()
+                        },
+                    });
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+            SelectionItem {
                 name: "Markdown (custom path...)".to_string(),
                 description: Some("Choose a destination path.".to_string()),
                 actions: vec![Box::new(|tx| {
@@ -3590,6 +3605,21 @@ impl ChatWidget {
                     tx.send(AppEvent::ExportChat {
                         format: Some(ChatExportFormat::Json),
                         overrides: ExportOverrides::default(),
+                    });
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+            SelectionItem {
+                name: "JSON (.json) in current dir".to_string(),
+                description: Some("Creates a file in the current directory.".to_string()),
+                actions: vec![Box::new(|tx| {
+                    tx.send(AppEvent::ExportChat {
+                        format: Some(ChatExportFormat::Json),
+                        overrides: ExportOverrides {
+                            output_dir: Some(PathBuf::from(".")),
+                            ..Default::default()
+                        },
                     });
                 })],
                 dismiss_on_select: true,
