@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::app::App;
+use crate::bottom_pane::ComposerAttachment;
 use crate::chatwidget::QueueSnapshot;
 use crate::history_cell::SessionInfoCell;
 use crate::history_cell::UserHistoryCell;
@@ -44,6 +45,7 @@ pub(crate) struct BacktrackSelection {
     pub(crate) base_id: ConversationId,
     pub(crate) nth_user_message: usize,
     pub(crate) prefill: String,
+    pub(crate) attachments: Vec<ComposerAttachment>,
     pub(crate) rollout_path: PathBuf,
 }
 
@@ -587,13 +589,14 @@ impl App {
         let nth_user_message = self.backtrack.nth_user_message;
 
         if let Some(base_id) = self.backtrack.base_id {
-            let prefill = nth_user_position(&self.transcript_cells, nth_user_message)
-                .and_then(|idx| self.transcript_cells.get(idx))
-                .and_then(|cell| cell.as_any().downcast_ref::<UserHistoryCell>())
-                .map(|c| c.message.clone())
-                .unwrap_or_default();
+            let (prefill, attachments) =
+                nth_user_position(&self.transcript_cells, nth_user_message)
+                    .and_then(|idx| self.transcript_cells.get(idx))
+                    .and_then(|cell| cell.as_any().downcast_ref::<UserHistoryCell>())
+                    .map(|c| (c.message.clone(), c.attachments.clone()))
+                    .unwrap_or_else(|| (String::new(), Vec::new()));
             self.close_transcript_overlay(tui);
-            self.stage_backtrack_action_picker(base_id, nth_user_message, prefill);
+            self.stage_backtrack_action_picker(base_id, nth_user_message, prefill, attachments);
         }
 
         self.reset_backtrack_state();
@@ -629,13 +632,18 @@ impl App {
     /// Computes the prefill from the selected user message and requests history.
     pub(crate) fn confirm_backtrack_from_main(&mut self) {
         if let Some(base_id) = self.backtrack.base_id {
-            let prefill =
+            let (prefill, attachments) =
                 nth_user_position(&self.transcript_cells, self.backtrack.nth_user_message)
                     .and_then(|idx| self.transcript_cells.get(idx))
                     .and_then(|cell| cell.as_any().downcast_ref::<UserHistoryCell>())
-                    .map(|c| c.message.clone())
-                    .unwrap_or_default();
-            self.stage_backtrack_action_picker(base_id, self.backtrack.nth_user_message, prefill);
+                    .map(|c| (c.message.clone(), c.attachments.clone()))
+                    .unwrap_or_else(|| (String::new(), Vec::new()));
+            self.stage_backtrack_action_picker(
+                base_id,
+                self.backtrack.nth_user_message,
+                prefill,
+                attachments,
+            );
         }
 
         self.reset_backtrack_state();
@@ -646,6 +654,7 @@ impl App {
         base_id: ConversationId,
         nth_user_message: usize,
         prefill: String,
+        attachments: Vec<ComposerAttachment>,
     ) {
         let Some(rollout_path) = self.chat_widget.rollout_path() else {
             tracing::error!("rollout path unavailable; cannot backtrack");
@@ -657,6 +666,7 @@ impl App {
             base_id,
             nth_user_message,
             prefill,
+            attachments,
             rollout_path,
         });
         self.chat_widget.open_backtrack_action_picker();
@@ -801,6 +811,7 @@ impl App {
         let BacktrackSelection {
             nth_user_message,
             prefill,
+            attachments,
             ..
         } = selection;
         let conv = new_conv.conversation;
@@ -827,12 +838,15 @@ impl App {
         self.current_session_user_index = user_count(&self.transcript_cells);
         self.render_transcript_once(tui);
 
-        if !prefill.is_empty() {
+        if !prefill.is_empty() || !attachments.is_empty() {
             if auto_submit {
                 self.chat_widget
-                    .submit_backtrack_message(prefill, resend_overrides);
-            } else {
+                    .submit_backtrack_message(prefill, attachments, resend_overrides);
+            } else if attachments.is_empty() {
                 self.chat_widget.set_composer_text(prefill);
+            } else {
+                self.chat_widget
+                    .set_composer_text_with_attachments(prefill, attachments);
             }
         }
 
@@ -1030,6 +1044,7 @@ mod tests {
         let mut cells: Vec<Arc<dyn HistoryCell>> = vec![
             Arc::new(UserHistoryCell {
                 message: "first user".to_string(),
+                attachments: Vec::new(),
             }) as Arc<dyn HistoryCell>,
             Arc::new(AgentMessageCell::new(vec![Line::from("assistant")], true))
                 as Arc<dyn HistoryCell>,
@@ -1046,6 +1061,7 @@ mod tests {
                 as Arc<dyn HistoryCell>,
             Arc::new(UserHistoryCell {
                 message: "first".to_string(),
+                attachments: Vec::new(),
             }) as Arc<dyn HistoryCell>,
             Arc::new(AgentMessageCell::new(vec![Line::from("after")], false))
                 as Arc<dyn HistoryCell>,
@@ -1074,11 +1090,13 @@ mod tests {
                 as Arc<dyn HistoryCell>,
             Arc::new(UserHistoryCell {
                 message: "first".to_string(),
+                attachments: Vec::new(),
             }) as Arc<dyn HistoryCell>,
             Arc::new(AgentMessageCell::new(vec![Line::from("between")], false))
                 as Arc<dyn HistoryCell>,
             Arc::new(UserHistoryCell {
                 message: "second".to_string(),
+                attachments: Vec::new(),
             }) as Arc<dyn HistoryCell>,
             Arc::new(AgentMessageCell::new(vec![Line::from("tail")], false))
                 as Arc<dyn HistoryCell>,

@@ -1,3 +1,4 @@
+use crate::bottom_pane::ComposerAttachment;
 use crate::diff_render::create_diff_summary;
 use crate::diff_render::display_path_for;
 use crate::exec_cell::CommandOutput;
@@ -135,6 +136,46 @@ impl dyn HistoryCell {
 #[derive(Debug)]
 pub(crate) struct UserHistoryCell {
     pub message: String,
+    pub attachments: Vec<ComposerAttachment>,
+}
+
+impl UserHistoryCell {
+    fn line_with_attachments(&self, line: &str) -> Line<'static> {
+        if self.attachments.is_empty() {
+            return Line::from(line.to_string());
+        }
+
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut remaining = line;
+        let placeholders: Vec<&str> = self
+            .attachments
+            .iter()
+            .map(|attachment| attachment.placeholder.as_str())
+            .collect();
+
+        while !remaining.is_empty() {
+            let mut next_match: Option<(usize, &str)> = None;
+            for placeholder in &placeholders {
+                if let Some(idx) = remaining.find(placeholder)
+                    && next_match.is_none_or(|(best_idx, _)| idx < best_idx) {
+                        next_match = Some((idx, *placeholder));
+                    }
+            }
+
+            let Some((idx, placeholder)) = next_match else {
+                spans.push(Span::from(remaining.to_string()));
+                break;
+            };
+
+            if idx > 0 {
+                spans.push(Span::from(remaining[..idx].to_string()));
+            }
+            spans.push(Span::from(placeholder.to_string()).cyan());
+            remaining = &remaining[idx + placeholder.len()..];
+        }
+
+        Line::from(spans)
+    }
 }
 
 impl HistoryCell for UserHistoryCell {
@@ -150,7 +191,9 @@ impl HistoryCell for UserHistoryCell {
         let style = user_message_style();
 
         let wrapped = word_wrap_lines(
-            self.message.lines().map(|l| Line::from(l).style(style)),
+            self.message
+                .lines()
+                .map(|line| self.line_with_attachments(line).style(style)),
             // Wrap algorithm matches textarea.rs.
             RtOptions::new(usize::from(wrap_width))
                 .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit),
@@ -904,8 +947,14 @@ pub(crate) fn new_session_info(
     SessionInfoCell(CompositeHistoryCell { parts })
 }
 
-pub(crate) fn new_user_prompt(message: String) -> UserHistoryCell {
-    UserHistoryCell { message }
+pub(crate) fn new_user_prompt(
+    message: String,
+    attachments: Vec<ComposerAttachment>,
+) -> UserHistoryCell {
+    UserHistoryCell {
+        message,
+        attachments,
+    }
 }
 
 #[derive(Debug)]
@@ -2601,6 +2650,7 @@ mod tests {
         let msg = "one two three four five six seven";
         let cell = UserHistoryCell {
             message: msg.to_string(),
+            attachments: Vec::new(),
         };
 
         // Small width to force wrapping more clearly. Effective wrap width is width-2 due to the ▌ prefix and trailing space.

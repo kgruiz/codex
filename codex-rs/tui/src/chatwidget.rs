@@ -472,6 +472,7 @@ pub(crate) struct ChatWidget {
 struct UserMessage {
     text: String,
     image_paths: Vec<PathBuf>,
+    attachments: Vec<ComposerAttachment>,
 }
 
 #[derive(Clone, Debug)]
@@ -522,6 +523,7 @@ impl From<String> for UserMessage {
         Self {
             text,
             image_paths: Vec::new(),
+            attachments: Vec::new(),
         }
     }
 }
@@ -531,6 +533,7 @@ impl From<&str> for UserMessage {
         Self {
             text: text.to_string(),
             image_paths: Vec::new(),
+            attachments: Vec::new(),
         }
     }
 }
@@ -539,7 +542,11 @@ fn create_initial_user_message(text: String, image_paths: Vec<PathBuf>) -> Optio
     if text.is_empty() && image_paths.is_empty() {
         None
     } else {
-        Some(UserMessage { text, image_paths })
+        Some(UserMessage {
+            text,
+            image_paths,
+            attachments: Vec::new(),
+        })
     }
 }
 
@@ -3809,10 +3816,14 @@ impl ChatWidget {
         } else {
             self.queued_auto_send_pending = false;
             let image_paths = attachments
-                .into_iter()
-                .map(|attachment| attachment.path)
+                .iter()
+                .map(|attachment| attachment.path.clone())
                 .collect();
-            self.submit_user_message(UserMessage { text, image_paths });
+            self.submit_user_message(UserMessage {
+                text,
+                image_paths,
+                attachments,
+            });
         }
     }
 
@@ -3861,12 +3872,13 @@ impl ChatWidget {
 
         let image_paths = queued
             .attachments
-            .into_iter()
-            .map(|attachment| attachment.path)
+            .iter()
+            .map(|attachment| attachment.path.clone())
             .collect();
         self.submit_user_message(UserMessage {
             text: queued.text,
             image_paths,
+            attachments: queued.attachments,
         });
 
         if restore_model.is_some() || restore_effort.is_some() {
@@ -3885,16 +3897,23 @@ impl ChatWidget {
     pub(crate) fn submit_backtrack_message(
         &mut self,
         text: String,
+        attachments: Vec<ComposerAttachment>,
         overrides: Option<ResendOverrides>,
     ) {
-        if text.is_empty() {
+        if text.is_empty() && attachments.is_empty() {
             return;
         }
+
+        let image_paths = attachments
+            .iter()
+            .map(|attachment| attachment.path.clone())
+            .collect();
 
         let Some(overrides) = overrides else {
             self.submit_user_message(UserMessage {
                 text,
-                image_paths: Vec::new(),
+                image_paths,
+                attachments,
             });
             return;
         };
@@ -3925,7 +3944,8 @@ impl ChatWidget {
         });
         self.submit_user_message(UserMessage {
             text,
-            image_paths: Vec::new(),
+            image_paths,
+            attachments,
         });
         self.submit_op(Op::OverrideTurnContext {
             cwd: None,
@@ -3939,7 +3959,11 @@ impl ChatWidget {
     }
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
-        let UserMessage { text, image_paths } = user_message;
+        let UserMessage {
+            text,
+            image_paths,
+            attachments,
+        } = user_message;
         if text.is_empty() && image_paths.is_empty() {
             return;
         }
@@ -3968,8 +3992,8 @@ impl ChatWidget {
             items.push(UserInput::Text { text: text.clone() });
         }
 
-        for path in image_paths {
-            items.push(UserInput::LocalImage { path });
+        for path in &image_paths {
+            items.push(UserInput::LocalImage { path: path.clone() });
         }
 
         if let Some(skills) = self.bottom_pane.skills() {
@@ -4003,7 +4027,7 @@ impl ChatWidget {
 
         // Only show the text portion in conversation history.
         if !text.is_empty() {
-            self.add_to_history(history_cell::new_user_prompt(text));
+            self.add_to_history(history_cell::new_user_prompt(text, attachments));
         }
         self.needs_final_message_separator = false;
     }
@@ -4206,7 +4230,10 @@ impl ChatWidget {
     fn on_user_message_event(&mut self, event: UserMessageEvent) {
         let message = event.message.trim();
         if !message.is_empty() {
-            self.add_to_history(history_cell::new_user_prompt(message.to_string()));
+            self.add_to_history(history_cell::new_user_prompt(
+                message.to_string(),
+                Vec::new(),
+            ));
         }
     }
 
@@ -5594,6 +5621,15 @@ impl ChatWidget {
     /// Replace the composer content with the provided text and reset cursor.
     pub(crate) fn set_composer_text(&mut self, text: String) {
         self.bottom_pane.set_composer_text(text);
+    }
+
+    pub(crate) fn set_composer_text_with_attachments(
+        &mut self,
+        text: String,
+        attachments: Vec<ComposerAttachment>,
+    ) {
+        self.bottom_pane
+            .set_composer_text_with_attachments(text, attachments);
     }
 
     pub(crate) fn show_esc_backtrack_hint(&mut self) {
