@@ -508,18 +508,8 @@ impl ChatComposer {
         text: String,
         attachments: Vec<ComposerAttachment>,
     ) {
-        self.set_text_content(text.clone());
-
-        let mut filtered = Vec::new();
-        for attachment in attachments {
-            if text.contains(&attachment.placeholder) {
-                filtered.push(attachment);
-            }
-        }
-
-        self.attached_images = filtered.into_iter().map(Into::into).collect();
-        self.textarea.set_cursor(text.len());
-        self.sync_popups();
+        self.attached_images = attachments.into_iter().map(Into::into).collect();
+        self.apply_external_edit(text);
     }
 
     pub(crate) fn clear_for_ctrl_c(&mut self) -> Option<String> {
@@ -4251,6 +4241,49 @@ mod tests {
         assert_eq!(imgs.len(), 1);
         assert_eq!(imgs[0], path);
         assert!(composer.attached_images.is_empty());
+    }
+
+    #[test]
+    fn set_text_content_with_attachments_rebuilds_placeholder_elements() {
+        let (tx, _rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            true,
+            sender,
+            false,
+            "Ask Codex to do anything".to_string(),
+            false,
+            default_keybindings(false),
+        );
+
+        let path = PathBuf::from("/tmp/queued.png");
+        composer.attach_image(path.clone(), 12, 34, "PNG");
+        let placeholder = composer.attached_images[0].placeholder.clone();
+        let attachments = composer.current_attachments();
+        let text = format!("{placeholder} hello");
+
+        composer.set_text_content_with_attachments(text.clone(), attachments);
+
+        assert_eq!(composer.textarea.text(), text);
+        assert_eq!(composer.attached_images.len(), 1);
+        assert_eq!(composer.attached_images[0].path, path);
+
+        let start = composer
+            .textarea
+            .text()
+            .find(&placeholder)
+            .expect("placeholder should exist");
+        let mid = start + (placeholder.len() / 2);
+        let dist_start = mid.saturating_sub(start);
+        let dist_end = start + placeholder.len() - mid;
+        let expected = if dist_start <= dist_end {
+            start
+        } else {
+            start + placeholder.len()
+        };
+
+        composer.textarea.set_cursor(mid);
+        assert_eq!(composer.textarea.cursor(), expected);
     }
 
     #[test]
