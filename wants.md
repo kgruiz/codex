@@ -76,3 +76,4 @@ Add new items below as you think of them.
 27. [ ] Allow planning and interacting in editor like Cursor and Antigravity use
 28. [ ] Investigate whether background terminal checks are too frequent (possible token usage impact)
 29. [ ] Fix attached image placeholder (`[<filename> <size>]`) turning into plain text when editing messages (edit flow or queue editor)
+30. [ ] Use a model to name chats with configurable model selection and a full off switch to save costs
