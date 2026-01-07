@@ -53,6 +53,7 @@ pub(crate) struct SelectionViewParams {
     pub subtitle: Option<String>,
     pub footer_hint: Option<Line<'static>>,
     pub items: Vec<SelectionItem>,
+    pub cancel_action: Option<SelectionAction>,
     pub is_searchable: bool,
     pub search_placeholder: Option<String>,
     pub header: Box<dyn Renderable>,
@@ -67,6 +68,7 @@ impl Default for SelectionViewParams {
             subtitle: None,
             footer_hint: None,
             items: Vec::new(),
+            cancel_action: None,
             is_searchable: false,
             search_placeholder: None,
             header: Box::new(()),
@@ -79,6 +81,7 @@ impl Default for SelectionViewParams {
 pub(crate) struct ListSelectionView {
     footer_hint: Option<Line<'static>>,
     items: Vec<SelectionItem>,
+    cancel_action: Option<SelectionAction>,
     state: ScrollState,
     complete: bool,
     app_event_tx: AppEventSender,
@@ -107,6 +110,7 @@ impl ListSelectionView {
         let mut s = Self {
             footer_hint: params.footer_hint,
             items: params.items,
+            cancel_action: params.cancel_action,
             state: ScrollState::new(),
             complete: false,
             app_event_tx,
@@ -419,6 +423,9 @@ impl BottomPaneView for ListSelectionView {
     }
 
     fn on_ctrl_c(&mut self) -> CancellationEvent {
+        if let Some(action) = self.cancel_action.as_ref() {
+            action(&self.app_event_tx);
+        }
         self.complete = true;
         CancellationEvent::Handled
     }

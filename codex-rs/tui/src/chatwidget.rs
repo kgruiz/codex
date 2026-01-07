@@ -5764,6 +5764,9 @@ impl ChatWidget {
 
     pub(crate) fn open_backtrack_action_picker(&mut self) {
         let mut items: Vec<SelectionItem> = Vec::new();
+        let cancel_action: SelectionAction = Box::new(|tx| {
+            tx.send(AppEvent::BacktrackActionCanceled);
+        });
 
         items.push(SelectionItem {
             name: "Edit in place".to_string(),
@@ -5814,11 +5817,22 @@ impl ChatWidget {
             ..Default::default()
         });
 
+        items.push(SelectionItem {
+            name: "Back".to_string(),
+            description: Some("Return to message navigation.".into()),
+            actions: vec![Box::new(|tx| {
+                tx.send(AppEvent::BacktrackActionCanceled);
+            })],
+            dismiss_on_select: true,
+            ..Default::default()
+        });
+
         self.bottom_pane.show_selection_view(SelectionViewParams {
             title: Some("Edit previous message".into()),
             subtitle: Some("Choose how to edit or resend.".into()),
             footer_hint: Some(standard_popup_hint_line()),
             items,
+            cancel_action: Some(cancel_action),
             ..Default::default()
         });
     }

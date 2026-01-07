@@ -275,6 +275,8 @@ pub(crate) enum AppEvent {
     BacktrackActionSelected {
         action: BacktrackActionRequest,
     },
+    /// Return from the backtrack action picker to message navigation.
+    BacktrackActionCanceled,
 
     /// Open the resend thinking picker for a backtrack retry.
     OpenBacktrackResendThinkingPicker {

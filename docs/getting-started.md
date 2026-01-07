@@ -78,7 +78,7 @@ Typing `@` triggers a fuzzy-filename search over the workspace root. Use up/down
 
 #### Esc–Esc to edit a previous message
 
-When the chat composer is empty, press Esc to prime “backtrack” mode. Press Esc again to open a transcript preview highlighting the last user message; press Esc repeatedly to step to older user messages. Press Enter to choose how to apply the edit: edit in place, retry the same message immediately, resend with a different model/thinking, or branch into a new chat. Editing in place keeps the current chat and creates editable versions of that message; retry/resend automatically submits the message (optionally with model/effort overrides); branching creates a new chat from that point and trims the visible transcript accordingly.
+When the chat composer is empty, press Esc to prime “backtrack” mode. Press Esc again to open a transcript preview highlighting the last user message; press Esc repeatedly to step to older user messages. Press Enter to choose how to apply the edit: edit in place, retry the same message immediately, resend with a different model/thinking, or branch into a new chat. Editing in place keeps the current chat and creates editable versions of that message; retry/resend automatically submits the message (optionally with model/effort overrides); branching creates a new chat from that point and trims the visible transcript accordingly. If you open the action picker, choose Back (or press Esc) to return to message navigation.
 
 In the transcript preview, the footer shows an `Esc edit/branch prev` hint while editing is active.
 

@@ -157,9 +157,10 @@ impl UserHistoryCell {
             let mut next_match: Option<(usize, &str)> = None;
             for placeholder in &placeholders {
                 if let Some(idx) = remaining.find(placeholder)
-                    && next_match.is_none_or(|(best_idx, _)| idx < best_idx) {
-                        next_match = Some((idx, *placeholder));
-                    }
+                    && next_match.is_none_or(|(best_idx, _)| idx < best_idx)
+                {
+                    next_match = Some((idx, *placeholder));
+                }
             }
 
             let Some((idx, placeholder)) = next_match else {

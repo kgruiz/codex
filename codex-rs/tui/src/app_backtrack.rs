@@ -297,6 +297,25 @@ impl App {
         );
     }
 
+    pub(crate) fn handle_backtrack_action_canceled(&mut self, tui: &mut tui::Tui) {
+        let Some(selection) = self.backtrack.pending_selection.take() else {
+            return;
+        };
+
+        self.backtrack.primed = true;
+        self.backtrack.base_id = Some(selection.base_id);
+        self.backtrack.nth_user_message = selection.nth_user_message;
+        self.backtrack.overlay_preview_active = true;
+
+        if self.overlay.is_none() {
+            self.open_transcript_overlay(tui);
+        }
+
+        self.chat_widget.clear_esc_backtrack_hint();
+        self.apply_backtrack_selection(selection.nth_user_message);
+        tui.frame_requester().schedule_frame();
+    }
+
     pub(crate) async fn switch_edit_version(
         &mut self,
         tui: &mut tui::Tui,
