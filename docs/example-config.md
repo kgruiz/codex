@@ -203,7 +203,7 @@ windows_wsl_setup_acknowledged = false
 # submit = "Enter"
 # newline = "Shift+Enter"
 # paste = ["Cmd+V", "Ctrl+V"]
-# copy_prompt = "Alt+C"
+# copy_prompt = "Ctrl+Shift+C"
 #
 # Example: multi-line-first workflow (Enter inserts newline, Ctrl+Enter submits)
 # submit = "Ctrl+Enter"

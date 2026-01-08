@@ -1001,7 +1001,7 @@ binding) or an array of strings. Unknown bindings are ignored with a warning.
 submit = "Enter"
 newline = "Shift+Enter"
 paste = ["Cmd+V", "Ctrl+V"]
-copy_prompt = "Alt+C"
+copy_prompt = "Ctrl+Shift+C"
 
 # Editor navigation (optional)
 editor_move_left = "Alt+Left"
