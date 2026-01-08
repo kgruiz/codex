@@ -26,6 +26,7 @@ use super::file_search_popup::FileSearchPopup;
 use super::footer::FooterMode;
 use super::footer::FooterProps;
 use super::footer::StatusLineMetrics;
+use super::footer::StatusLineNotice;
 use super::footer::esc_hint_mode;
 use super::footer::footer_height;
 use super::footer::render_footer;
@@ -195,6 +196,7 @@ pub(crate) struct ChatComposer {
     status_line_cwd: Option<PathBuf>,
     status_line_git_branch: Option<String>,
     status_line_metrics: StatusLineMetrics,
+    status_line_notice: Option<StatusLineNotice>,
     skills: Option<Vec<SkillMetadata>>,
     dismissed_skill_popup_token: Option<String>,
     keybindings: Keybindings,
@@ -252,6 +254,7 @@ impl ChatComposer {
             status_line_cwd: None,
             status_line_git_branch: None,
             status_line_metrics: StatusLineMetrics::default(),
+            status_line_notice: None,
             skills: None,
             dismissed_skill_popup_token: None,
             keybindings,
@@ -484,6 +487,16 @@ impl ChatComposer {
 
     pub(crate) fn set_status_line_metrics(&mut self, metrics: StatusLineMetrics) {
         self.status_line_metrics = metrics;
+    }
+
+    pub(crate) fn show_status_line_notice(&mut self, message: String, duration: Duration) {
+        self.status_line_notice = Some(StatusLineNotice::new(message, duration));
+    }
+
+    fn active_status_line_notice(&self) -> Option<&StatusLineNotice> {
+        self.status_line_notice
+            .as_ref()
+            .filter(|notice| notice.is_active())
     }
 
     /// Override the footer hint items displayed beneath the composer. Passing
@@ -2348,6 +2361,7 @@ impl ChatComposer {
             status_line_cwd: self.status_line_cwd.as_deref(),
             status_line_git_branch: self.status_line_git_branch.as_deref(),
             status_line_metrics: &self.status_line_metrics,
+            status_line_notice: self.active_status_line_notice(),
         }
     }
 

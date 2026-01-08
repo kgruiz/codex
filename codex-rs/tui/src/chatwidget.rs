@@ -2525,11 +2525,17 @@ impl ChatWidget {
             return;
         }
 
-        if let Err(err) = copy_text_to_clipboard(&text) {
-            self.add_to_history(history_cell::new_error_event(format!(
-                "Failed to copy prompt to clipboard: {err}",
-            )));
-            self.request_redraw();
+        match copy_text_to_clipboard(&text) {
+            Ok(()) => {
+                self.bottom_pane
+                    .show_status_line_notice("Prompt copied".to_string(), Duration::from_secs(2));
+            }
+            Err(err) => {
+                self.add_to_history(history_cell::new_error_event(format!(
+                    "Failed to copy prompt to clipboard: {err}",
+                )));
+                self.request_redraw();
+            }
         }
     }
 

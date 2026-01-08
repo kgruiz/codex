@@ -417,6 +417,12 @@ impl BottomPane {
         self.request_redraw();
     }
 
+    pub(crate) fn show_status_line_notice(&mut self, message: String, duration: Duration) {
+        self.composer.show_status_line_notice(message, duration);
+        self.request_redraw();
+        self.request_redraw_in(duration);
+    }
+
     pub(crate) fn clear_composer_for_ctrl_c(&mut self) {
         self.composer.clear_for_ctrl_c();
         self.request_redraw();

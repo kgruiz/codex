@@ -18,6 +18,8 @@ use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
+use std::time::Duration;
+use std::time::Instant;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FooterProps<'a> {
@@ -34,6 +36,7 @@ pub(crate) struct FooterProps<'a> {
     pub(crate) status_line_cwd: Option<&'a std::path::Path>,
     pub(crate) status_line_git_branch: Option<&'a str>,
     pub(crate) status_line_metrics: &'a StatusLineMetrics,
+    pub(crate) status_line_notice: Option<&'a StatusLineNotice>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -42,6 +45,29 @@ pub(crate) struct StatusLineMetrics {
     pub(crate) latency: Option<std::time::Duration>,
     pub(crate) tool_time: Option<std::time::Duration>,
     pub(crate) cost: Option<f64>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct StatusLineNotice {
+    message: String,
+    expires_at: Instant,
+}
+
+impl StatusLineNotice {
+    pub(crate) fn new(message: String, duration: Duration) -> Self {
+        Self {
+            message,
+            expires_at: Instant::now() + duration,
+        }
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        Instant::now() < self.expires_at
+    }
+
+    pub(crate) fn message(&self) -> &str {
+        &self.message
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -349,6 +375,10 @@ fn context_window_line(percent: Option<i64>, used_tokens: Option<i64>) -> Line<'
 }
 
 fn status_line_line(props: FooterProps<'_>) -> Line<'static> {
+    if let Some(notice) = props.status_line_notice {
+        return Line::from(vec![notice.message().to_string().green()]);
+    }
+
     let mut line = Line::default();
     let mut push_segment = |mut segment: Line<'static>| {
         if !line.spans.is_empty() {
@@ -536,6 +566,7 @@ mod tests {
                 status_line_cwd: None,
                 status_line_git_branch: None,
                 status_line_metrics: &status_line_metrics_empty,
+                status_line_notice: None,
             },
         );
 
@@ -555,6 +586,7 @@ mod tests {
                 status_line_cwd: None,
                 status_line_git_branch: None,
                 status_line_metrics: &status_line_metrics_empty,
+                status_line_notice: None,
             },
         );
 
@@ -574,6 +606,7 @@ mod tests {
                 status_line_cwd: None,
                 status_line_git_branch: None,
                 status_line_metrics: &status_line_metrics_empty,
+                status_line_notice: None,
             },
         );
 
@@ -593,6 +626,7 @@ mod tests {
                 status_line_cwd: None,
                 status_line_git_branch: None,
                 status_line_metrics: &status_line_metrics_empty,
+                status_line_notice: None,
             },
         );
 
@@ -612,6 +646,7 @@ mod tests {
                 status_line_cwd: None,
                 status_line_git_branch: None,
                 status_line_metrics: &status_line_metrics_empty,
+                status_line_notice: None,
             },
         );
 
@@ -631,6 +666,7 @@ mod tests {
                 status_line_cwd: None,
                 status_line_git_branch: None,
                 status_line_metrics: &status_line_metrics_empty,
+                status_line_notice: None,
             },
         );
 
@@ -650,6 +686,7 @@ mod tests {
                 status_line_cwd: None,
                 status_line_git_branch: None,
                 status_line_metrics: &status_line_metrics_empty,
+                status_line_notice: None,
             },
         );
 
@@ -669,6 +706,7 @@ mod tests {
                 status_line_cwd: None,
                 status_line_git_branch: None,
                 status_line_metrics: &status_line_metrics_empty,
+                status_line_notice: None,
             },
         );
 
@@ -688,6 +726,7 @@ mod tests {
                 status_line_cwd: None,
                 status_line_git_branch: None,
                 status_line_metrics: &status_line_metrics_empty,
+                status_line_notice: None,
             },
         );
 
@@ -707,6 +746,7 @@ mod tests {
                 status_line_cwd: None,
                 status_line_git_branch: None,
                 status_line_metrics: &status_line_metrics_sample,
+                status_line_notice: None,
             },
         );
     }
