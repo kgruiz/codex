@@ -372,6 +372,14 @@ pub struct NotificationFocusConfig {
     /// Suppress notifications when the focused app matches one of these entries.
     #[serde(default)]
     pub blacklist: Vec<String>,
+
+    /// Only send notifications when the focused app bundle identifier matches one of these entries.
+    #[serde(default)]
+    pub bundle_id_whitelist: Vec<String>,
+
+    /// Suppress notifications when the focused app bundle identifier matches one of these entries.
+    #[serde(default)]
+    pub bundle_id_blacklist: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]

@@ -737,6 +737,10 @@ whitelist = ["Slack", "iTerm*"]
 
 # Never notify when the focused app matches a blacklist entry.
 blacklist = ["Zoom"]
+
+# macOS-only: match the focused app bundle identifier.
+bundle_id_whitelist = ["com.apple.Terminal"]
+bundle_id_blacklist = ["com.microsoft.VSCode*"]
 ```
 
 Behavior notes:
@@ -747,6 +751,7 @@ Behavior notes:
 - macOS uses `System Events` to detect the frontmost app.
 - Windows/WSL uses PowerShell to query the foreground process.
 - Linux uses X11 tools (`xdotool` or `xprop`); Wayland desktops may not support this.
+- Bundle identifier filtering is only supported on macOS. On other platforms, these settings are ignored.
 
 You can toggle this per session (without saving config changes) via:
 
@@ -1067,6 +1072,8 @@ Valid values:
 | `completion_notify`                              | boolean                                                           | Enable built-in turn-complete notifications (default: false).                                                                   |
 | `notification_focus.whitelist`                   | array<string>                                                     | Allow notifications only when the focused app matches (case-insensitive, `*` and `?` wildcards).                                 |
 | `notification_focus.blacklist`                   | array<string>                                                     | Suppress notifications when the focused app matches (case-insensitive, `*` and `?` wildcards).                                   |
+| `notification_focus.bundle_id_whitelist`         | array<string>                                                     | macOS-only: allow notifications only when the focused app bundle identifier matches.                                             |
+| `notification_focus.bundle_id_blacklist`         | array<string>                                                     | macOS-only: suppress notifications when the focused app bundle identifier matches.                                               |
 | `tui.animations`                                 | boolean                                                           | Enable terminal animations (welcome screen, shimmer, spinner). Defaults to true; set to `false` to disable visual motion.       |
 | `instructions`                                   | string                                                            | Currently ignored; use `experimental_instructions_file` or `AGENTS.md`.                                                         |
 | `developer_instructions`                         | string                                                            | The additional developer instructions.                                                                                          |

@@ -1353,6 +1353,8 @@ impl Config {
         let notification_focus = NotificationFocusConfig {
             whitelist: normalize_focus_list(cfg.notification_focus.whitelist),
             blacklist: normalize_focus_list(cfg.notification_focus.blacklist),
+            bundle_id_whitelist: normalize_focus_list(cfg.notification_focus.bundle_id_whitelist),
+            bundle_id_blacklist: normalize_focus_list(cfg.notification_focus.bundle_id_blacklist),
         };
 
         // Ensure that every field of ConfigRequirements is applied to the final
@@ -4013,6 +4015,8 @@ mod notifications_tests {
             [notification_focus]
             whitelist = ["Slack", "iTerm*"]
             blacklist = ["Zoom"]
+            bundle_id_whitelist = ["com.apple.Terminal"]
+            bundle_id_blacklist = ["com.apple.Zoom"]
         "#;
         #[derive(Deserialize, Debug, PartialEq)]
         struct RootToml {
@@ -4026,6 +4030,14 @@ mod notifications_tests {
         assert_eq!(
             parsed.notification_focus.blacklist,
             vec!["Zoom".to_string()]
+        );
+        assert_eq!(
+            parsed.notification_focus.bundle_id_whitelist,
+            vec!["com.apple.Terminal".to_string()]
+        );
+        assert_eq!(
+            parsed.notification_focus.bundle_id_blacklist,
+            vec!["com.apple.Zoom".to_string()]
         );
     }
 }

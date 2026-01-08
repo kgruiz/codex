@@ -89,7 +89,6 @@ impl SlashCommand {
             SlashCommand::New
             | SlashCommand::Resume
             | SlashCommand::Session
-            | SlashCommand::Rename
             | SlashCommand::Export
             | SlashCommand::Init
             | SlashCommand::Compact
@@ -111,7 +110,8 @@ impl SlashCommand {
             | SlashCommand::Ask
             | SlashCommand::Normal
             | SlashCommand::Model
-            | SlashCommand::Notifications => true,
+            | SlashCommand::Notifications
+            | SlashCommand::Rename => true,
             SlashCommand::Rollout => true,
             SlashCommand::TestApproval => true,
         }

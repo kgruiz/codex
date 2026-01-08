@@ -191,6 +191,8 @@ windows_wsl_setup_acknowledged = false
 # [notification_focus]
 # whitelist = ["Slack", "iTerm*"]
 # blacklist = ["Zoom"]
+# bundle_id_whitelist = ["com.apple.Terminal"]
+# bundle_id_blacklist = ["com.microsoft.VSCode*"]
 
 ################################################################################
 # Keybindings (TUI)

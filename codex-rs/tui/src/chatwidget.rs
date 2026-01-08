@@ -639,7 +639,10 @@ impl ChatWidget {
 
     fn notification_focus_configured(&self) -> bool {
         let focus = &self.config.notification_focus;
-        !focus.whitelist.is_empty() || !focus.blacklist.is_empty()
+        !focus.whitelist.is_empty()
+            || !focus.blacklist.is_empty()
+            || !focus.bundle_id_whitelist.is_empty()
+            || !focus.bundle_id_blacklist.is_empty()
     }
 
     // --- Small event handlers ---

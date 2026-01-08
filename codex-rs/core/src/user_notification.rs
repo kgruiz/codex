@@ -24,33 +24,76 @@ static NOTIFY_SEND_MISSING_WARNED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Default)]
 struct NotificationFocusFilter {
-    whitelist: Vec<WildMatchPattern<'*', '?'>>,
-    blacklist: Vec<WildMatchPattern<'*', '?'>>,
+    name_whitelist: Vec<WildMatchPattern<'*', '?'>>,
+    name_blacklist: Vec<WildMatchPattern<'*', '?'>>,
+    bundle_id_whitelist: Vec<WildMatchPattern<'*', '?'>>,
+    bundle_id_blacklist: Vec<WildMatchPattern<'*', '?'>>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct FocusedAppInfo {
+    name: Option<String>,
+    bundle_id: Option<String>,
+}
+
+impl FocusedAppInfo {
+    fn is_empty(&self) -> bool {
+        self.name
+            .as_ref()
+            .is_none_or(|name| name.trim().is_empty())
+            && self
+                .bundle_id
+                .as_ref()
+                .is_none_or(|bundle_id| bundle_id.trim().is_empty())
+    }
 }
 
 impl NotificationFocusFilter {
     fn from_config(config: &NotificationFocusConfig) -> Self {
         Self {
-            whitelist: Self::compile_patterns(&config.whitelist),
-            blacklist: Self::compile_patterns(&config.blacklist),
+            name_whitelist: Self::compile_patterns(&config.whitelist),
+            name_blacklist: Self::compile_patterns(&config.blacklist),
+            bundle_id_whitelist: Self::compile_patterns(&config.bundle_id_whitelist),
+            bundle_id_blacklist: Self::compile_patterns(&config.bundle_id_blacklist),
         }
     }
 
     fn is_configured(&self) -> bool {
-        !self.whitelist.is_empty() || !self.blacklist.is_empty()
+        !self.name_whitelist.is_empty()
+            || !self.name_blacklist.is_empty()
+            || !self.bundle_id_whitelist.is_empty()
+            || !self.bundle_id_blacklist.is_empty()
     }
 
-    fn allows(&self, focused_app: &str) -> bool {
-        if focused_app.trim().is_empty() {
+    fn allows(&self, focused_app: Option<&str>, focused_bundle_id: Option<&str>) -> bool {
+        let focused_app = focused_app.map(str::trim).filter(|name| !name.is_empty());
+        let focused_bundle_id = focused_bundle_id
+            .map(str::trim)
+            .filter(|bundle_id| !bundle_id.is_empty());
+        if focused_app.is_none() && focused_bundle_id.is_none() {
             return true;
         }
-        if self.matches_any(&self.blacklist, focused_app) {
-            return false;
-        }
-        if self.whitelist.is_empty() {
+        if let Some(name) = focused_app
+            && self.matches_any(&self.name_blacklist, name) {
+                return false;
+            }
+        if let Some(bundle_id) = focused_bundle_id
+            && self.matches_any(&self.bundle_id_blacklist, bundle_id) {
+                return false;
+            }
+        let name_whitelist_active = focused_app.is_some() && !self.name_whitelist.is_empty();
+        let bundle_whitelist_active =
+            focused_bundle_id.is_some() && !self.bundle_id_whitelist.is_empty();
+        if !name_whitelist_active && !bundle_whitelist_active {
             return true;
         }
-        self.matches_any(&self.whitelist, focused_app)
+        let name_allowed = focused_app.is_some_and(|name| {
+            name_whitelist_active && self.matches_any(&self.name_whitelist, name)
+        });
+        let bundle_allowed = focused_bundle_id.is_some_and(|bundle_id| {
+            bundle_whitelist_active && self.matches_any(&self.bundle_id_whitelist, bundle_id)
+        });
+        name_allowed || bundle_allowed
     }
 
     fn matches_any(&self, patterns: &[WildMatchPattern<'*', '?'>], candidate: &str) -> bool {
@@ -168,10 +211,14 @@ impl UserNotifier {
         if !self.focus_filter_active() {
             return true;
         }
-        let Some(focused_app) = focused_app_name() else {
+        let focused_app = focused_app_info();
+        if focused_app.is_empty() {
             return true;
         };
-        self.focus_filter.allows(&focused_app)
+        self.focus_filter.allows(
+            focused_app.name.as_deref(),
+            focused_app.bundle_id.as_deref(),
+        )
     }
 
     fn focus_filter_active(&self) -> bool {
@@ -317,27 +364,38 @@ fn truncate_text(input: &str, max_chars: usize) -> String {
     }
 }
 
-fn focused_app_name() -> Option<String> {
+fn focused_app_info() -> FocusedAppInfo {
     #[cfg(target_os = "macos")]
     {
-        focused_app_name_macos()
+        FocusedAppInfo {
+            name: focused_app_name_macos(),
+            bundle_id: focused_app_bundle_id_macos(),
+        }
     }
     #[cfg(target_os = "windows")]
     {
-        return focused_app_name_windows();
+        FocusedAppInfo {
+            name: focused_app_name_windows(),
+            bundle_id: None,
+        }
     }
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     {
         #[cfg(target_os = "linux")]
         {
-            if is_wsl() && std::env::var_os("WT_SESSION").is_some() {
-                return focused_app_name_windows();
+            let name = if is_wsl() && std::env::var_os("WT_SESSION").is_some() {
+                focused_app_name_windows()
+            } else {
+                focused_app_name_linux()
+            };
+            FocusedAppInfo {
+                name,
+                bundle_id: None,
             }
-            return focused_app_name_linux();
         }
         #[cfg(not(target_os = "linux"))]
         {
-            return None;
+            FocusedAppInfo::default()
         }
     }
 }
@@ -345,6 +403,14 @@ fn focused_app_name() -> Option<String> {
 #[cfg(target_os = "macos")]
 fn focused_app_name_macos() -> Option<String> {
     let script = r#"tell application "System Events" to get name of first application process whose frontmost is true"#;
+    command_output_trimmed("osascript", &["-e", script])
+        .ok()
+        .flatten()
+}
+
+#[cfg(target_os = "macos")]
+fn focused_app_bundle_id_macos() -> Option<String> {
+    let script = r#"tell application "System Events" to get bundle identifier of first application process whose frontmost is true"#;
     command_output_trimmed("osascript", &["-e", script])
         .ok()
         .flatten()
@@ -658,10 +724,25 @@ mod tests {
         let config = NotificationFocusConfig {
             whitelist: vec!["Slack".to_string()],
             blacklist: vec!["Code".to_string()],
+            bundle_id_whitelist: vec!["com.apple.Terminal".to_string()],
+            bundle_id_blacklist: vec!["com.microsoft.VSCode".to_string()],
         };
         let filter = NotificationFocusFilter::from_config(&config);
-        assert_eq!(filter.allows("Code"), false);
-        assert_eq!(filter.allows("Slack"), true);
-        assert_eq!(filter.allows("Safari"), false);
+        assert_eq!(filter.allows(Some("Code"), None), false);
+        assert_eq!(filter.allows(Some("Slack"), None), true);
+        assert_eq!(filter.allows(Some("Safari"), None), false);
+        assert_eq!(
+            filter.allows(Some("Electron"), Some("com.microsoft.VSCode")),
+            false
+        );
+        assert_eq!(
+            filter.allows(Some("Electron"), Some("com.apple.Terminal")),
+            true
+        );
+        assert_eq!(
+            filter.allows(Some("Electron"), Some("com.apple.Safari")),
+            false
+        );
+        assert_eq!(filter.allows(None, None), true);
     }
 }
