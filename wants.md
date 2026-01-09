@@ -85,3 +85,5 @@ Add new items below as you think of them.
 36. [ ] Tab completion while typing prompts (including partial; history-based suggestions, etc.)
 37. [ ] Menu bar dropdown showing what stage agent is in (plan/edit/check/etc.)
 38. [ ] Ability to render flowcharts
+39. [ ] Render Md tables
+40. [ ] Each chat checks out a branch for parallel agents
