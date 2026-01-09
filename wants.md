@@ -84,3 +84,4 @@ Add new items below as you think of them.
 35. [ ] Integrate session management into the resume UI (rename/delete/resume, etc.)
 36. [ ] Tab completion while typing prompts (including partial; history-based suggestions, etc.)
 37. [ ] Menu bar dropdown showing what stage agent is in (plan/edit/check/etc.)
+38. [ ] Ability to render flowcharts
