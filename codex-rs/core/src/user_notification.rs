@@ -38,9 +38,7 @@ struct FocusedAppInfo {
 
 impl FocusedAppInfo {
     fn is_empty(&self) -> bool {
-        self.name
-            .as_ref()
-            .is_none_or(|name| name.trim().is_empty())
+        self.name.as_ref().is_none_or(|name| name.trim().is_empty())
             && self
                 .bundle_id
                 .as_ref()
@@ -74,13 +72,15 @@ impl NotificationFocusFilter {
             return true;
         }
         if let Some(name) = focused_app
-            && self.matches_any(&self.name_blacklist, name) {
-                return false;
-            }
+            && self.matches_any(&self.name_blacklist, name)
+        {
+            return false;
+        }
         if let Some(bundle_id) = focused_bundle_id
-            && self.matches_any(&self.bundle_id_blacklist, bundle_id) {
-                return false;
-            }
+            && self.matches_any(&self.bundle_id_blacklist, bundle_id)
+        {
+            return false;
+        }
         let name_whitelist_active = focused_app.is_some() && !self.name_whitelist.is_empty();
         let bundle_whitelist_active =
             focused_bundle_id.is_some() && !self.bundle_id_whitelist.is_empty();
