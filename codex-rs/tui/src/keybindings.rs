@@ -110,10 +110,7 @@ impl Keybindings {
             paste
         };
 
-        let copy_prompt = vec![KeyBinding::new(
-            KeyCode::Char('c'),
-            KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
-        )];
+        let copy_prompt = vec![KeyBinding::new(KeyCode::Char('l'), KeyModifiers::CONTROL)];
 
         Self {
             submit,

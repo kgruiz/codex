@@ -45,9 +45,40 @@ impl KeyBinding {
     }
 
     pub fn matches(&self, event: &KeyEvent) -> bool {
-        self.key == event.code
+        if self.key == event.code
             && self.modifiers == event.modifiers
             && (event.kind == KeyEventKind::Press || event.kind == KeyEventKind::Repeat)
+        {
+            return true;
+        }
+
+        if event.kind != KeyEventKind::Press && event.kind != KeyEventKind::Repeat {
+            return false;
+        }
+
+        // Terminals without keyboard enhancement may report Ctrl+<letter> as a control byte.
+        if self.modifiers != KeyModifiers::CONTROL || event.modifiers != KeyModifiers::NONE {
+            return false;
+        }
+
+        let KeyCode::Char(binding_char) = self.key else {
+            return false;
+        };
+        let KeyCode::Char(event_char) = event.code else {
+            return false;
+        };
+
+        if !event_char.is_ascii_control() {
+            return false;
+        }
+
+        let lower = binding_char.to_ascii_lowercase();
+        if !lower.is_ascii_lowercase() {
+            return false;
+        }
+
+        let control_code = (lower as u8) - b'a' + 1;
+        event_char as u8 == control_code
     }
 
     pub fn is_press(&self, event: KeyEvent) -> bool {
