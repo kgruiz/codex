@@ -164,6 +164,9 @@ pub enum Op {
         title: Option<String>,
     },
 
+    /// Automatically generate a session title from the conversation history.
+    AutoRenameSession,
+
     /// Approve a command execution
     ExecApproval {
         /// The id of the submission we are approving

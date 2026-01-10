@@ -8,6 +8,7 @@ use app_test_support::create_mock_chat_completions_server_unchecked;
 use app_test_support::create_shell_command_sse_response;
 use app_test_support::format_with_current_shell_display;
 use app_test_support::to_response;
+use app_test_support::wait_for_mock_requests;
 use codex_app_server_protocol::ApprovalDecision;
 use codex_app_server_protocol::CommandExecutionRequestApprovalResponse;
 use codex_app_server_protocol::CommandExecutionStatus;
@@ -45,6 +46,7 @@ async fn turn_start_emits_notifications_and_accepts_model_override() -> Result<(
     // Provide a mock server and config so model wiring is valid.
     // Three Codex turns hit the mock model (session start + two turn/start calls).
     let responses = vec![
+        create_final_assistant_message_sse_response("Done")?,
         create_final_assistant_message_sse_response("Done")?,
         create_final_assistant_message_sse_response("Done")?,
         create_final_assistant_message_sse_response("Done")?,
@@ -153,6 +155,7 @@ async fn turn_start_accepts_local_image_input() -> Result<()> {
     let responses = vec![
         create_final_assistant_message_sse_response("Done")?,
         create_final_assistant_message_sse_response("Done")?,
+        create_final_assistant_message_sse_response("Done")?,
     ];
     // Use the unchecked variant because the request payload includes a LocalImage
     // which the strict matcher does not currently cover.
@@ -220,6 +223,7 @@ async fn turn_start_exec_approval_toggle_v2() -> Result<()> {
             "call1",
         )?,
         create_final_assistant_message_sse_response("done 1")?,
+        create_final_assistant_message_sse_response("Done")?,
         create_shell_command_sse_response(
             vec![
                 "python3".to_string(),
@@ -232,6 +236,7 @@ async fn turn_start_exec_approval_toggle_v2() -> Result<()> {
         )?,
         create_final_assistant_message_sse_response("done 2")?,
     ];
+    let expected_requests = responses.len();
     let server = create_mock_chat_completions_server(responses).await;
     // Default approval is untrusted to force elicitation on first turn.
     create_config_toml(codex_home.as_path(), &server.uri(), "untrusted")?;
@@ -331,6 +336,7 @@ async fn turn_start_exec_approval_toggle_v2() -> Result<()> {
     )
     .await??;
 
+    wait_for_mock_requests(&server, expected_requests, DEFAULT_READ_TIMEOUT).await;
     Ok(())
 }
 
@@ -355,7 +361,9 @@ async fn turn_start_exec_approval_decline_v2() -> Result<()> {
             "call-decline",
         )?,
         create_final_assistant_message_sse_response("done")?,
+        create_final_assistant_message_sse_response("Done")?,
     ];
+    let expected_requests = responses.len();
     let server = create_mock_chat_completions_server(responses).await;
     create_config_toml(codex_home.as_path(), &server.uri(), "untrusted")?;
 
@@ -469,6 +477,7 @@ async fn turn_start_exec_approval_decline_v2() -> Result<()> {
     )
     .await??;
 
+    wait_for_mock_requests(&server, expected_requests, DEFAULT_READ_TIMEOUT).await;
     Ok(())
 }
 
@@ -494,6 +503,7 @@ async fn turn_start_updates_sandbox_and_cwd_between_turns_v2() -> Result<()> {
             "call-first",
         )?,
         create_final_assistant_message_sse_response("done first")?,
+        create_final_assistant_message_sse_response("Done")?,
         create_shell_command_sse_response(
             vec!["echo".to_string(), "second".to_string(), "turn".to_string()],
             None,
@@ -502,6 +512,7 @@ async fn turn_start_updates_sandbox_and_cwd_between_turns_v2() -> Result<()> {
         )?,
         create_final_assistant_message_sse_response("done second")?,
     ];
+    let expected_requests = responses.len();
     let server = create_mock_chat_completions_server(responses).await;
     create_config_toml(&codex_home, &server.uri(), "untrusted")?;
 
@@ -611,6 +622,7 @@ async fn turn_start_updates_sandbox_and_cwd_between_turns_v2() -> Result<()> {
     )
     .await??;
 
+    wait_for_mock_requests(&server, expected_requests, DEFAULT_READ_TIMEOUT).await;
     Ok(())
 }
 
@@ -632,7 +644,9 @@ async fn turn_start_file_change_approval_v2() -> Result<()> {
     let responses = vec![
         create_apply_patch_sse_response(patch, "patch-call")?,
         create_final_assistant_message_sse_response("patch applied")?,
+        create_final_assistant_message_sse_response("Done")?,
     ];
+    let expected_requests = responses.len();
     let server = create_mock_chat_completions_server(responses).await;
     create_config_toml(&codex_home, &server.uri(), "untrusted")?;
 
@@ -777,6 +791,7 @@ async fn turn_start_file_change_approval_v2() -> Result<()> {
     let readme_contents = std::fs::read_to_string(expected_readme_path)?;
     assert_eq!(readme_contents, "new line\n");
 
+    wait_for_mock_requests(&server, expected_requests, DEFAULT_READ_TIMEOUT).await;
     Ok(())
 }
 
@@ -798,7 +813,9 @@ async fn turn_start_file_change_approval_decline_v2() -> Result<()> {
     let responses = vec![
         create_apply_patch_sse_response(patch, "patch-call")?,
         create_final_assistant_message_sse_response("patch declined")?,
+        create_final_assistant_message_sse_response("Done")?,
     ];
+    let expected_requests = responses.len();
     let server = create_mock_chat_completions_server(responses).await;
     create_config_toml(&codex_home, &server.uri(), "untrusted")?;
 
@@ -925,6 +942,7 @@ async fn turn_start_file_change_approval_decline_v2() -> Result<()> {
         "declined patch should not be applied"
     );
 
+    wait_for_mock_requests(&server, expected_requests, DEFAULT_READ_TIMEOUT).await;
     Ok(())
 }
 
@@ -936,7 +954,9 @@ async fn command_execution_notifications_include_process_id() -> Result<()> {
     let responses = vec![
         create_exec_command_sse_response("uexec-1")?,
         create_final_assistant_message_sse_response("done")?,
+        create_final_assistant_message_sse_response("Done")?,
     ];
+    let expected_requests = responses.len();
     let server = create_mock_chat_completions_server(responses).await;
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri(), "never")?;
@@ -1053,6 +1073,7 @@ unified_exec = true
     )
     .await??;
 
+    wait_for_mock_requests(&server, expected_requests, DEFAULT_READ_TIMEOUT).await;
     Ok(())
 }
 

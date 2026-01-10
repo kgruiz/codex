@@ -20,7 +20,7 @@ Control Codex’s behavior during an interactive session with slash commands.
 | `/review`       | review my current changes and find issues                                  |
 | `/new`          | start a new chat during a conversation                                     |
 | `/resume`       | resume an old chat                                                         |
-| `/rename`       | rename the current chat                                                    |
+| `/rename`       | rename the current chat (manual or auto-generated)                         |
 | `/export`       | export the current chat transcript                                         |
 | `/init`         | create an AGENTS.md file with instructions for Codex                       |
 | `/compact`      | summarize conversation to prevent hitting the context limit                |

@@ -3,6 +3,7 @@ use app_test_support::McpProcess;
 use app_test_support::create_final_assistant_message_sse_response;
 use app_test_support::create_mock_chat_completions_server;
 use app_test_support::to_response;
+use app_test_support::wait_for_mock_requests;
 use codex_app_server_protocol::AddConversationListenerParams;
 use codex_app_server_protocol::AddConversationSubscriptionResponse;
 use codex_app_server_protocol::InputItem;
@@ -27,11 +28,13 @@ const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 #[tokio::test]
 async fn test_send_message_success() -> Result<()> {
     // Spin up a mock completions server that immediately ends the Codex turn.
-    // Two Codex turns hit the mock model (session start + send-user-message). Provide two SSE responses.
+    // Two user turns plus the auto-rename call hit the mock model. Provide three SSE responses.
     let responses = vec![
         create_final_assistant_message_sse_response("Done")?,
         create_final_assistant_message_sse_response("Done")?,
+        create_final_assistant_message_sse_response("Done")?,
     ];
+    let expected_requests = responses.len();
     let server = create_mock_chat_completions_server(responses).await;
 
     // Create a temporary Codex home with config pointing at the mock server.
@@ -75,6 +78,7 @@ async fn test_send_message_success() -> Result<()> {
     // Now exercise sendUserMessage twice.
     send_message("Hello", conversation_id, &mut mcp).await?;
     send_message("Hello again", conversation_id, &mut mcp).await?;
+    wait_for_mock_requests(&server, expected_requests, DEFAULT_READ_TIMEOUT).await;
     Ok(())
 }
 
@@ -135,7 +139,11 @@ async fn send_message(
 
 #[tokio::test]
 async fn test_send_message_raw_notifications_opt_in() -> Result<()> {
-    let responses = vec![create_final_assistant_message_sse_response("Done")?];
+    let responses = vec![
+        create_final_assistant_message_sse_response("Done")?,
+        create_final_assistant_message_sse_response("Done")?,
+    ];
+    let expected_requests = responses.len();
     let server = create_mock_chat_completions_server(responses).await;
 
     let codex_home = TempDir::new()?;
@@ -210,6 +218,7 @@ async fn test_send_message_raw_notifications_opt_in() -> Result<()> {
     )
     .await;
 
+    wait_for_mock_requests(&server, expected_requests, DEFAULT_READ_TIMEOUT).await;
     Ok(())
 }
 

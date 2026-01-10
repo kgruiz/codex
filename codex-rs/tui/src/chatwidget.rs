@@ -463,6 +463,7 @@ pub(crate) struct ChatWidget {
     // Current session rollout path (if known)
     current_rollout_path: Option<PathBuf>,
     session_title: Option<String>,
+    has_completed_assistant_message: bool,
     external_editor_state: ExternalEditorState,
 
     pending_active_turn_context: Option<PendingTurnContext>,
@@ -655,6 +656,7 @@ impl ChatWidget {
         self.conversation_id = Some(event.session_id);
         self.current_rollout_path = Some(event.rollout_path.clone());
         self.session_title = None;
+        self.has_completed_assistant_message = false;
         let initial_messages = event.initial_messages.clone();
         let model_for_header = event.model.clone();
         self.config.model = Some(model_for_header.clone());
@@ -765,12 +767,40 @@ impl ChatWidget {
     }
 
     pub(crate) fn open_rename_chat_view(&mut self) {
-        let view = crate::bottom_pane::RenameChatView::new(
-            self.app_event_tx.clone(),
-            self.session_title.clone(),
-            crate::bottom_pane::RenameTarget::CurrentSession,
-        );
-        self.bottom_pane.show_view(Box::new(view));
+        let current_title = self.session_title.clone();
+        let mut items = Vec::new();
+        items.push(SelectionItem {
+            name: "Rename manually".to_string(),
+            description: Some("Set a custom title.".to_string()),
+            actions: vec![Box::new(move |tx| {
+                tx.send(AppEvent::OpenRenameSessionView {
+                    target: crate::bottom_pane::RenameTarget::CurrentSession,
+                    current_title: current_title.clone(),
+                });
+            })],
+            dismiss_on_select: true,
+            ..Default::default()
+        });
+
+        if self.has_completed_assistant_message {
+            items.push(SelectionItem {
+                name: "Generate title from chat".to_string(),
+                description: Some("Generate a title automatically.".to_string()),
+                actions: vec![Box::new(|tx| {
+                    tx.send(AppEvent::CodexOp(Op::AutoRenameSession));
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            });
+        }
+
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some("Rename chat".to_string()),
+            footer_hint: Some(standard_popup_hint_line()),
+            items,
+            completion_behavior: ViewCompletionBehavior::Pop,
+            ..Default::default()
+        });
         self.request_redraw();
     }
 
@@ -885,6 +915,9 @@ impl ChatWidget {
     }
 
     fn on_agent_message(&mut self, message: String) {
+        if !message.trim().is_empty() {
+            self.has_completed_assistant_message = true;
+        }
         // If we have a stream_controller, then the final agent message is redundant and will be a
         // duplicate of what has already been streamed.
         if self.stream_controller.is_none() {
@@ -978,6 +1011,12 @@ impl ChatWidget {
     }
 
     fn on_task_complete(&mut self, last_agent_message: Option<String>) {
+        if last_agent_message
+            .as_ref()
+            .is_some_and(|message| !message.trim().is_empty())
+        {
+            self.has_completed_assistant_message = true;
+        }
         // If a stream is currently active, finalize it.
         self.flush_answer_stream_with_separator();
         self.turn_metrics.finish(Instant::now());
@@ -1911,6 +1950,7 @@ impl ChatWidget {
             feedback,
             current_rollout_path: None,
             session_title: None,
+            has_completed_assistant_message: false,
             external_editor_state: ExternalEditorState::Closed,
             pending_active_turn_context: None,
             active_turn_context: None,
@@ -2033,6 +2073,7 @@ impl ChatWidget {
             feedback,
             current_rollout_path: None,
             session_title: None,
+            has_completed_assistant_message: false,
             external_editor_state: ExternalEditorState::Closed,
             pending_active_turn_context: None,
             active_turn_context: None,
@@ -3322,6 +3363,10 @@ impl ChatWidget {
 
     pub(crate) fn set_external_editor_state(&mut self, state: ExternalEditorState) {
         self.external_editor_state = state;
+    }
+
+    pub(crate) fn set_completed_assistant_message(&mut self, has_completed: bool) {
+        self.has_completed_assistant_message = has_completed;
     }
 
     pub(crate) fn set_footer_hint_override(&mut self, items: Option<Vec<(String, String)>>) {

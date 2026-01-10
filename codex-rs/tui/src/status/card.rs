@@ -347,9 +347,7 @@ impl HistoryCell for StatusHistoryCell {
         if account_value.is_some() {
             push_label(&mut labels, &mut seen, "Account");
         }
-        if self.session_title.is_some() {
-            push_label(&mut labels, &mut seen, "Chat");
-        }
+        push_label(&mut labels, &mut seen, "Chat");
         if self.session_id.is_some() {
             push_label(&mut labels, &mut seen, "Session");
         }
@@ -398,9 +396,8 @@ impl HistoryCell for StatusHistoryCell {
             lines.push(formatter.line("Account", vec![Span::from(account_value)]));
         }
 
-        if let Some(session_title) = self.session_title.as_ref() {
-            lines.push(formatter.line("Chat", vec![Span::from(session_title.clone())]));
-        }
+        let session_title = self.session_title.as_deref().unwrap_or("Untitled");
+        lines.push(formatter.line("Chat", vec![Span::from(session_title.to_string())]));
 
         if let Some(session) = self.session_id.as_ref() {
             lines.push(formatter.line("Session", vec![Span::from(session.clone())]));

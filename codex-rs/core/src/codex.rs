@@ -850,7 +850,24 @@ impl Session {
         let Some(rec) = recorder else {
             return Err(IoError::other("rollout recorder is not available"));
         };
-        rec.update_session_title(title).await
+        rec.update_session_title(title.clone()).await?;
+        let mut state = self.state.lock().await;
+        state.set_session_title(title);
+        Ok(())
+    }
+
+    pub(crate) async fn session_title(&self) -> Option<String> {
+        let state = self.state.lock().await;
+        state.session_title()
+    }
+
+    pub(crate) async fn prepare_auto_rename(&self) -> bool {
+        let mut state = self.state.lock().await;
+        if state.session_title().is_some() || state.auto_rename_attempted() {
+            return false;
+        }
+        state.mark_auto_rename_attempted();
+        true
     }
 
     fn next_internal_sub_id(&self) -> String {
@@ -878,6 +895,16 @@ impl Session {
             InitialHistory::Resumed(_) | InitialHistory::Forked(_) => {
                 let rollout_items = conversation_history.get_rollout_items();
                 let persist = matches!(conversation_history, InitialHistory::Forked(_));
+                if let Some(title) = rollout_items.iter().find_map(|item| {
+                    if let RolloutItem::SessionMeta(meta_line) = item {
+                        Some(meta_line.meta.title.clone())
+                    } else {
+                        None
+                    }
+                }) {
+                    let mut state = self.state.lock().await;
+                    state.set_session_title(title);
+                }
 
                 // If resuming, warn when the last recorded model differs from the current one.
                 if let InitialHistory::Resumed(_) = conversation_history
@@ -1830,6 +1857,9 @@ async fn submission_loop(sess: Arc<Session>, config: Arc<Config>, rx_sub: Receiv
                 )
                 .await;
             }
+            Op::AutoRenameSession => {
+                handlers::auto_rename_session(&sess, sub.id.clone()).await;
+            }
             Op::UpdateSessionTitle { title } => {
                 handlers::update_session_title(&sess, sub.id.clone(), title).await;
             }
@@ -2007,6 +2037,64 @@ mod handlers {
                     id: sub_id,
                     msg: EventMsg::Error(ErrorEvent {
                         message: format!("Failed to rename chat: {err}"),
+                        codex_error_info: Some(CodexErrorInfo::Other),
+                    }),
+                })
+                .await;
+            }
+        }
+    }
+
+    pub async fn auto_rename_session(sess: &Arc<Session>, sub_id: String) {
+        let turn_context = sess.new_default_turn_with_sub_id(sub_id.clone()).await;
+        let title = match crate::chat_title::generate_chat_title(
+            sess.as_ref(),
+            turn_context.as_ref(),
+        )
+        .await
+        {
+            Ok(title) => title,
+            Err(err) => {
+                sess.send_event_raw(Event {
+                    id: sub_id,
+                    msg: EventMsg::Error(ErrorEvent {
+                        message: format!("Auto-rename failed: {err}"),
+                        codex_error_info: Some(CodexErrorInfo::Other),
+                    }),
+                })
+                .await;
+                return;
+            }
+        };
+
+        let Some(title) = title else {
+            sess.send_event_raw(Event {
+                id: sub_id,
+                msg: EventMsg::Error(ErrorEvent {
+                    message: "Auto-rename failed: empty title.".to_string(),
+                    codex_error_info: Some(CodexErrorInfo::Other),
+                }),
+            })
+            .await;
+            return;
+        };
+
+        let result = sess.update_session_title(Some(title.clone())).await;
+        match result {
+            Ok(()) => {
+                sess.send_event_raw(Event {
+                    id: sub_id,
+                    msg: EventMsg::SessionTitleUpdated(SessionTitleUpdatedEvent {
+                        title: Some(title),
+                    }),
+                })
+                .await;
+            }
+            Err(err) => {
+                sess.send_event_raw(Event {
+                    id: sub_id,
+                    msg: EventMsg::Error(ErrorEvent {
+                        message: format!("Auto-rename failed: {err}"),
                         codex_error_info: Some(CodexErrorInfo::Other),
                     }),
                 })

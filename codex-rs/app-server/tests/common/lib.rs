@@ -20,6 +20,7 @@ pub use core_test_support::test_tmp_path_buf;
 pub use mcp_process::McpProcess;
 pub use mock_model_server::create_mock_chat_completions_server;
 pub use mock_model_server::create_mock_chat_completions_server_unchecked;
+pub use mock_model_server::wait_for_mock_requests;
 pub use models_cache::write_models_cache;
 pub use models_cache::write_models_cache_with_models;
 pub use responses::create_apply_patch_sse_response;

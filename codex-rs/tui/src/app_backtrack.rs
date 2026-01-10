@@ -854,6 +854,8 @@ impl App {
         self.current_model = model_family.get_model_slug().to_string();
         // Trim transcript up to the selected user message and re-render it.
         self.trim_transcript_for_backtrack(nth_user_message);
+        self.chat_widget
+            .set_completed_assistant_message(nth_user_message > 0);
         self.current_session_user_index = user_count(&self.transcript_cells);
         self.render_transcript_once(tui);
 

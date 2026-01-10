@@ -484,6 +484,7 @@ fn make_chatwidget_manual_with_config(
         feedback: codex_feedback::CodexFeedback::new(),
         current_rollout_path: None,
         session_title: None,
+        has_completed_assistant_message: false,
         external_editor_state: ExternalEditorState::Closed,
         pending_active_turn_context: None,
         active_turn_context: None,

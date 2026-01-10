@@ -3,6 +3,7 @@ use app_test_support::McpProcess;
 use app_test_support::create_final_assistant_message_sse_response;
 use app_test_support::create_mock_chat_completions_server;
 use app_test_support::to_response;
+use app_test_support::wait_for_mock_requests;
 use codex_app_server_protocol::AddConversationListenerParams;
 use codex_app_server_protocol::AddConversationSubscriptionResponse;
 use codex_app_server_protocol::InputItem;
@@ -23,7 +24,11 @@ const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_conversation_create_and_send_message_ok() -> Result<()> {
     // Mock server – we won't strictly rely on it, but provide one to satisfy any model wiring.
-    let responses = vec![create_final_assistant_message_sse_response("Done")?];
+    let responses = vec![
+        create_final_assistant_message_sse_response("Done")?,
+        create_final_assistant_message_sse_response("Done")?,
+    ];
+    let expected_requests = responses.len();
     let server = create_mock_chat_completions_server(responses).await;
 
     // Temporary Codex home with config pointing at the mock server.
@@ -87,17 +92,7 @@ async fn test_conversation_create_and_send_message_ok() -> Result<()> {
     let _ok: SendUserMessageResponse = to_response::<SendUserMessageResponse>(send_resp)?;
 
     // avoid race condition by waiting for the mock server to receive the chat.completions request
-    let deadline = std::time::Instant::now() + DEFAULT_READ_TIMEOUT;
-    let requests = loop {
-        let requests = server.received_requests().await.unwrap_or_default();
-        if !requests.is_empty() {
-            break requests;
-        }
-        if std::time::Instant::now() >= deadline {
-            panic!("mock server did not receive the chat.completions request in time");
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    };
+    let requests = wait_for_mock_requests(&server, expected_requests, DEFAULT_READ_TIMEOUT).await;
 
     // Verify the outbound request body matches expectations for Chat Completions.
     let request = requests

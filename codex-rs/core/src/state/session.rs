@@ -14,6 +14,8 @@ pub(crate) struct SessionState {
     pub(crate) session_configuration: SessionConfiguration,
     pub(crate) history: ContextManager,
     pub(crate) latest_rate_limits: Option<RateLimitSnapshot>,
+    pub(crate) session_title: Option<String>,
+    pub(crate) auto_rename_attempted: bool,
 }
 
 impl SessionState {
@@ -24,6 +26,8 @@ impl SessionState {
             session_configuration,
             history,
             latest_rate_limits: None,
+            session_title: None,
+            auto_rename_attempted: false,
         }
     }
 
@@ -80,6 +84,22 @@ impl SessionState {
 
     pub(crate) fn get_total_token_usage(&self) -> i64 {
         self.history.get_total_token_usage()
+    }
+
+    pub(crate) fn session_title(&self) -> Option<String> {
+        self.session_title.clone()
+    }
+
+    pub(crate) fn set_session_title(&mut self, title: Option<String>) {
+        self.session_title = title;
+    }
+
+    pub(crate) fn auto_rename_attempted(&self) -> bool {
+        self.auto_rename_attempted
+    }
+
+    pub(crate) fn mark_auto_rename_attempted(&mut self) {
+        self.auto_rename_attempted = true;
     }
 }
 

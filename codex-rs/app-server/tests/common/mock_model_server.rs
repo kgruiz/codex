@@ -1,8 +1,11 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
+use std::time::Instant;
 
 use wiremock::Mock;
 use wiremock::MockServer;
+use wiremock::Request;
 use wiremock::Respond;
 use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
@@ -46,6 +49,24 @@ pub async fn create_mock_chat_completions_server_unchecked(responses: Vec<String
         .await;
 
     server
+}
+
+pub async fn wait_for_mock_requests(
+    server: &MockServer,
+    expected: usize,
+    timeout: Duration,
+) -> Vec<Request> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let requests = server.received_requests().await.unwrap_or_default();
+        if requests.len() >= expected {
+            return requests;
+        }
+        if Instant::now() >= deadline {
+            panic!("mock server did not receive {expected} requests in time");
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }
 
 struct SeqResponder {
