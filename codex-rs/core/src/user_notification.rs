@@ -24,21 +24,30 @@ static NOTIFY_SEND_MISSING_WARNED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Default)]
 struct NotificationFocusFilter {
-    name_whitelist: Vec<WildMatchPattern<'*', '?'>>,
-    name_blacklist: Vec<WildMatchPattern<'*', '?'>>,
+    process_name_whitelist: Vec<WildMatchPattern<'*', '?'>>,
+    process_name_blacklist: Vec<WildMatchPattern<'*', '?'>>,
+    app_name_whitelist: Vec<WildMatchPattern<'*', '?'>>,
+    app_name_blacklist: Vec<WildMatchPattern<'*', '?'>>,
     bundle_id_whitelist: Vec<WildMatchPattern<'*', '?'>>,
     bundle_id_blacklist: Vec<WildMatchPattern<'*', '?'>>,
 }
 
 #[derive(Debug, Default, Clone)]
 struct FocusedAppInfo {
-    name: Option<String>,
+    process_name: Option<String>,
+    app_name: Option<String>,
     bundle_id: Option<String>,
 }
 
 impl FocusedAppInfo {
     fn is_empty(&self) -> bool {
-        self.name.as_ref().is_none_or(|name| name.trim().is_empty())
+        self.process_name
+            .as_ref()
+            .is_none_or(|name| name.trim().is_empty())
+            && self
+                .app_name
+                .as_ref()
+                .is_none_or(|name| name.trim().is_empty())
             && self
                 .bundle_id
                 .as_ref()
@@ -49,30 +58,52 @@ impl FocusedAppInfo {
 impl NotificationFocusFilter {
     fn from_config(config: &NotificationFocusConfig) -> Self {
         Self {
-            name_whitelist: Self::compile_patterns(&config.whitelist),
-            name_blacklist: Self::compile_patterns(&config.blacklist),
+            process_name_whitelist: Self::compile_patterns(&config.process_name_whitelist),
+            process_name_blacklist: Self::compile_patterns(&config.process_name_blacklist),
+            app_name_whitelist: Self::compile_patterns(&config.app_name_whitelist),
+            app_name_blacklist: Self::compile_patterns(&config.app_name_blacklist),
             bundle_id_whitelist: Self::compile_patterns(&config.bundle_id_whitelist),
             bundle_id_blacklist: Self::compile_patterns(&config.bundle_id_blacklist),
         }
     }
 
     fn is_configured(&self) -> bool {
-        !self.name_whitelist.is_empty()
-            || !self.name_blacklist.is_empty()
+        !self.process_name_whitelist.is_empty()
+            || !self.process_name_blacklist.is_empty()
+            || !self.app_name_whitelist.is_empty()
+            || !self.app_name_blacklist.is_empty()
             || !self.bundle_id_whitelist.is_empty()
             || !self.bundle_id_blacklist.is_empty()
     }
 
-    fn allows(&self, focused_app: Option<&str>, focused_bundle_id: Option<&str>) -> bool {
-        let focused_app = focused_app.map(str::trim).filter(|name| !name.is_empty());
+    fn allows(
+        &self,
+        focused_process_name: Option<&str>,
+        focused_app_name: Option<&str>,
+        focused_bundle_id: Option<&str>,
+    ) -> bool {
+        let focused_process_name = focused_process_name
+            .map(str::trim)
+            .filter(|name| !name.is_empty());
+        let focused_app_name = focused_app_name
+            .map(str::trim)
+            .filter(|name| !name.is_empty());
         let focused_bundle_id = focused_bundle_id
             .map(str::trim)
             .filter(|bundle_id| !bundle_id.is_empty());
-        if focused_app.is_none() && focused_bundle_id.is_none() {
+        if focused_process_name.is_none()
+            && focused_app_name.is_none()
+            && focused_bundle_id.is_none()
+        {
             return true;
         }
-        if let Some(name) = focused_app
-            && self.matches_any(&self.name_blacklist, name)
+        if let Some(name) = focused_process_name
+            && self.matches_any(&self.process_name_blacklist, name)
+        {
+            return false;
+        }
+        if let Some(name) = focused_app_name
+            && self.matches_any(&self.app_name_blacklist, name)
         {
             return false;
         }
@@ -81,19 +112,26 @@ impl NotificationFocusFilter {
         {
             return false;
         }
-        let name_whitelist_active = focused_app.is_some() && !self.name_whitelist.is_empty();
+        let process_name_whitelist_active =
+            focused_process_name.is_some() && !self.process_name_whitelist.is_empty();
+        let app_name_whitelist_active =
+            focused_app_name.is_some() && !self.app_name_whitelist.is_empty();
         let bundle_whitelist_active =
             focused_bundle_id.is_some() && !self.bundle_id_whitelist.is_empty();
-        if !name_whitelist_active && !bundle_whitelist_active {
+        if !process_name_whitelist_active && !app_name_whitelist_active && !bundle_whitelist_active
+        {
             return true;
         }
-        let name_allowed = focused_app.is_some_and(|name| {
-            name_whitelist_active && self.matches_any(&self.name_whitelist, name)
+        let process_name_allowed = focused_process_name.is_some_and(|name| {
+            process_name_whitelist_active && self.matches_any(&self.process_name_whitelist, name)
+        });
+        let app_name_allowed = focused_app_name.is_some_and(|name| {
+            app_name_whitelist_active && self.matches_any(&self.app_name_whitelist, name)
         });
         let bundle_allowed = focused_bundle_id.is_some_and(|bundle_id| {
             bundle_whitelist_active && self.matches_any(&self.bundle_id_whitelist, bundle_id)
         });
-        name_allowed || bundle_allowed
+        process_name_allowed || app_name_allowed || bundle_allowed
     }
 
     fn matches_any(&self, patterns: &[WildMatchPattern<'*', '?'>], candidate: &str) -> bool {
@@ -216,7 +254,8 @@ impl UserNotifier {
             return true;
         };
         self.focus_filter.allows(
-            focused_app.name.as_deref(),
+            focused_app.process_name.as_deref(),
+            focused_app.app_name.as_deref(),
             focused_app.bundle_id.as_deref(),
         )
     }
@@ -367,15 +406,21 @@ fn truncate_text(input: &str, max_chars: usize) -> String {
 fn focused_app_info() -> FocusedAppInfo {
     #[cfg(target_os = "macos")]
     {
+        let bundle_id = focused_app_bundle_id_macos();
+        let app_name = bundle_id
+            .as_deref()
+            .and_then(focused_app_display_name_macos);
         FocusedAppInfo {
-            name: focused_app_name_macos(),
-            bundle_id: focused_app_bundle_id_macos(),
+            process_name: focused_app_process_name_macos(),
+            app_name,
+            bundle_id,
         }
     }
     #[cfg(target_os = "windows")]
     {
         FocusedAppInfo {
-            name: focused_app_name_windows(),
+            process_name: focused_app_process_name_windows(),
+            app_name: None,
             bundle_id: None,
         }
     }
@@ -384,12 +429,13 @@ fn focused_app_info() -> FocusedAppInfo {
         #[cfg(target_os = "linux")]
         {
             let name = if is_wsl() && std::env::var_os("WT_SESSION").is_some() {
-                focused_app_name_windows()
+                focused_app_process_name_windows()
             } else {
-                focused_app_name_linux()
+                focused_app_process_name_linux()
             };
             FocusedAppInfo {
-                name,
+                process_name: name,
+                app_name: None,
                 bundle_id: None,
             }
         }
@@ -401,7 +447,7 @@ fn focused_app_info() -> FocusedAppInfo {
 }
 
 #[cfg(target_os = "macos")]
-fn focused_app_name_macos() -> Option<String> {
+fn focused_app_process_name_macos() -> Option<String> {
     let script = r#"tell application "System Events" to get name of first application process whose frontmost is true"#;
     command_output_trimmed("osascript", &["-e", script])
         .ok()
@@ -417,7 +463,7 @@ fn focused_app_bundle_id_macos() -> Option<String> {
 }
 
 #[cfg(target_os = "linux")]
-fn focused_app_name_linux() -> Option<String> {
+fn focused_app_process_name_linux() -> Option<String> {
     if let Ok(Some(class_name)) =
         command_output_trimmed("xdotool", &["getwindowfocus", "getwindowclassname"])
     {
@@ -438,7 +484,7 @@ fn focused_app_name_linux() -> Option<String> {
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
-fn focused_app_name_windows() -> Option<String> {
+fn focused_app_process_name_windows() -> Option<String> {
     let script = r#"
 Add-Type @"
 using System;
@@ -489,6 +535,14 @@ $proc.ProcessName
             None
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn focused_app_display_name_macos(bundle_id: &str) -> Option<String> {
+    let script = format!("name of application id \"{bundle_id}\"");
+    command_output_trimmed("osascript", &["-e", &script])
+        .ok()
+        .flatten()
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -722,27 +776,41 @@ mod tests {
     #[test]
     fn test_focus_filter_lists() {
         let config = NotificationFocusConfig {
-            whitelist: vec!["Slack".to_string()],
-            blacklist: vec!["Code".to_string()],
+            process_name_whitelist: vec!["Slack".to_string()],
+            process_name_blacklist: vec!["Code".to_string()],
+            app_name_whitelist: vec!["Visual Studio Code".to_string()],
+            app_name_blacklist: vec!["Adobe*".to_string()],
             bundle_id_whitelist: vec!["com.apple.Terminal".to_string()],
             bundle_id_blacklist: vec!["com.microsoft.VSCode".to_string()],
         };
         let filter = NotificationFocusFilter::from_config(&config);
-        assert_eq!(filter.allows(Some("Code"), None), false);
-        assert_eq!(filter.allows(Some("Slack"), None), true);
-        assert_eq!(filter.allows(Some("Safari"), None), false);
+        assert_eq!(filter.allows(Some("Code"), None, None), false);
+        assert_eq!(filter.allows(Some("Slack"), None, None), true);
+        assert_eq!(filter.allows(Some("Safari"), None, None), false);
         assert_eq!(
-            filter.allows(Some("Electron"), Some("com.microsoft.VSCode")),
-            false
-        );
-        assert_eq!(
-            filter.allows(Some("Electron"), Some("com.apple.Terminal")),
+            filter.allows(Some("Electron"), Some("Visual Studio Code"), None),
             true
         );
         assert_eq!(
-            filter.allows(Some("Electron"), Some("com.apple.Safari")),
+            filter.allows(Some("Slack"), Some("Adobe Photoshop"), None),
             false
         );
-        assert_eq!(filter.allows(None, None), true);
+        assert_eq!(
+            filter.allows(
+                Some("Electron"),
+                Some("Visual Studio Code"),
+                Some("com.microsoft.VSCode")
+            ),
+            false
+        );
+        assert_eq!(
+            filter.allows(
+                Some("Electron"),
+                Some("Visual Studio Code"),
+                Some("com.apple.Terminal")
+            ),
+            true
+        );
+        assert_eq!(filter.allows(None, None, None), true);
     }
 }

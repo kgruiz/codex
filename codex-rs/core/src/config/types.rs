@@ -365,13 +365,21 @@ impl Default for Notifications {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct NotificationFocusConfig {
-    /// Only send notifications when the focused app matches one of these entries.
-    #[serde(default)]
-    pub whitelist: Vec<String>,
+    /// Only send notifications when the focused app's process name matches one of these entries.
+    #[serde(default, alias = "whitelist")]
+    pub process_name_whitelist: Vec<String>,
 
-    /// Suppress notifications when the focused app matches one of these entries.
+    /// Suppress notifications when the focused app's process name matches one of these entries.
+    #[serde(default, alias = "blacklist")]
+    pub process_name_blacklist: Vec<String>,
+
+    /// Only send notifications when the focused app's display name matches one of these entries.
     #[serde(default)]
-    pub blacklist: Vec<String>,
+    pub app_name_whitelist: Vec<String>,
+
+    /// Suppress notifications when the focused app's display name matches one of these entries.
+    #[serde(default)]
+    pub app_name_blacklist: Vec<String>,
 
     /// Only send notifications when the focused app bundle identifier matches one of these entries.
     #[serde(default)]

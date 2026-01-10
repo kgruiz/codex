@@ -732,11 +732,15 @@ Optionally filter built-in/external notifications based on the currently focused
 
 ```toml
 [notification_focus]
-# Only notify when the focused app matches a whitelist entry.
-whitelist = ["Slack", "iTerm*"]
+# Only notify when the focused app's process name matches a whitelist entry.
+process_name_whitelist = ["Slack", "iTerm*"]
 
-# Never notify when the focused app matches a blacklist entry.
-blacklist = ["Zoom"]
+# Never notify when the focused app's process name matches a blacklist entry.
+process_name_blacklist = ["Zoom"]
+
+# macOS-only: match the focused app's display name.
+app_name_whitelist = ["Visual Studio Code"]
+app_name_blacklist = ["Adobe*"]
 
 # macOS-only: match the focused app bundle identifier.
 bundle_id_whitelist = ["com.apple.Terminal"]
@@ -745,13 +749,14 @@ bundle_id_blacklist = ["com.microsoft.VSCode*"]
 
 Behavior notes:
 
-- If a blacklist entry matches, notifications are suppressed even if whitelisted.
-- If a whitelist is provided, notifications are sent only when the focused app matches it.
+- If any blacklist entry matches, notifications are suppressed even if whitelisted.
+- If any whitelist is provided, notifications are sent only when the focused app matches at least one whitelist.
 - If focus detection fails, Codex sends notifications anyway.
 - macOS uses `System Events` to detect the frontmost app.
 - Windows/WSL uses PowerShell to query the foreground process.
 - Linux uses X11 tools (`xdotool` or `xprop`); Wayland desktops may not support this.
-- Bundle identifier filtering is only supported on macOS. On other platforms, these settings are ignored.
+- Display name and bundle identifier filtering are only supported on macOS. On other platforms, these settings are ignored.
+- Legacy `whitelist`/`blacklist` keys are accepted as aliases for `process_name_whitelist`/`process_name_blacklist`.
 
 You can toggle this per session (without saving config changes) via:
 
@@ -1070,8 +1075,10 @@ Valid values:
 | `completion_command`                             | array<string>                                                     | External program for turn-complete notifications.                                                                               |
 | `approval_notify`                                | boolean                                                           | Enable built-in approval notifications (default: false).                                                                        |
 | `completion_notify`                              | boolean                                                           | Enable built-in turn-complete notifications (default: false).                                                                   |
-| `notification_focus.whitelist`                   | array<string>                                                     | Allow notifications only when the focused app matches (case-insensitive, `*` and `?` wildcards).                                 |
-| `notification_focus.blacklist`                   | array<string>                                                     | Suppress notifications when the focused app matches (case-insensitive, `*` and `?` wildcards).                                   |
+| `notification_focus.process_name_whitelist`      | array<string>                                                     | Allow notifications only when the focused app's process name matches (case-insensitive, `*` and `?` wildcards).                  |
+| `notification_focus.process_name_blacklist`      | array<string>                                                     | Suppress notifications when the focused app's process name matches (case-insensitive, `*` and `?` wildcards).                    |
+| `notification_focus.app_name_whitelist`          | array<string>                                                     | macOS-only: allow notifications only when the focused app's display name matches.                                                |
+| `notification_focus.app_name_blacklist`          | array<string>                                                     | macOS-only: suppress notifications when the focused app's display name matches.                                                  |
 | `notification_focus.bundle_id_whitelist`         | array<string>                                                     | macOS-only: allow notifications only when the focused app bundle identifier matches.                                             |
 | `notification_focus.bundle_id_blacklist`         | array<string>                                                     | macOS-only: suppress notifications when the focused app bundle identifier matches.                                               |
 | `tui.animations`                                 | boolean                                                           | Enable terminal animations (welcome screen, shimmer, spinner). Defaults to true; set to `false` to disable visual motion.       |

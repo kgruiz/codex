@@ -189,8 +189,10 @@ windows_wsl_setup_acknowledged = false
 
 # Focused-app filter for notifications (case-insensitive, supports * and ?).
 # [notification_focus]
-# whitelist = ["Slack", "iTerm*"]
-# blacklist = ["Zoom"]
+# process_name_whitelist = ["Slack", "iTerm*"]
+# process_name_blacklist = ["Zoom"]
+# app_name_whitelist = ["Visual Studio Code"]
+# app_name_blacklist = ["Adobe*"]
 # bundle_id_whitelist = ["com.apple.Terminal"]
 # bundle_id_blacklist = ["com.microsoft.VSCode*"]
 

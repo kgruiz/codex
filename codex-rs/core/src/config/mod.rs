@@ -1351,8 +1351,14 @@ impl Config {
                 .collect::<Vec<String>>()
         };
         let notification_focus = NotificationFocusConfig {
-            whitelist: normalize_focus_list(cfg.notification_focus.whitelist),
-            blacklist: normalize_focus_list(cfg.notification_focus.blacklist),
+            process_name_whitelist: normalize_focus_list(
+                cfg.notification_focus.process_name_whitelist,
+            ),
+            process_name_blacklist: normalize_focus_list(
+                cfg.notification_focus.process_name_blacklist,
+            ),
+            app_name_whitelist: normalize_focus_list(cfg.notification_focus.app_name_whitelist),
+            app_name_blacklist: normalize_focus_list(cfg.notification_focus.app_name_blacklist),
             bundle_id_whitelist: normalize_focus_list(cfg.notification_focus.bundle_id_whitelist),
             bundle_id_blacklist: normalize_focus_list(cfg.notification_focus.bundle_id_blacklist),
         };
@@ -4013,8 +4019,10 @@ mod notifications_tests {
     fn test_notification_focus_lists() {
         let toml = r#"
             [notification_focus]
-            whitelist = ["Slack", "iTerm*"]
-            blacklist = ["Zoom"]
+            process_name_whitelist = ["Slack", "iTerm*"]
+            process_name_blacklist = ["Zoom"]
+            app_name_whitelist = ["Visual Studio Code"]
+            app_name_blacklist = ["Adobe*"]
             bundle_id_whitelist = ["com.apple.Terminal"]
             bundle_id_blacklist = ["com.apple.Zoom"]
         "#;
@@ -4023,21 +4031,34 @@ mod notifications_tests {
             notification_focus: NotificationFocusConfig,
         }
         let parsed: RootToml = toml::from_str(toml).expect("deserialize notification_focus");
-        assert_eq!(
-            parsed.notification_focus.whitelist,
-            vec!["Slack".to_string(), "iTerm*".to_string()]
-        );
-        assert_eq!(
-            parsed.notification_focus.blacklist,
-            vec!["Zoom".to_string()]
-        );
-        assert_eq!(
-            parsed.notification_focus.bundle_id_whitelist,
-            vec!["com.apple.Terminal".to_string()]
-        );
-        assert_eq!(
-            parsed.notification_focus.bundle_id_blacklist,
-            vec!["com.apple.Zoom".to_string()]
-        );
+        let expected = NotificationFocusConfig {
+            process_name_whitelist: vec!["Slack".to_string(), "iTerm*".to_string()],
+            process_name_blacklist: vec!["Zoom".to_string()],
+            app_name_whitelist: vec!["Visual Studio Code".to_string()],
+            app_name_blacklist: vec!["Adobe*".to_string()],
+            bundle_id_whitelist: vec!["com.apple.Terminal".to_string()],
+            bundle_id_blacklist: vec!["com.apple.Zoom".to_string()],
+        };
+        assert_eq!(parsed.notification_focus, expected);
+    }
+
+    #[test]
+    fn test_notification_focus_legacy_lists() {
+        let toml = r#"
+            [notification_focus]
+            whitelist = ["Slack"]
+            blacklist = ["Zoom"]
+        "#;
+        #[derive(Deserialize, Debug, PartialEq)]
+        struct RootToml {
+            notification_focus: NotificationFocusConfig,
+        }
+        let parsed: RootToml = toml::from_str(toml).expect("deserialize legacy lists");
+        let expected = NotificationFocusConfig {
+            process_name_whitelist: vec!["Slack".to_string()],
+            process_name_blacklist: vec!["Zoom".to_string()],
+            ..NotificationFocusConfig::default()
+        };
+        assert_eq!(parsed.notification_focus, expected);
     }
 }

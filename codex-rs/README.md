@@ -51,7 +51,7 @@ Codex can notify you in two ways:
 - **External commands**: configure `approval_command` and/or `completion_command` to run a script with a JSON payload.
 - **Built-in notifier**: set `approval_notify` and/or `completion_notify` to enable system notifications without extra setup.
 
-You can also filter these notifications based on the currently focused app (or macOS bundle identifier) using the `[notification_focus]` config table, and toggle the filter for the current session via `/notifications`.
+You can also filter these notifications based on the currently focused app process name, macOS app display name, or bundle identifier using the `[notification_focus]` config table, and toggle the filter for the current session via `/notifications`.
 
 See the configuration guide for payload shapes and examples. When Codex detects that it is running under WSL 2 inside Windows Terminal (`WT_SESSION` is set), the TUI automatically falls back to native Windows toast notifications so approval prompts and completed turns surface even though Windows Terminal does not implement OSC 9.
 
