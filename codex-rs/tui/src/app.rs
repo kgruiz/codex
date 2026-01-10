@@ -18,7 +18,7 @@ use crate::model_migration::run_model_migration_prompt;
 use crate::pager_overlay::Overlay;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::render::renderable::Renderable;
-use crate::resume_picker::ResumeSelection;
+use crate::sessions_picker::SessionSelection;
 use crate::tui;
 use crate::tui::TuiEvent;
 use crate::update_action::UpdateAction;
@@ -407,7 +407,7 @@ impl App {
         active_profile: Option<String>,
         initial_prompt: Option<String>,
         initial_images: Vec<PathBuf>,
-        resume_selection: ResumeSelection,
+        resume_selection: SessionSelection,
         feedback: codex_feedback::CodexFeedback,
         is_first_run: bool,
     ) -> Result<AppExitInfo> {
@@ -444,7 +444,7 @@ impl App {
             .construct_model_family(model.as_str(), &config)
             .await;
         let mut chat_widget = match resume_selection {
-            ResumeSelection::StartFresh | ResumeSelection::Exit => {
+            SessionSelection::StartFresh | SessionSelection::Exit => {
                 let init = crate::chatwidget::ChatWidgetInit {
                     config: config.clone(),
                     frame_requester: tui.frame_requester(),
@@ -460,7 +460,7 @@ impl App {
                 };
                 ChatWidget::new(init, conversation_manager.clone())
             }
-            ResumeSelection::Resume(path) => {
+            SessionSelection::Resume(path) => {
                 let resumed = conversation_manager
                     .resume_conversation_from_rollout(
                         config.clone(),
@@ -696,20 +696,24 @@ impl App {
                 }
                 tui.frame_requester().schedule_frame();
             }
-            AppEvent::OpenResumePicker => {
-                match crate::resume_picker::run_resume_picker(
+            AppEvent::OpenSessionsPicker { view } => {
+                let current_path = self.chat_widget.rollout_path();
+                match crate::sessions_picker::run_sessions_picker(
                     tui,
                     &self.config.codex_home,
                     &self.config.model_provider_id,
                     false,
+                    view,
+                    crate::sessions_picker::SessionPickerExit::Close,
+                    current_path,
                 )
                 .await?
                 {
-                    ResumeSelection::Resume(path) => {
+                    SessionSelection::Resume(path) => {
                         self.resume_from_rollout(&model_family, tui.frame_requester(), path)
                             .await;
                     }
-                    ResumeSelection::Exit | ResumeSelection::StartFresh => {}
+                    SessionSelection::Exit | SessionSelection::StartFresh => {}
                 }
 
                 // Leaving alt-screen may blank the inline viewport; force a redraw either way.

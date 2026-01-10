@@ -13,6 +13,7 @@ use crate::bottom_pane::RenameTarget;
 use crate::get_git_diff::GitDiffResult;
 use crate::history_cell::HistoryCell;
 use crate::session_manager::SessionManagerEntry;
+use crate::sessions_picker::SessionView;
 
 use codex_core::features::Feature;
 use codex_core::protocol::AskForApproval;
@@ -56,8 +57,10 @@ pub(crate) enum AppEvent {
     /// Start a new session.
     NewSession,
 
-    /// Open the resume picker inside the running TUI session.
-    OpenResumePicker,
+    /// Open the sessions picker inside the running TUI session.
+    OpenSessionsPicker {
+        view: SessionView,
+    },
 
     /// Request to exit the application gracefully.
     ExitRequest,

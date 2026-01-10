@@ -23,7 +23,9 @@ pub enum SlashCommand {
     Normal,
     New,
     Resume,
+    #[strum(serialize = "sessions", serialize = "session")]
     Session,
+    Archived,
     Rename,
     Export,
     Init,
@@ -57,6 +59,7 @@ impl SlashCommand {
             SlashCommand::Normal => "return to normal editing mode",
             SlashCommand::Resume => "resume a saved chat",
             SlashCommand::Session => "manage saved chats",
+            SlashCommand::Archived => "view archived chats",
             SlashCommand::Rename => "rename this chat (manual or auto-generated)",
             SlashCommand::Export => "export this chat",
             SlashCommand::Quit | SlashCommand::Exit => "exit Codex",
@@ -89,6 +92,7 @@ impl SlashCommand {
             SlashCommand::New
             | SlashCommand::Resume
             | SlashCommand::Session
+            | SlashCommand::Archived
             | SlashCommand::Export
             | SlashCommand::Init
             | SlashCommand::Compact

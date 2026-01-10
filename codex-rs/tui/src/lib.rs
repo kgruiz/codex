@@ -67,10 +67,10 @@ mod oss_selection;
 mod pager_overlay;
 pub mod public_widgets;
 mod render;
-mod resume_picker;
 mod selection_list;
 mod session_log;
 mod session_manager;
+mod sessions_picker;
 mod shimmer;
 mod slash_command;
 mod status;
@@ -443,7 +443,7 @@ async fn run_ratatui_app(
     // Determine resume behavior: explicit id, then resume last, then picker.
     let resume_selection = if let Some(id_str) = cli.resume_session_id.as_deref() {
         match find_conversation_path_by_id_str(&config.codex_home, id_str).await? {
-            Some(path) => resume_picker::ResumeSelection::Resume(path),
+            Some(path) => sessions_picker::SessionSelection::Resume(path),
             None => {
                 error!("Error finding conversation path: {id_str}");
                 restore();
@@ -477,20 +477,23 @@ async fn run_ratatui_app(
             Ok(page) => page
                 .items
                 .first()
-                .map(|it| resume_picker::ResumeSelection::Resume(it.path.clone()))
-                .unwrap_or(resume_picker::ResumeSelection::StartFresh),
-            Err(_) => resume_picker::ResumeSelection::StartFresh,
+                .map(|it| sessions_picker::SessionSelection::Resume(it.path.clone()))
+                .unwrap_or(sessions_picker::SessionSelection::StartFresh),
+            Err(_) => sessions_picker::SessionSelection::StartFresh,
         }
     } else if cli.resume_picker {
-        match resume_picker::run_resume_picker(
+        match sessions_picker::run_sessions_picker(
             &mut tui,
             &config.codex_home,
             &config.model_provider_id,
             cli.resume_show_all,
+            sessions_picker::SessionView::Active,
+            sessions_picker::SessionPickerExit::StartFresh,
+            None,
         )
         .await?
         {
-            resume_picker::ResumeSelection::Exit => {
+            sessions_picker::SessionSelection::Exit => {
                 restore();
                 session_log::log_session_end();
                 return Ok(AppExitInfo {
@@ -502,7 +505,7 @@ async fn run_ratatui_app(
             other => other,
         }
     } else {
-        resume_picker::ResumeSelection::StartFresh
+        sessions_picker::SessionSelection::StartFresh
     };
 
     let Cli { prompt, images, .. } = cli;

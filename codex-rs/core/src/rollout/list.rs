@@ -85,7 +85,8 @@ impl serde::Serialize for Cursor {
                 "[year]-[month]-[day]T[hour]-[minute]-[second]"
             ))
             .map_err(|e| serde::ser::Error::custom(format!("format error: {e}")))?;
-        serializer.serialize_str(&format!("{ts_str}|{}", self.id))
+        let id = self.id;
+        serializer.serialize_str(&format!("{ts_str}|{id}"))
     }
 }
 
@@ -112,7 +113,25 @@ pub(crate) async fn get_conversations(
 ) -> io::Result<ConversationsPage> {
     let mut root = codex_home.to_path_buf();
     root.push(SESSIONS_SUBDIR);
+    get_conversations_in_dir(
+        &root,
+        page_size,
+        cursor,
+        allowed_sources,
+        model_providers,
+        default_provider,
+    )
+    .await
+}
 
+pub(crate) async fn get_conversations_in_dir(
+    root: &Path,
+    page_size: usize,
+    cursor: Option<&Cursor>,
+    allowed_sources: &[SessionSource],
+    model_providers: Option<&[String]>,
+    default_provider: &str,
+) -> io::Result<ConversationsPage> {
     if !root.exists() {
         return Ok(ConversationsPage {
             items: Vec::new(),
@@ -128,7 +147,7 @@ pub(crate) async fn get_conversations(
         model_providers.and_then(|filters| ProviderMatcher::new(filters, default_provider));
 
     let result = traverse_directories_for_paths(
-        root.clone(),
+        root.to_path_buf(),
         page_size,
         anchor,
         allowed_sources,
@@ -159,6 +178,18 @@ async fn traverse_directories_for_paths(
     let mut more_matches_available = false;
 
     let year_dirs = collect_dirs_desc(&root, |s| s.parse::<u16>().ok()).await?;
+    if year_dirs.is_empty() {
+        return traverse_files_in_root(
+            root,
+            page_size,
+            anchor_ts,
+            anchor_id,
+            anchor_passed,
+            allowed_sources,
+            provider_matcher,
+        )
+        .await;
+    }
 
     'outer: for (_year, year_path) in year_dirs.iter() {
         if scanned_files >= MAX_SCAN_FILES {
@@ -241,6 +272,101 @@ async fn traverse_directories_for_paths(
                     }
                 }
             }
+        }
+    }
+
+    let reached_scan_cap = scanned_files >= MAX_SCAN_FILES;
+    if reached_scan_cap && !items.is_empty() {
+        more_matches_available = true;
+    }
+
+    let next = if more_matches_available {
+        build_next_cursor(&items)
+    } else {
+        None
+    };
+    Ok(ConversationsPage {
+        items,
+        next_cursor: next,
+        num_scanned_files: scanned_files,
+        reached_scan_cap,
+    })
+}
+
+async fn traverse_files_in_root(
+    root: PathBuf,
+    page_size: usize,
+    anchor_ts: OffsetDateTime,
+    anchor_id: Uuid,
+    mut anchor_passed: bool,
+    allowed_sources: &[SessionSource],
+    provider_matcher: Option<&ProviderMatcher<'_>>,
+) -> io::Result<ConversationsPage> {
+    let mut items: Vec<ConversationItem> = Vec::with_capacity(page_size);
+    let mut scanned_files = 0usize;
+    let mut more_matches_available = false;
+
+    let mut files = collect_files(&root, |name_str, path| {
+        if !name_str.starts_with("rollout-") || !name_str.ends_with(".jsonl") {
+            return None;
+        }
+        parse_timestamp_uuid_from_filename(name_str)
+            .map(|(ts, id)| (ts, id, name_str.to_string(), path.to_path_buf()))
+    })
+    .await?;
+    files.sort_by_key(|(ts, sid, _name_str, _path)| (Reverse(*ts), Reverse(*sid)));
+
+    for (ts, sid, _name_str, path) in files.into_iter() {
+        scanned_files += 1;
+        if scanned_files >= MAX_SCAN_FILES && items.len() >= page_size {
+            more_matches_available = true;
+            break;
+        }
+        if !anchor_passed {
+            if ts < anchor_ts || (ts == anchor_ts && sid < anchor_id) {
+                anchor_passed = true;
+            } else {
+                continue;
+            }
+        }
+        if items.len() == page_size {
+            more_matches_available = true;
+            break;
+        }
+        let summary = read_head_summary(&path, HEAD_RECORD_LIMIT)
+            .await
+            .unwrap_or_default();
+        if !allowed_sources.is_empty()
+            && !summary
+                .source
+                .is_some_and(|source| allowed_sources.iter().any(|s| s == &source))
+        {
+            continue;
+        }
+        if let Some(matcher) = provider_matcher
+            && !matcher.matches(summary.model_provider.as_deref())
+        {
+            continue;
+        }
+        if summary.saw_session_meta && summary.saw_user_event {
+            let HeadTailSummary {
+                head,
+                created_at,
+                mut updated_at,
+                ..
+            } = summary;
+            if updated_at.is_none() {
+                updated_at = file_modified_rfc3339(&path)
+                    .await
+                    .unwrap_or(None)
+                    .or_else(|| created_at.clone());
+            }
+            items.push(ConversationItem {
+                path,
+                head,
+                created_at,
+                updated_at,
+            });
         }
     }
 

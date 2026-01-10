@@ -144,6 +144,7 @@ use crate::render::renderable::RenderableExt;
 use crate::render::renderable::RenderableItem;
 use crate::session_manager::SessionManagerEntry;
 use crate::session_manager::paths_match;
+use crate::sessions_picker::SessionView;
 use crate::slash_command::SlashCommand;
 use crate::status::RateLimitSnapshotDisplay;
 use crate::text_formatting::truncate_text;
@@ -438,7 +439,7 @@ pub(crate) struct ChatWidget {
     frame_requester: FrameRequester,
     // Whether to include the initial welcome banner on session configured
     show_welcome_banner: bool,
-    // When resuming an existing session (selected via resume picker), avoid an
+    // When resuming an existing session (selected via sessions picker), avoid an
     // immediate redraw on SessionConfigured to prevent a gratuitous UI flicker.
     suppress_session_configured_redraw: bool,
     // User messages queued while a turn is in progress
@@ -3399,10 +3400,19 @@ impl ChatWidget {
                 self.app_event_tx.send(AppEvent::NewSession);
             }
             SlashCommand::Resume => {
-                self.app_event_tx.send(AppEvent::OpenResumePicker);
+                self.app_event_tx.send(AppEvent::OpenSessionsPicker {
+                    view: SessionView::Active,
+                });
             }
             SlashCommand::Session => {
-                self.open_session_manager();
+                self.app_event_tx.send(AppEvent::OpenSessionsPicker {
+                    view: SessionView::Active,
+                });
+            }
+            SlashCommand::Archived => {
+                self.app_event_tx.send(AppEvent::OpenSessionsPicker {
+                    view: SessionView::Archived,
+                });
             }
             SlashCommand::Rename => {
                 self.open_rename_chat_view();

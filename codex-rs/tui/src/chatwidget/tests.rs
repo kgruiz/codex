@@ -1,6 +1,7 @@
 use super::*;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::sessions_picker::SessionView;
 use crate::test_backend::VT100Backend;
 use crate::tui::FrameRequester;
 use assert_matches::assert_matches;
@@ -1660,7 +1661,12 @@ fn slash_resume_opens_picker() {
 
     chat.dispatch_command(SlashCommand::Resume, None);
 
-    assert_matches!(rx.try_recv(), Ok(AppEvent::OpenResumePicker));
+    assert_matches!(
+        rx.try_recv(),
+        Ok(AppEvent::OpenSessionsPicker {
+            view: SessionView::Active
+        })
+    );
 }
 
 #[test]

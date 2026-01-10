@@ -20,10 +20,12 @@ use tokio::sync::oneshot;
 use tracing::info;
 use tracing::warn;
 
+use super::ARCHIVED_SESSIONS_SUBDIR;
 use super::SESSIONS_SUBDIR;
 use super::list::ConversationsPage;
 use super::list::Cursor;
 use super::list::get_conversations;
+use super::list::get_conversations_in_dir;
 use super::policy::is_persisted_response_item;
 use crate::config::Config;
 use crate::default_client::originator;
@@ -108,6 +110,27 @@ impl RolloutRecorder {
     ) -> std::io::Result<ConversationsPage> {
         get_conversations(
             codex_home,
+            page_size,
+            cursor,
+            allowed_sources,
+            model_providers,
+            default_provider,
+        )
+        .await
+    }
+
+    /// List archived conversations under the provided Codex home directory.
+    pub async fn list_archived_conversations(
+        codex_home: &Path,
+        page_size: usize,
+        cursor: Option<&Cursor>,
+        allowed_sources: &[SessionSource],
+        model_providers: Option<&[String]>,
+        default_provider: &str,
+    ) -> std::io::Result<ConversationsPage> {
+        let root = codex_home.join(ARCHIVED_SESSIONS_SUBDIR);
+        get_conversations_in_dir(
+            &root,
             page_size,
             cursor,
             allowed_sources,
@@ -348,8 +371,10 @@ fn create_log_file(
     let mut dir = config.codex_home.clone();
     dir.push(SESSIONS_SUBDIR);
     dir.push(timestamp.year().to_string());
-    dir.push(format!("{:02}", u8::from(timestamp.month())));
-    dir.push(format!("{:02}", timestamp.day()));
+    let month = u8::from(timestamp.month());
+    dir.push(format!("{month:02}"));
+    let day = timestamp.day();
+    dir.push(format!("{day:02}"));
     fs::create_dir_all(&dir)?;
 
     // Custom format for YYYY-MM-DDThh-mm-ss. Use `-` instead of `:` for
