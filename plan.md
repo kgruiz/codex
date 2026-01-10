@@ -1,0 +1,28 @@
+**Updated Outline**
+- Semantics: “delete” means archive (move to archived); “rename” edits session metadata title only (no filename changes).
+- Rename the picker module + entry point (e.g., `resume_picker.rs` → `sessions_picker.rs`, `run_resume_picker` → `run_sessions_picker`) and update call sites.
+- Update UI copy to match broader scope:
+  - Header “Sessions” or “Manage sessions” instead of “Resume a previous session.”
+  - Key hints reflect resume/rename/archive/toggles.
+- Session actions:
+  - `Enter` resume, `r` rename, `x` archive, `Esc` close, `Ctrl+C` exit.
+  - Inline rename prompt; prefill title; `Enter` save, `Esc` cancel; empty clears title.
+  - Archive confirmation modal: “Archive session?” with `Enter` archive, `Esc` cancel.
+  - List refresh after rename/archive; keep selection stable when possible.
+- Archived view:
+  - Toggle (e.g., `a`) to switch active/archived in the picker.
+  - `/archived` opens picker in archived mode.
+- Show‑all toggle:
+  - Toggle (e.g., `o`) to switch cwd‑scoped vs all sessions in‑picker.
+- Entry points:
+  - `/sessions` opens the picker.
+  - `/resume` inside existing chat opens the picker.
+  - `/archived` opens picker in archived mode.
+- ESC behavior:
+  - From in‑chat `/sessions`/`/resume`/`/archived`, `Esc` returns to that chat.
+  - From `codex resume`, keep current “start fresh/exit” behavior.
+- Testing:
+  - Run required tests; if any failures are unrelated to these changes, note and ignore them.
+- Versioning and docs:
+  - After completing changes, add a commit.
+  - Then bump minor version, update docs and/or snapshots if needed, and commit again.
