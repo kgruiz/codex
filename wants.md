@@ -80,7 +80,7 @@ Add new items below as you think of them.
 31. [x] Chat name shows in /status
 32. [x] Keybind to copy contents in prompt area
 33. [ ] Load repo `AGENTS.md` as part of system prompt (not just search at start); show in `/status`
-34. [ ] Fix `/sessions` UI when list is long (end-of-line squish, similar to prior queue UI)
+34. [ ] ~~Fix `/sessions` UI when list is long (end-of-line squish, similar to prior queue UI)~~
 35. [x] Integrate session management into the resume UI (rename/delete/resume, etc.)
 36. [ ] Tab completion while typing prompts (including partial; history-based suggestions, etc.)
 37. [ ] Menu bar dropdown showing what stage agent is in (plan/edit/check/etc.)
