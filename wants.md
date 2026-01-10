@@ -76,7 +76,7 @@ Add new items below as you think of them.
 27. [ ] Allow planning and interacting in editor like Cursor and Antigravity use
 28. [ ] Investigate whether background terminal checks are too frequent (possible token usage impact)
 29. [x] Fix attached image placeholder (`[<filename> <size>]`) turning into plain text when editing messages (edit flow or queue editor)
-30. [ ] Use a model to name chats with configurable model selection and a full off switch to save costs
+30. [x] Use a model to name chats with configurable model selection and a full off switch to save costs
 31. [x] Chat name shows in /status
 32. [x] Keybind to copy contents in prompt area
 33. [ ] Load repo `AGENTS.md` as part of system prompt (not just search at start); show in `/status`
