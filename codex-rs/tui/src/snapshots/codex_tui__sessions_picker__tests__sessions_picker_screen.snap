@@ -1,0 +1,13 @@
+---
+source: tui/src/sessions_picker.rs
+expression: snapshot
+---
+Sessions
+Type to search
+  Updated  Branch  CWD  Session
+No sessions yet
+
+
+
+
+enter resume     r rename     x archive     a archived     o scoped     esc star
