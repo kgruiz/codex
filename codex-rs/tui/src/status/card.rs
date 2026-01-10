@@ -63,6 +63,7 @@ struct StatusHistoryCell {
     sandbox: String,
     agents_summary: String,
     account: Option<StatusAccountDisplay>,
+    session_title: Option<String>,
     session_id: Option<String>,
     token_usage: StatusTokenUsageData,
     rate_limits: StatusRateLimitData,
@@ -76,6 +77,7 @@ pub(crate) fn new_status_output(
     total_usage: &TokenUsage,
     context_usage: Option<&TokenUsage>,
     session_id: &Option<ConversationId>,
+    session_title: Option<String>,
     rate_limits: Option<&RateLimitSnapshotDisplay>,
     plan_type: Option<PlanType>,
     now: DateTime<Local>,
@@ -89,6 +91,7 @@ pub(crate) fn new_status_output(
         total_usage,
         context_usage,
         session_id,
+        session_title,
         rate_limits,
         plan_type,
         now,
@@ -107,6 +110,7 @@ impl StatusHistoryCell {
         total_usage: &TokenUsage,
         context_usage: Option<&TokenUsage>,
         session_id: &Option<ConversationId>,
+        session_title: Option<String>,
         rate_limits: Option<&RateLimitSnapshotDisplay>,
         plan_type: Option<PlanType>,
         now: DateTime<Local>,
@@ -134,6 +138,7 @@ impl StatusHistoryCell {
         let agents_summary = compose_agents_summary(config);
         let account = compose_account_display(auth_manager, plan_type);
         let session_id = session_id.as_ref().map(std::string::ToString::to_string);
+        let session_title = session_title.filter(|title| !title.trim().is_empty());
         let context_window = model_family.context_window.and_then(|window| {
             context_usage.map(|usage| StatusContextWindowData {
                 percent_remaining: usage.percent_of_context_window_remaining(window),
@@ -158,6 +163,7 @@ impl StatusHistoryCell {
             sandbox,
             agents_summary,
             account,
+            session_title,
             session_id,
             token_usage,
             rate_limits,
@@ -341,6 +347,9 @@ impl HistoryCell for StatusHistoryCell {
         if account_value.is_some() {
             push_label(&mut labels, &mut seen, "Account");
         }
+        if self.session_title.is_some() {
+            push_label(&mut labels, &mut seen, "Chat");
+        }
         if self.session_id.is_some() {
             push_label(&mut labels, &mut seen, "Session");
         }
@@ -387,6 +396,10 @@ impl HistoryCell for StatusHistoryCell {
 
         if let Some(account_value) = account_value {
             lines.push(formatter.line("Account", vec![Span::from(account_value)]));
+        }
+
+        if let Some(session_title) = self.session_title.as_ref() {
+            lines.push(formatter.line("Chat", vec![Span::from(session_title.clone())]));
         }
 
         if let Some(session) = self.session_id.as_ref() {

@@ -159,7 +159,50 @@ async fn status_snapshot_includes_reasoning_details() {
         &usage,
         Some(&usage),
         &None,
+        None,
         Some(&rate_display),
+        None,
+        captured_at,
+        &model_slug,
+    );
+    let mut rendered_lines = render_lines(&composite.display_lines(80));
+    if cfg!(windows) {
+        for line in &mut rendered_lines {
+            *line = line.replace('\\', "/");
+        }
+    }
+    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    assert_snapshot!(sanitized);
+}
+
+#[tokio::test]
+async fn status_snapshot_includes_chat_title() {
+    let temp_home = TempDir::new().expect("temp home");
+    let mut config = test_config(&temp_home).await;
+    config.model = Some("gpt-5.1-codex-max".to_string());
+    config.model_provider_id = "openai".to_string();
+    config.cwd = PathBuf::from("/workspace/tests");
+
+    let auth_manager = test_auth_manager(&config);
+    let usage = TokenUsage::default();
+
+    let captured_at = chrono::Local
+        .with_ymd_and_hms(2024, 6, 7, 8, 9, 10)
+        .single()
+        .expect("timestamp");
+
+    let model_slug = ModelsManager::get_model_offline(config.model.as_deref());
+    let model_family = test_model_family(&model_slug, &config);
+
+    let composite = new_status_output(
+        &config,
+        &auth_manager,
+        &model_family,
+        &usage,
+        Some(&usage),
+        &None,
+        Some("My chat title".to_string()),
+        None,
         None,
         captured_at,
         &model_slug,
@@ -216,6 +259,7 @@ async fn status_snapshot_includes_monthly_limit() {
         &usage,
         Some(&usage),
         &None,
+        None,
         Some(&rate_display),
         None,
         captured_at,
@@ -261,6 +305,7 @@ async fn status_snapshot_shows_unlimited_credits() {
         &usage,
         Some(&usage),
         &None,
+        None,
         Some(&rate_display),
         None,
         captured_at,
@@ -305,6 +350,7 @@ async fn status_snapshot_shows_positive_credits() {
         &usage,
         Some(&usage),
         &None,
+        None,
         Some(&rate_display),
         None,
         captured_at,
@@ -349,6 +395,7 @@ async fn status_snapshot_hides_zero_credits() {
         &usage,
         Some(&usage),
         &None,
+        None,
         Some(&rate_display),
         None,
         captured_at,
@@ -391,6 +438,7 @@ async fn status_snapshot_hides_when_has_no_credits_flag() {
         &usage,
         Some(&usage),
         &None,
+        None,
         Some(&rate_display),
         None,
         captured_at,
@@ -433,6 +481,7 @@ async fn status_card_token_usage_excludes_cached_tokens() {
         &usage,
         Some(&usage),
         &None,
+        None,
         None,
         None,
         now,
@@ -490,6 +539,7 @@ async fn status_snapshot_truncates_in_narrow_terminal() {
         &usage,
         Some(&usage),
         &None,
+        None,
         Some(&rate_display),
         None,
         captured_at,
@@ -536,6 +586,7 @@ async fn status_snapshot_shows_missing_limits_message() {
         &usage,
         Some(&usage),
         &None,
+        None,
         None,
         None,
         now,
@@ -600,6 +651,7 @@ async fn status_snapshot_includes_credits_and_limits() {
         &usage,
         Some(&usage),
         &None,
+        None,
         Some(&rate_display),
         None,
         captured_at,
@@ -652,6 +704,7 @@ async fn status_snapshot_shows_empty_limits_message() {
         &usage,
         Some(&usage),
         &None,
+        None,
         Some(&rate_display),
         None,
         captured_at,
@@ -713,6 +766,7 @@ async fn status_snapshot_shows_stale_limits_message() {
         &usage,
         Some(&usage),
         &None,
+        None,
         Some(&rate_display),
         None,
         now,
@@ -778,6 +832,7 @@ async fn status_snapshot_cached_limits_hide_credits_without_flag() {
         &usage,
         Some(&usage),
         &None,
+        None,
         Some(&rate_display),
         None,
         now,
@@ -829,6 +884,7 @@ async fn status_context_window_uses_last_usage() {
         &total_usage,
         Some(&last_usage),
         &None,
+        None,
         None,
         None,
         now,
