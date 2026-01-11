@@ -88,3 +88,5 @@ Add new items below as you think of them.
 39. [ ] Render Md tables
 40. [ ] Each chat checks out a branch for parallel agents
 41. [ ] Keybind to copy last output
+42. [ ] Keybind to copy last output including thinking
+43. [ ] Keybind to copy last thinking
