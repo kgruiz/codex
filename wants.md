@@ -87,3 +87,4 @@ Add new items below as you think of them.
 38. [ ] Ability to render flowcharts
 39. [ ] Render Md tables
 40. [ ] Each chat checks out a branch for parallel agents
+41. [ ] Keybind to copy last output
