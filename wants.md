@@ -86,6 +86,12 @@ Add new items below as you think of them.
 37. [ ] Add a progress tracker to the status line showing what the agent has done (planning, tool calls, editing, checking work, running tests, etc.)
     - Show distinct colored segments/entries for each stage.
     - Prefer a compact “timeline” bar over a single current-state label.
+    - Include (at minimum) these trace categories (names can differ):
+      - tool
+      - waiting
+      - network
+      - prefill
+      - gen
 38. [ ] Ability to render flowcharts
 39. [ ] Render Md tables
 40. [ ] Each chat checks out a branch for parallel agents
