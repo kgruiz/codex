@@ -83,7 +83,9 @@ Add new items below as you think of them.
 34. [ ] ~~Fix `/sessions` UI when list is long (end-of-line squish, similar to prior queue UI)~~
 35. [x] Integrate session management into the resume UI (rename/delete/resume, etc.)
 36. [ ] Tab completion while typing prompts (including partial; history-based suggestions, etc.)
-37. [ ] Menu bar dropdown showing what stage agent is in (plan/edit/check/etc.)
+37. [ ] Add a progress tracker to the status line showing what the agent has done (planning, tool calls, editing, checking work, running tests, etc.)
+    - Show distinct colored segments/entries for each stage.
+    - Prefer a compact “timeline” bar over a single current-state label.
 38. [ ] Ability to render flowcharts
 39. [ ] Render Md tables
 40. [ ] Each chat checks out a branch for parallel agents
