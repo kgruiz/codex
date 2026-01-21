@@ -98,3 +98,8 @@ Add new items below as you think of them.
 41. [ ] Keybind to copy last output
 42. [ ] Keybind to copy last output including thinking
 43. [ ] Keybind to copy last thinking
+44. [ ] Diff output rendered as inline, syntax-highlighted, line-numbered patch view (gutter +/- and red/green row backgrounds)
+    - Include per-file header (`Write(path)`) and per-file added/removed line counts.
+    - Show context lines uncolored; edits appear as `-` then `+` (delete+add).
+    - Keep line numbers (old/new as appropriate per `-`/`+` line) in the gutter.
+    - Group nearby changes into readable excerpts instead of raw unified diff `@@` hunks/headers.
