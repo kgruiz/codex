@@ -104,3 +104,4 @@ Add new items below as you think of them.
     - Keep a single line-number column in the left gutter (editor-style), alongside the +/- column.
     - Group nearby changes into readable excerpts; do not show raw unified diff `@@` hunks/headers.
     - Add a new diff config option (e.g. `diff = "pretty"`) to enable this view; keep all existing diff options and make `pretty` the default.
+    - Add a config option to choose the highlighting engine for this view (current tree-sitter-based highlighting vs an alternative crate-backed highlighter).
