@@ -393,6 +393,7 @@ pub struct NotificationFocusConfig {
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum DiffView {
+    Pretty,
     Line,
     Inline,
     SideBySide,
@@ -400,7 +401,20 @@ pub enum DiffView {
 
 impl Default for DiffView {
     fn default() -> Self {
-        Self::Line
+        Self::Pretty
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum DiffHighlighter {
+    TreeSitter,
+    Syntect,
+}
+
+impl Default for DiffHighlighter {
+    fn default() -> Self {
+        Self::TreeSitter
     }
 }
 
@@ -455,9 +469,14 @@ pub struct Tui {
     pub keep_queue_on_branch: bool,
 
     /// Default diff format shown in the TUI.
-    /// Defaults to `line`.
+    /// Defaults to `pretty`.
     #[serde(default)]
     pub diff_view: DiffView,
+
+    /// Highlighting engine used for pretty diff views.
+    /// Defaults to `tree-sitter`.
+    #[serde(default)]
+    pub diff_highlighter: DiffHighlighter,
 
     /// Default directory for chat exports. When set, `/export` writes here.
     pub export_dir: Option<PathBuf>,

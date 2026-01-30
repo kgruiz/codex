@@ -28,6 +28,7 @@ use crate::wrapping::word_wrap_lines;
 use base64::Engine;
 use codex_common::format_env_display::format_env_display;
 use codex_core::config::Config;
+use codex_core::config::types::DiffHighlighter;
 use codex_core::config::types::DiffView;
 use codex_core::config::types::McpServerTransportConfig;
 use codex_core::protocol::FileChange;
@@ -734,11 +735,18 @@ pub(crate) struct PatchHistoryCell {
     changes: HashMap<PathBuf, FileChange>,
     cwd: PathBuf,
     view: DiffView,
+    highlighter: DiffHighlighter,
 }
 
 impl HistoryCell for PatchHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        create_diff_summary(&self.changes, &self.cwd, width as usize, self.view)
+        create_diff_summary(
+            &self.changes,
+            &self.cwd,
+            width as usize,
+            self.view,
+            self.highlighter,
+        )
     }
 }
 
@@ -1637,11 +1645,13 @@ pub(crate) fn new_patch_event(
     changes: HashMap<PathBuf, FileChange>,
     cwd: &Path,
     view: DiffView,
+    highlighter: DiffHighlighter,
 ) -> PatchHistoryCell {
     PatchHistoryCell {
         changes,
         cwd: cwd.to_path_buf(),
         view,
+        highlighter,
     }
 }
 

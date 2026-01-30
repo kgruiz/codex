@@ -98,7 +98,7 @@ Add new items below as you think of them.
 41. [ ] Keybind to copy last output
 42. [ ] Keybind to copy last output including thinking
 43. [ ] Keybind to copy last thinking
-44. [ ] Diff output rendered as inline, syntax-highlighted, line-numbered patch view (gutter +/- and red/green row backgrounds)
+44. [x] Diff output rendered as inline, syntax-highlighted, line-numbered patch view (gutter +/- and red/green row backgrounds)
     - Show a header per diff excerpt like `Update(path)` followed by `Added N lines, removed M lines`.
     - Show context lines uncolored; removed lines use `-` with red row backgrounds; added lines use `+` with green row backgrounds.
     - Keep a single line-number column in the left gutter (editor-style), alongside the +/- column.

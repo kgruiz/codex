@@ -13,19 +13,30 @@ use similar::TextDiff;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+use syntect::easy::HighlightLines;
+use syntect::highlighting::Color as SyntectColor;
+use syntect::highlighting::FontStyle as SyntectFontStyle;
+use syntect::highlighting::Style as SyntectStyle;
+use syntect::highlighting::Theme;
+use syntect::highlighting::ThemeSet;
+use syntect::parsing::SyntaxSet;
 use unicode_width::UnicodeWidthStr;
 
 use crate::exec_command::relativize_to_home;
+use crate::render::highlight::highlight_code_block_to_lines;
 use crate::render::line_utils::line_to_static;
 use crate::render::line_utils::prefix_lines;
 use crate::render::renderable::Renderable;
 use crate::wrapping::RtOptions;
 use crate::wrapping::word_wrap_line;
+use codex_core::config::types::DiffHighlighter;
 use codex_core::config::types::DiffView;
 use codex_core::git_info::get_git_repo_root;
 use codex_core::protocol::FileChange;
 
 // Internal representation for diff line rendering
+#[derive(Copy, Clone)]
 enum DiffLineType {
     Insert,
     Delete,
@@ -50,22 +61,45 @@ pub struct DiffSummary {
     changes: HashMap<PathBuf, FileChange>,
     cwd: PathBuf,
     view: DiffView,
+    highlighter: DiffHighlighter,
 }
 
 impl DiffSummary {
-    pub fn new(changes: HashMap<PathBuf, FileChange>, cwd: PathBuf, view: DiffView) -> Self {
-        Self { changes, cwd, view }
+    pub fn new(
+        changes: HashMap<PathBuf, FileChange>,
+        cwd: PathBuf,
+        view: DiffView,
+        highlighter: DiffHighlighter,
+    ) -> Self {
+        Self {
+            changes,
+            cwd,
+            view,
+            highlighter,
+        }
     }
 }
 
 impl Renderable for DiffSummary {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        let lines = create_diff_summary(&self.changes, &self.cwd, area.width as usize, self.view);
+        let lines = create_diff_summary(
+            &self.changes,
+            &self.cwd,
+            area.width as usize,
+            self.view,
+            self.highlighter,
+        );
         Paragraph::new(lines).render(area, buf);
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        let lines = create_diff_summary(&self.changes, &self.cwd, width as usize, self.view);
+        let lines = create_diff_summary(
+            &self.changes,
+            &self.cwd,
+            width as usize,
+            self.view,
+            self.highlighter,
+        );
         lines.len() as u16
     }
 }
@@ -89,8 +123,9 @@ pub(crate) fn create_diff_summary(
     cwd: &Path,
     wrap_cols: usize,
     view: DiffView,
+    highlighter: DiffHighlighter,
 ) -> Vec<RtLine<'static>> {
-    let view_lines = render_diff_view(changes, cwd, wrap_cols, view);
+    let view_lines = render_diff_view(changes, cwd, wrap_cols, view, highlighter);
     if view_lines.is_empty() {
         vec![RtLine::from("(no changes)".dim().italic())]
     } else {
@@ -103,12 +138,16 @@ pub(crate) fn render_diff_view(
     cwd: &Path,
     wrap_cols: usize,
     view: DiffView,
+    highlighter: DiffHighlighter,
 ) -> Vec<RtLine<'static>> {
     if changes.is_empty() {
         return Vec::new();
     }
     let rows = collect_rows(changes);
-    render_changes_block(rows, wrap_cols, cwd, view)
+    match view {
+        DiffView::Pretty => render_changes_pretty(rows, wrap_cols, cwd, highlighter),
+        _ => render_changes_block(rows, wrap_cols, cwd, view),
+    }
 }
 
 // Shared row for per-file presentation
@@ -120,6 +159,13 @@ struct Row {
     added: usize,
     removed: usize,
     change: FileChange,
+}
+
+#[derive(Clone)]
+struct PrettyDiffLine {
+    line_number: usize,
+    kind: DiffLineType,
+    text: String,
 }
 
 fn collect_rows(changes: &HashMap<PathBuf, FileChange>) -> Vec<Row> {
@@ -225,6 +271,179 @@ fn render_changes_block(
     out
 }
 
+fn render_changes_pretty(
+    rows: Vec<Row>,
+    wrap_cols: usize,
+    cwd: &Path,
+    highlighter: DiffHighlighter,
+) -> Vec<RtLine<'static>> {
+    let mut out: Vec<RtLine<'static>> = Vec::new();
+    let mut first_excerpt = true;
+
+    for row in rows {
+        let (display_path, highlight_path) = pretty_paths(&row, cwd);
+        match &row.change {
+            FileChange::Add { content } => {
+                let mut lines: Vec<PrettyDiffLine> = Vec::new();
+                for (idx, raw) in content.lines().enumerate() {
+                    lines.push(PrettyDiffLine {
+                        line_number: idx + 1,
+                        kind: DiffLineType::Insert,
+                        text: raw.to_string(),
+                    });
+                }
+                push_pretty_excerpt(
+                    &mut out,
+                    "Add",
+                    &display_path,
+                    lines.len(),
+                    0,
+                    lines,
+                    wrap_cols,
+                    &highlight_path,
+                    highlighter,
+                    &mut first_excerpt,
+                );
+            }
+            FileChange::Delete { content } => {
+                let mut lines: Vec<PrettyDiffLine> = Vec::new();
+                for (idx, raw) in content.lines().enumerate() {
+                    lines.push(PrettyDiffLine {
+                        line_number: idx + 1,
+                        kind: DiffLineType::Delete,
+                        text: raw.to_string(),
+                    });
+                }
+                push_pretty_excerpt(
+                    &mut out,
+                    "Delete",
+                    &display_path,
+                    0,
+                    lines.len(),
+                    lines,
+                    wrap_cols,
+                    &highlight_path,
+                    highlighter,
+                    &mut first_excerpt,
+                );
+            }
+            FileChange::Update { unified_diff, .. } => {
+                let Ok(patch) = diffy::Patch::from_str(unified_diff) else {
+                    continue;
+                };
+                for h in patch.hunks() {
+                    let mut lines: Vec<PrettyDiffLine> = Vec::new();
+                    let mut added = 0usize;
+                    let mut removed = 0usize;
+                    let mut old_ln = h.old_range().start();
+                    let mut new_ln = h.new_range().start();
+                    for line in h.lines() {
+                        match line {
+                            diffy::Line::Insert(text) => {
+                                let s = text.trim_end_matches('\n');
+                                lines.push(PrettyDiffLine {
+                                    line_number: new_ln,
+                                    kind: DiffLineType::Insert,
+                                    text: s.to_string(),
+                                });
+                                added += 1;
+                                new_ln += 1;
+                            }
+                            diffy::Line::Delete(text) => {
+                                let s = text.trim_end_matches('\n');
+                                lines.push(PrettyDiffLine {
+                                    line_number: old_ln,
+                                    kind: DiffLineType::Delete,
+                                    text: s.to_string(),
+                                });
+                                removed += 1;
+                                old_ln += 1;
+                            }
+                            diffy::Line::Context(text) => {
+                                let s = text.trim_end_matches('\n');
+                                lines.push(PrettyDiffLine {
+                                    line_number: new_ln,
+                                    kind: DiffLineType::Context,
+                                    text: s.to_string(),
+                                });
+                                old_ln += 1;
+                                new_ln += 1;
+                            }
+                        }
+                    }
+                    push_pretty_excerpt(
+                        &mut out,
+                        "Update",
+                        &display_path,
+                        added,
+                        removed,
+                        lines,
+                        wrap_cols,
+                        &highlight_path,
+                        highlighter,
+                        &mut first_excerpt,
+                    );
+                }
+            }
+        }
+    }
+
+    out
+}
+
+fn pretty_paths(row: &Row, cwd: &Path) -> (String, PathBuf) {
+    let mut display_path = display_path_for(&row.path, cwd);
+    let highlight_path = row.move_path.as_ref().unwrap_or(&row.path).to_path_buf();
+    if let Some(move_path) = &row.move_path {
+        let move_display = display_path_for(move_path, cwd);
+        display_path = format!("{display_path} → {move_display}");
+    }
+    (display_path, highlight_path)
+}
+
+fn push_pretty_excerpt(
+    out: &mut Vec<RtLine<'static>>,
+    verb: &str,
+    display_path: &str,
+    added: usize,
+    removed: usize,
+    lines: Vec<PrettyDiffLine>,
+    wrap_cols: usize,
+    highlight_path: &Path,
+    highlighter: DiffHighlighter,
+    first_excerpt: &mut bool,
+) {
+    if !*first_excerpt {
+        out.push("".into());
+    }
+
+    out.push(RtLine::from(format!("{verb}({display_path})").bold()));
+    out.push(RtLine::from(format!(
+        "Added {added} lines, removed {removed} lines"
+    )));
+
+    if lines.is_empty() {
+        *first_excerpt = false;
+        return;
+    }
+
+    let max_line_number = lines.iter().map(|line| line.line_number).max().unwrap_or(0);
+    let line_number_width = line_number_width(max_line_number);
+    let highlighted_lines = highlight_pretty_lines(&lines, highlight_path, highlighter);
+
+    for (line, spans) in lines.into_iter().zip(highlighted_lines.into_iter()) {
+        out.extend(push_wrapped_pretty_diff_line(
+            line.line_number,
+            line.kind,
+            spans,
+            wrap_cols,
+            line_number_width,
+        ));
+    }
+
+    *first_excerpt = false;
+}
+
 fn render_change_with_view(
     change: &FileChange,
     out: &mut Vec<RtLine<'static>>,
@@ -232,6 +451,7 @@ fn render_change_with_view(
     view: DiffView,
 ) {
     match view {
+        DiffView::Pretty => render_change_line(change, out, width),
         DiffView::Line => render_change_line(change, out, width),
         DiffView::Inline => render_change_inline(change, out, width),
         DiffView::SideBySide => render_change_side_by_side(change, out, width),
@@ -845,6 +1065,20 @@ fn pad_line_to_width(mut line: RtLine<'static>, width: usize) -> RtLine<'static>
     line
 }
 
+fn pad_pretty_line(mut line: RtLine<'static>, width: usize, bg: Option<Color>) -> RtLine<'static> {
+    let Some(bg) = bg else {
+        return line;
+    };
+    let current = line_width(&line);
+    if current < width {
+        line.spans.push(RtSpan::styled(
+            " ".repeat(width - current),
+            Style::default().bg(bg),
+        ));
+    }
+    line
+}
+
 fn line_width(line: &RtLine<'static>) -> usize {
     line.spans
         .iter()
@@ -854,6 +1088,44 @@ fn line_width(line: &RtLine<'static>) -> usize {
 
 fn blank_line(width: usize) -> RtLine<'static> {
     RtLine::from(vec![RtSpan::raw(" ".repeat(width))])
+}
+
+fn push_wrapped_pretty_diff_line(
+    line_number: usize,
+    kind: DiffLineType,
+    spans: Vec<RtSpan<'static>>,
+    width: usize,
+    line_number_width: usize,
+) -> Vec<RtLine<'static>> {
+    let ln_str = line_number.to_string();
+    let gutter_width = line_number_width.max(1);
+    let bg = pretty_bg(kind);
+    let gutter_style = apply_bg(style_gutter(), bg);
+    let sign_style = apply_bg(pretty_sign_style(kind), bg);
+    let sign_char = match kind {
+        DiffLineType::Insert => '+',
+        DiffLineType::Delete => '-',
+        DiffLineType::Context => ' ',
+    };
+
+    let gutter = RtSpan::styled(format!("{ln_str:>gutter_width$} "), gutter_style);
+    let sign = RtSpan::styled(sign_char.to_string(), sign_style);
+    let sign_space = RtSpan::styled(" ".to_string(), sign_style);
+    let indent_first = RtLine::from(vec![gutter.clone(), sign, sign_space.clone()]);
+    let spacer_gutter = RtSpan::styled(format!("{:gutter_width$} ", ""), gutter_style);
+    let spacer_sign = RtSpan::styled(" ".to_string(), sign_style);
+    let indent_sub = RtLine::from(vec![spacer_gutter, spacer_sign, sign_space]);
+
+    let content = RtLine::from(apply_bg_to_spans(spans, bg));
+    let opts = RtOptions::new(width)
+        .initial_indent(indent_first)
+        .subsequent_indent(indent_sub);
+
+    word_wrap_line(&content, opts)
+        .iter()
+        .map(line_to_static)
+        .map(|line| pad_pretty_line(line, width, bg))
+        .collect()
 }
 
 fn push_wrapped_inline_diff_line(
@@ -886,6 +1158,173 @@ fn push_wrapped_inline_diff_line(
         .iter()
         .map(line_to_static)
         .collect()
+}
+
+fn highlight_pretty_lines(
+    lines: &[PrettyDiffLine],
+    path: &Path,
+    highlighter: DiffHighlighter,
+) -> Vec<Vec<RtSpan<'static>>> {
+    let content_lines = lines
+        .iter()
+        .map(|line| line.text.clone())
+        .collect::<Vec<_>>();
+    match highlighter {
+        DiffHighlighter::TreeSitter => {
+            highlight_lines_tree_sitter(&content_lines, diff_language_for_path(path))
+        }
+        DiffHighlighter::Syntect => highlight_lines_syntect(&content_lines, path),
+    }
+}
+
+fn highlight_lines_tree_sitter(
+    lines: &[String],
+    language: Option<&'static str>,
+) -> Vec<Vec<RtSpan<'static>>> {
+    lines
+        .iter()
+        .map(|line| {
+            if line.is_empty() {
+                return Vec::new();
+            }
+            let mut highlighted = highlight_code_block_to_lines(language, line);
+            highlighted
+                .pop()
+                .map(|line| line.spans)
+                .unwrap_or_else(|| vec![line.to_string().into()])
+        })
+        .collect()
+}
+
+fn highlight_lines_syntect(lines: &[String], path: &Path) -> Vec<Vec<RtSpan<'static>>> {
+    let syntax_set = syntect_syntax_set();
+    let syntax = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .and_then(|ext| syntax_set.find_syntax_by_extension(ext))
+        .unwrap_or_else(|| syntax_set.find_syntax_plain_text());
+    let theme = syntect_theme();
+    let mut highlighter = HighlightLines::new(syntax, theme);
+    lines
+        .iter()
+        .map(|line| {
+            if line.is_empty() {
+                return Vec::new();
+            }
+            match highlighter.highlight_line(line, syntax_set) {
+                Ok(ranges) => ranges
+                    .into_iter()
+                    .map(|(style, text)| {
+                        RtSpan::styled(text.to_string(), syntect_style_to_ratatui(style))
+                    })
+                    .collect(),
+                Err(_) => vec![line.to_string().into()],
+            }
+        })
+        .collect()
+}
+
+fn diff_language_for_path(path: &Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_string_lossy().to_ascii_lowercase();
+    match ext.as_str() {
+        "bash" | "bashrc" | "sh" | "zsh" | "zshrc" | "fish" => Some("bash"),
+        "json" | "jsonc" | "json5" => Some("json"),
+        "py" | "pyi" => Some("python"),
+        "rs" => Some("rust"),
+        "yaml" | "yml" => Some("yaml"),
+        _ => None,
+    }
+}
+
+fn syntect_syntax_set() -> &'static SyntaxSet {
+    static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
+    SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines)
+}
+
+fn syntect_theme() -> &'static Theme {
+    static THEME: OnceLock<Theme> = OnceLock::new();
+    THEME.get_or_init(|| {
+        let theme_set = ThemeSet::load_defaults();
+        #[expect(clippy::expect_used)]
+        theme_set
+            .themes
+            .get("base16-ocean.dark")
+            .or_else(|| theme_set.themes.values().next())
+            .expect("syntect themes missing")
+            .clone()
+    })
+}
+
+fn syntect_style_to_ratatui(style: SyntectStyle) -> Style {
+    let mut out = Style::default();
+    if style.foreground.a != 0 {
+        out = out.fg(syntect_color_to_ratatui(style.foreground));
+    }
+    if style.font_style.contains(SyntectFontStyle::BOLD) {
+        out = out.add_modifier(Modifier::BOLD);
+    }
+    if style.font_style.contains(SyntectFontStyle::ITALIC) {
+        out = out.add_modifier(Modifier::ITALIC);
+    }
+    if style.font_style.contains(SyntectFontStyle::UNDERLINE) {
+        out = out.add_modifier(Modifier::UNDERLINED);
+    }
+    out
+}
+
+fn syntect_color_to_ratatui(color: SyntectColor) -> Color {
+    let r = color.r;
+    let g = color.g;
+    let b = color.b;
+    if r == g && g == b {
+        return if r < 64 {
+            Color::Black
+        } else if r < 128 {
+            Color::DarkGray
+        } else if r < 192 {
+            Color::Gray
+        } else {
+            Color::White
+        };
+    }
+
+    let max = r.max(g).max(b);
+    let bright = max > 200;
+    if r >= g && r >= b {
+        if g > b {
+            if bright {
+                Color::LightYellow
+            } else {
+                Color::Yellow
+            }
+        } else if bright {
+            Color::LightRed
+        } else {
+            Color::Red
+        }
+    } else if g >= r && g >= b {
+        if r > b {
+            if bright {
+                Color::LightYellow
+            } else {
+                Color::Yellow
+            }
+        } else if bright {
+            Color::LightGreen
+        } else {
+            Color::Green
+        }
+    } else if r > g {
+        if bright {
+            Color::LightMagenta
+        } else {
+            Color::Magenta
+        }
+    } else if bright {
+        Color::LightBlue
+    } else {
+        Color::Blue
+    }
 }
 
 pub(crate) fn display_path_for(path: &Path, cwd: &Path) -> String {
@@ -1007,6 +1446,39 @@ fn style_del() -> Style {
     Style::default().fg(Color::Red)
 }
 
+fn pretty_bg(kind: DiffLineType) -> Option<Color> {
+    match kind {
+        DiffLineType::Insert => Some(Color::Green),
+        DiffLineType::Delete => Some(Color::Red),
+        DiffLineType::Context => None,
+    }
+}
+
+fn pretty_sign_style(kind: DiffLineType) -> Style {
+    match kind {
+        DiffLineType::Insert => style_add().add_modifier(Modifier::BOLD),
+        DiffLineType::Delete => style_del().add_modifier(Modifier::BOLD),
+        DiffLineType::Context => Style::default(),
+    }
+}
+
+fn apply_bg(style: Style, bg: Option<Color>) -> Style {
+    match bg {
+        Some(color) => style.bg(color),
+        None => style,
+    }
+}
+
+fn apply_bg_to_spans(spans: Vec<RtSpan<'static>>, bg: Option<Color>) -> Vec<RtSpan<'static>> {
+    let Some(bg) = bg else {
+        return spans;
+    };
+    spans
+        .into_iter()
+        .map(|span| RtSpan::styled(span.content.to_string(), span.style.bg(bg)))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1022,7 +1494,13 @@ mod tests {
         changes: &HashMap<PathBuf, FileChange>,
         view: DiffView,
     ) -> Vec<RtLine<'static>> {
-        create_diff_summary(changes, &PathBuf::from("/"), 80, view)
+        create_diff_summary(
+            changes,
+            &PathBuf::from("/"),
+            80,
+            view,
+            DiffHighlighter::TreeSitter,
+        )
     }
 
     fn snapshot_lines(name: &str, lines: Vec<RtLine<'static>>, width: u16, height: u16) {
@@ -1091,6 +1569,32 @@ mod tests {
         let lines = diff_summary_for_tests(&changes, DiffView::Line);
 
         snapshot_lines("apply_update_block", lines, 80, 12);
+    }
+
+    #[test]
+    fn ui_snapshot_pretty_update_block_text() {
+        let mut changes: HashMap<PathBuf, FileChange> = HashMap::new();
+        let original = "line one\nline two\nline three\n";
+        let modified = "line one\nline two changed\nline three\n";
+        let patch = diffy::create_patch(original, modified).to_string();
+
+        changes.insert(
+            PathBuf::from("example.txt"),
+            FileChange::Update {
+                unified_diff: patch,
+                move_path: None,
+            },
+        );
+
+        let lines = create_diff_summary(
+            &changes,
+            &PathBuf::from("/"),
+            80,
+            DiffView::Pretty,
+            DiffHighlighter::TreeSitter,
+        );
+
+        snapshot_lines_text("pretty_update_block_text", &lines);
     }
 
     #[test]
@@ -1187,7 +1691,13 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 72, DiffView::Line);
+        let lines = create_diff_summary(
+            &changes,
+            &PathBuf::from("/"),
+            72,
+            DiffView::Line,
+            DiffHighlighter::TreeSitter,
+        );
 
         // Render with backend width wider than wrap width to avoid Paragraph auto-wrap.
         snapshot_lines("apply_update_block_wraps_long_lines", lines, 80, 12);
@@ -1210,7 +1720,13 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 28, DiffView::Line);
+        let lines = create_diff_summary(
+            &changes,
+            &PathBuf::from("/"),
+            28,
+            DiffView::Line,
+            DiffHighlighter::TreeSitter,
+        );
         snapshot_lines_text("apply_update_block_wraps_long_lines_text", &lines);
     }
 
@@ -1237,7 +1753,13 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 80, DiffView::Line);
+        let lines = create_diff_summary(
+            &changes,
+            &PathBuf::from("/"),
+            80,
+            DiffView::Line,
+            DiffHighlighter::TreeSitter,
+        );
         snapshot_lines_text("apply_update_block_line_numbers_three_digits_text", &lines);
     }
 
@@ -1260,7 +1782,13 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &cwd, 80, DiffView::Line);
+        let lines = create_diff_summary(
+            &changes,
+            &cwd,
+            80,
+            DiffView::Line,
+            DiffHighlighter::TreeSitter,
+        );
 
         snapshot_lines("apply_update_block_relativizes_path", lines, 80, 10);
     }
@@ -1286,7 +1814,13 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 60, DiffView::SideBySide);
+        let lines = create_diff_summary(
+            &changes,
+            &PathBuf::from("/"),
+            60,
+            DiffView::SideBySide,
+            DiffHighlighter::TreeSitter,
+        );
         let positions = lines
             .iter()
             .filter_map(|line| {

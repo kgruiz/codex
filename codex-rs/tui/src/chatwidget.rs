@@ -1366,6 +1366,7 @@ impl ChatWidget {
             event.changes,
             &self.config.cwd,
             self.config.diff_view,
+            self.config.diff_highlighter,
         ));
     }
 
@@ -1711,6 +1712,7 @@ impl ChatWidget {
             changes: ev.changes.clone(),
             cwd: self.config.cwd.clone(),
             diff_view: self.config.diff_view,
+            diff_highlighter: self.config.diff_highlighter,
         };
         self.bottom_pane
             .push_approval_request(request, &self.config.features);
@@ -3494,12 +3496,14 @@ impl ChatWidget {
                             return;
                         }
                     };
+                let diff_highlighter = self.config.diff_highlighter;
                 self.add_diff_in_progress();
                 let width = self.last_rendered_width.get().unwrap_or(80);
                 let tx = self.app_event_tx.clone();
                 let cwd = self.config.cwd.clone();
                 tokio::spawn(async move {
-                    let result = match get_git_diff(&cwd, diff_view, width).await {
+                    let result = match get_git_diff(&cwd, diff_view, diff_highlighter, width).await
+                    {
                         Ok(result) => result,
                         Err(e) => GitDiffResult::Error(format!("Failed to compute diff: {e}")),
                     };
@@ -6757,13 +6761,14 @@ fn diff_view_override(input: Option<&str>, default_view: DiffView) -> Result<Dif
             continue;
         }
         match arg.as_str() {
+            "--pretty" => view_override = Some(DiffView::Pretty),
             "--inline" => view_override = Some(DiffView::Inline),
             "--line" => view_override = Some(DiffView::Line),
             "--side-by-side" => view_override = Some(DiffView::SideBySide),
             "--view" => {
                 let Some(value) = args_iter.next() else {
                     return Err(
-                        "Expected a value after --view (line, inline, or side-by-side)."
+                        "Expected a value after --view (pretty, line, inline, or side-by-side)."
                             .to_string(),
                     );
                 };
@@ -6783,11 +6788,12 @@ fn diff_view_override(input: Option<&str>, default_view: DiffView) -> Result<Dif
 
 fn parse_diff_view_value(value: &str) -> Result<DiffView, String> {
     match value {
+        "pretty" => Ok(DiffView::Pretty),
         "line" => Ok(DiffView::Line),
         "inline" => Ok(DiffView::Inline),
         "side-by-side" | "side_by_side" | "side" => Ok(DiffView::SideBySide),
         _ => Err(format!(
-            "Invalid /diff view '{value}'. Use 'line', 'inline', or 'side-by-side'."
+            "Invalid /diff view '{value}'. Use 'pretty', 'line', 'inline', or 'side-by-side'."
         )),
     }
 }

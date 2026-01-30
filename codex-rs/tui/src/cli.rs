@@ -86,7 +86,7 @@ pub struct Cli {
     #[arg(long = "add-dir", value_name = "DIR", value_hint = ValueHint::DirPath)]
     pub add_dir: Vec<PathBuf>,
 
-    /// Default diff format for /diff and apply-patch previews (line or inline).
+    /// Default diff format for /diff and apply-patch previews.
     #[arg(long = "diff-view", value_enum)]
     pub diff_view: Option<DiffViewCliArg>,
 
@@ -96,6 +96,7 @@ pub struct Cli {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum DiffViewCliArg {
+    Pretty,
     Line,
     Inline,
     SideBySide,
@@ -104,6 +105,7 @@ pub enum DiffViewCliArg {
 impl DiffViewCliArg {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Pretty => "pretty",
             Self::Line => "line",
             Self::Inline => "inline",
             Self::SideBySide => "side-by-side",

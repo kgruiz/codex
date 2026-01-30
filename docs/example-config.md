@@ -149,9 +149,13 @@ status_line = ["model", "context", "cwd", "git-branch"]
 # Keep queued messages when branching from Esc backtrack. Default: false
 keep_queue_on_branch = false
 
-# Default diff view for /diff and apply-patch previews. Default: line
-# Options: "line", "inline", or "side-by-side"
-diff_view = "line"
+# Default diff view for /diff and apply-patch previews. Default: pretty
+# Options: "pretty", "line", "inline", or "side-by-side"
+diff_view = "pretty"
+
+# Highlighting engine for pretty diff views. Default: tree-sitter
+# Options: "tree-sitter" or "syntect"
+diff_highlighter = "tree-sitter"
 
 # Default export directory for /export (relative to cwd). Optional.
 # export_dir = "exports"

@@ -40,7 +40,7 @@ Control Codex’s behavior during an interactive session with slash commands.
 ---
 
 Notes:
-- `/diff` uses the configured diff view (`tui.diff_view`, or `--diff-view` on launch). Override per command with `--line`, `--inline`, `--side-by-side`, or `--view line|inline|side-by-side`.
+- `/diff` uses the configured diff view (`tui.diff_view`, or `--diff-view` on launch). Override per command with `--pretty`, `--line`, `--inline`, `--side-by-side`, or `--view pretty|line|inline|side-by-side`.
 - `/export` supports POSIX-style arguments:
   - `/export` opens the picker; defaults come from `tui.export_dir`, `tui.export_name`, and `tui.export_format`.
   - `/export -C DIR` writes to a directory (filename comes from the rollout name or `tui.export_name`).
