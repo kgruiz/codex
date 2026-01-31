@@ -294,7 +294,7 @@ fn render_changes_pretty(
                 }
                 push_pretty_excerpt(
                     &mut out,
-                    "Add",
+                    "Added",
                     &display_path,
                     lines.len(),
                     0,
@@ -316,7 +316,7 @@ fn render_changes_pretty(
                 }
                 push_pretty_excerpt(
                     &mut out,
-                    "Delete",
+                    "Deleted",
                     &display_path,
                     0,
                     lines.len(),
@@ -373,7 +373,7 @@ fn render_changes_pretty(
                     }
                     push_pretty_excerpt(
                         &mut out,
-                        "Update",
+                        "Edited",
                         &display_path,
                         added,
                         removed,
@@ -1065,16 +1065,10 @@ fn pad_line_to_width(mut line: RtLine<'static>, width: usize) -> RtLine<'static>
     line
 }
 
-fn pad_pretty_line(mut line: RtLine<'static>, width: usize, bg: Option<Color>) -> RtLine<'static> {
-    let Some(bg) = bg else {
-        return line;
-    };
+fn pad_pretty_line(mut line: RtLine<'static>, width: usize, _bg: Option<Color>) -> RtLine<'static> {
     let current = line_width(&line);
     if current < width {
-        line.spans.push(RtSpan::styled(
-            " ".repeat(width - current),
-            Style::default().bg(bg),
-        ));
+        line.spans.push(RtSpan::raw(" ".repeat(width - current)));
     }
     line
 }

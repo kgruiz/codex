@@ -3103,7 +3103,7 @@ fn apply_patch_events_emit_history_cells() {
         for x in 0..area.width {
             row.push(buf[(x, y)].symbol().chars().next().unwrap_or(' '));
         }
-        if row.contains("Add(foo.txt)") {
+        if row.contains("Added(foo.txt)") {
             saw_summary = true;
             break;
         }
@@ -3132,8 +3132,8 @@ fn apply_patch_events_emit_history_cells() {
     assert!(!cells.is_empty(), "expected apply block cell to be sent");
     let blob = lines_to_single_string(cells.last().unwrap());
     assert!(
-        blob.contains("Add(foo.txt)"),
-        "expected single-file header with filename (Add): {blob:?}"
+        blob.contains("Added(foo.txt)"),
+        "expected single-file header with filename (Added): {blob:?}"
     );
 
     // 3) End apply success -> success cell
@@ -3207,7 +3207,7 @@ fn apply_patch_manual_approval_adjusts_header() {
     assert!(!cells.is_empty(), "expected apply block cell to be sent");
     let blob = lines_to_single_string(cells.last().unwrap());
     assert!(
-        blob.contains("Add(foo.txt)"),
+        blob.contains("Added(foo.txt)"),
         "expected apply summary header for foo.txt: {blob:?}"
     );
 }
@@ -3475,7 +3475,7 @@ fn apply_patch_request_shows_diff_summary() -> anyhow::Result<()> {
         for x in 0..area.width {
             row.push(buf[(x, y)].symbol().chars().next().unwrap_or(' '));
         }
-        if row.contains("Add(README.md)") {
+        if row.contains("Added(README.md)") {
             saw_header = true;
         }
         if row.contains("line one") {
