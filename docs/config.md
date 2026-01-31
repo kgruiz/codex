@@ -918,10 +918,6 @@ keep_queue_on_branch = false
 # Valid values: "pretty", "line", "inline", "side-by-side"
 diff_view = "pretty"
 
-# Highlighting engine for pretty diff views.
-# Valid values: "tree-sitter", "syntect"
-diff_highlighter = "tree-sitter"
-
 # Default export directory used by /export.
 # Relative paths resolve against the current working directory.
 export_dir = "exports"
@@ -1124,7 +1120,6 @@ Valid values:
 | `tui.status_line`                                | array<string>                                                     | Ordered status line items (default: ["model", "context", "cwd", "git-branch"]).                                                  |
 | `tui.keep_queue_on_branch`                       | boolean                                                           | Keep queued messages when branching from Esc backtrack (default: false).                                                        |
 | `tui.diff_view`                                  | `pretty` \| `line` \| `inline` \| `side-by-side`                   | Default diff format for the TUI (default: `pretty`).                                                                            |
-| `tui.diff_highlighter`                           | `tree-sitter` \| `syntect`                                        | Highlighting engine for pretty diff views (default: `tree-sitter`).                                                             |
 | `tui.export_dir`                                 | string                                                            | Default export directory for `/export` (default: rollout directory).                                                            |
 | `tui.export_name`                                | string                                                            | Default export base filename (no extension) for `/export` (default: rollout name).                                              |
 | `tui.export_format`                              | `markdown` \| `json`                                              | Default export format for `/export` (default: `markdown`).                                                                      |

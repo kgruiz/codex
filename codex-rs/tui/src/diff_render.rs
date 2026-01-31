@@ -24,13 +24,11 @@ use syntect::parsing::SyntaxSet;
 use unicode_width::UnicodeWidthStr;
 
 use crate::exec_command::relativize_to_home;
-use crate::render::highlight::highlight_code_block_to_lines;
 use crate::render::line_utils::line_to_static;
 use crate::render::line_utils::prefix_lines;
 use crate::render::renderable::Renderable;
 use crate::wrapping::RtOptions;
 use crate::wrapping::word_wrap_line;
-use codex_core::config::types::DiffHighlighter;
 use codex_core::config::types::DiffView;
 use codex_core::git_info::get_git_repo_root;
 use codex_core::protocol::FileChange;
@@ -61,45 +59,22 @@ pub struct DiffSummary {
     changes: HashMap<PathBuf, FileChange>,
     cwd: PathBuf,
     view: DiffView,
-    highlighter: DiffHighlighter,
 }
 
 impl DiffSummary {
-    pub fn new(
-        changes: HashMap<PathBuf, FileChange>,
-        cwd: PathBuf,
-        view: DiffView,
-        highlighter: DiffHighlighter,
-    ) -> Self {
-        Self {
-            changes,
-            cwd,
-            view,
-            highlighter,
-        }
+    pub fn new(changes: HashMap<PathBuf, FileChange>, cwd: PathBuf, view: DiffView) -> Self {
+        Self { changes, cwd, view }
     }
 }
 
 impl Renderable for DiffSummary {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        let lines = create_diff_summary(
-            &self.changes,
-            &self.cwd,
-            area.width as usize,
-            self.view,
-            self.highlighter,
-        );
+        let lines = create_diff_summary(&self.changes, &self.cwd, area.width as usize, self.view);
         Paragraph::new(lines).render(area, buf);
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        let lines = create_diff_summary(
-            &self.changes,
-            &self.cwd,
-            width as usize,
-            self.view,
-            self.highlighter,
-        );
+        let lines = create_diff_summary(&self.changes, &self.cwd, width as usize, self.view);
         lines.len() as u16
     }
 }
@@ -123,9 +98,8 @@ pub(crate) fn create_diff_summary(
     cwd: &Path,
     wrap_cols: usize,
     view: DiffView,
-    highlighter: DiffHighlighter,
 ) -> Vec<RtLine<'static>> {
-    let view_lines = render_diff_view(changes, cwd, wrap_cols, view, highlighter);
+    let view_lines = render_diff_view(changes, cwd, wrap_cols, view);
     if view_lines.is_empty() {
         vec![RtLine::from("(no changes)".dim().italic())]
     } else {
@@ -138,14 +112,13 @@ pub(crate) fn render_diff_view(
     cwd: &Path,
     wrap_cols: usize,
     view: DiffView,
-    highlighter: DiffHighlighter,
 ) -> Vec<RtLine<'static>> {
     if changes.is_empty() {
         return Vec::new();
     }
     let rows = collect_rows(changes);
     match view {
-        DiffView::Pretty => render_changes_pretty(rows, wrap_cols, cwd, highlighter),
+        DiffView::Pretty => render_changes_pretty(rows, wrap_cols, cwd),
         _ => render_changes_block(rows, wrap_cols, cwd, view),
     }
 }
@@ -271,12 +244,7 @@ fn render_changes_block(
     out
 }
 
-fn render_changes_pretty(
-    rows: Vec<Row>,
-    wrap_cols: usize,
-    cwd: &Path,
-    highlighter: DiffHighlighter,
-) -> Vec<RtLine<'static>> {
+fn render_changes_pretty(rows: Vec<Row>, wrap_cols: usize, cwd: &Path) -> Vec<RtLine<'static>> {
     let mut out: Vec<RtLine<'static>> = Vec::new();
     let mut first_excerpt = true;
 
@@ -301,7 +269,6 @@ fn render_changes_pretty(
                     lines,
                     wrap_cols,
                     &highlight_path,
-                    highlighter,
                     &mut first_excerpt,
                 );
             }
@@ -323,7 +290,6 @@ fn render_changes_pretty(
                     lines,
                     wrap_cols,
                     &highlight_path,
-                    highlighter,
                     &mut first_excerpt,
                 );
             }
@@ -380,7 +346,6 @@ fn render_changes_pretty(
                         lines,
                         wrap_cols,
                         &highlight_path,
-                        highlighter,
                         &mut first_excerpt,
                     );
                 }
@@ -410,14 +375,17 @@ fn push_pretty_excerpt(
     lines: Vec<PrettyDiffLine>,
     wrap_cols: usize,
     highlight_path: &Path,
-    highlighter: DiffHighlighter,
     first_excerpt: &mut bool,
 ) {
     if !*first_excerpt {
         out.push("".into());
     }
 
-    out.push(RtLine::from(format!("{verb}({display_path})").bold()));
+    out.push(RtLine::from(vec![
+        verb.to_string().bold(),
+        " ".into(),
+        display_path.to_string().into(),
+    ]));
     out.push(RtLine::from(format!(
         "Added {added} lines, removed {removed} lines"
     )));
@@ -429,7 +397,7 @@ fn push_pretty_excerpt(
 
     let max_line_number = lines.iter().map(|line| line.line_number).max().unwrap_or(0);
     let line_number_width = line_number_width(max_line_number);
-    let highlighted_lines = highlight_pretty_lines(&lines, highlight_path, highlighter);
+    let highlighted_lines = highlight_pretty_lines(&lines, highlight_path);
 
     for (line, spans) in lines.into_iter().zip(highlighted_lines.into_iter()) {
         out.extend(push_wrapped_pretty_diff_line(
@@ -1065,14 +1033,6 @@ fn pad_line_to_width(mut line: RtLine<'static>, width: usize) -> RtLine<'static>
     line
 }
 
-fn pad_pretty_line(mut line: RtLine<'static>, width: usize, _bg: Option<Color>) -> RtLine<'static> {
-    let current = line_width(&line);
-    if current < width {
-        line.spans.push(RtSpan::raw(" ".repeat(width - current)));
-    }
-    line
-}
-
 fn line_width(line: &RtLine<'static>) -> usize {
     line.spans
         .iter()
@@ -1110,7 +1070,7 @@ fn push_wrapped_pretty_diff_line(
     let spacer_sign = RtSpan::styled(" ".to_string(), sign_style);
     let indent_sub = RtLine::from(vec![spacer_gutter, spacer_sign, sign_space]);
 
-    let content = RtLine::from(apply_bg_to_spans(spans, bg));
+    let content = RtLine::from(spans);
     let opts = RtOptions::new(width)
         .initial_indent(indent_first)
         .subsequent_indent(indent_sub);
@@ -1118,7 +1078,7 @@ fn push_wrapped_pretty_diff_line(
     word_wrap_line(&content, opts)
         .iter()
         .map(line_to_static)
-        .map(|line| pad_pretty_line(line, width, bg))
+        .map(|line| pad_line_to_width(line, width))
         .collect()
 }
 
@@ -1154,40 +1114,12 @@ fn push_wrapped_inline_diff_line(
         .collect()
 }
 
-fn highlight_pretty_lines(
-    lines: &[PrettyDiffLine],
-    path: &Path,
-    highlighter: DiffHighlighter,
-) -> Vec<Vec<RtSpan<'static>>> {
+fn highlight_pretty_lines(lines: &[PrettyDiffLine], path: &Path) -> Vec<Vec<RtSpan<'static>>> {
     let content_lines = lines
         .iter()
         .map(|line| line.text.clone())
         .collect::<Vec<_>>();
-    match highlighter {
-        DiffHighlighter::TreeSitter => {
-            highlight_lines_tree_sitter(&content_lines, diff_language_for_path(path))
-        }
-        DiffHighlighter::Syntect => highlight_lines_syntect(&content_lines, path),
-    }
-}
-
-fn highlight_lines_tree_sitter(
-    lines: &[String],
-    language: Option<&'static str>,
-) -> Vec<Vec<RtSpan<'static>>> {
-    lines
-        .iter()
-        .map(|line| {
-            if line.is_empty() {
-                return Vec::new();
-            }
-            let mut highlighted = highlight_code_block_to_lines(language, line);
-            highlighted
-                .pop()
-                .map(|line| line.spans)
-                .unwrap_or_else(|| vec![line.to_string().into()])
-        })
-        .collect()
+    highlight_lines_syntect(&content_lines, path)
 }
 
 fn highlight_lines_syntect(lines: &[String], path: &Path) -> Vec<Vec<RtSpan<'static>>> {
@@ -1216,18 +1148,6 @@ fn highlight_lines_syntect(lines: &[String], path: &Path) -> Vec<Vec<RtSpan<'sta
             }
         })
         .collect()
-}
-
-fn diff_language_for_path(path: &Path) -> Option<&'static str> {
-    let ext = path.extension()?.to_string_lossy().to_ascii_lowercase();
-    match ext.as_str() {
-        "bash" | "bashrc" | "sh" | "zsh" | "zshrc" | "fish" => Some("bash"),
-        "json" | "jsonc" | "json5" => Some("json"),
-        "py" | "pyi" => Some("python"),
-        "rs" => Some("rust"),
-        "yaml" | "yml" => Some("yaml"),
-        _ => None,
-    }
 }
 
 fn syntect_syntax_set() -> &'static SyntaxSet {
@@ -1463,16 +1383,6 @@ fn apply_bg(style: Style, bg: Option<Color>) -> Style {
     }
 }
 
-fn apply_bg_to_spans(spans: Vec<RtSpan<'static>>, bg: Option<Color>) -> Vec<RtSpan<'static>> {
-    let Some(bg) = bg else {
-        return spans;
-    };
-    spans
-        .into_iter()
-        .map(|span| RtSpan::styled(span.content.to_string(), span.style.bg(bg)))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1488,13 +1398,7 @@ mod tests {
         changes: &HashMap<PathBuf, FileChange>,
         view: DiffView,
     ) -> Vec<RtLine<'static>> {
-        create_diff_summary(
-            changes,
-            &PathBuf::from("/"),
-            80,
-            view,
-            DiffHighlighter::TreeSitter,
-        )
+        create_diff_summary(changes, &PathBuf::from("/"), 80, view)
     }
 
     fn snapshot_lines(name: &str, lines: Vec<RtLine<'static>>, width: u16, height: u16) {
@@ -1580,13 +1484,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(
-            &changes,
-            &PathBuf::from("/"),
-            80,
-            DiffView::Pretty,
-            DiffHighlighter::TreeSitter,
-        );
+        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 80, DiffView::Pretty);
 
         snapshot_lines_text("pretty_update_block_text", &lines);
     }
@@ -1685,13 +1583,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(
-            &changes,
-            &PathBuf::from("/"),
-            72,
-            DiffView::Line,
-            DiffHighlighter::TreeSitter,
-        );
+        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 72, DiffView::Line);
 
         // Render with backend width wider than wrap width to avoid Paragraph auto-wrap.
         snapshot_lines("apply_update_block_wraps_long_lines", lines, 80, 12);
@@ -1714,13 +1606,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(
-            &changes,
-            &PathBuf::from("/"),
-            28,
-            DiffView::Line,
-            DiffHighlighter::TreeSitter,
-        );
+        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 28, DiffView::Line);
         snapshot_lines_text("apply_update_block_wraps_long_lines_text", &lines);
     }
 
@@ -1747,13 +1633,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(
-            &changes,
-            &PathBuf::from("/"),
-            80,
-            DiffView::Line,
-            DiffHighlighter::TreeSitter,
-        );
+        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 80, DiffView::Line);
         snapshot_lines_text("apply_update_block_line_numbers_three_digits_text", &lines);
     }
 
@@ -1776,13 +1656,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(
-            &changes,
-            &cwd,
-            80,
-            DiffView::Line,
-            DiffHighlighter::TreeSitter,
-        );
+        let lines = create_diff_summary(&changes, &cwd, 80, DiffView::Line);
 
         snapshot_lines("apply_update_block_relativizes_path", lines, 80, 10);
     }
@@ -1808,13 +1682,7 @@ mod tests {
             },
         );
 
-        let lines = create_diff_summary(
-            &changes,
-            &PathBuf::from("/"),
-            60,
-            DiffView::SideBySide,
-            DiffHighlighter::TreeSitter,
-        );
+        let lines = create_diff_summary(&changes, &PathBuf::from("/"), 60, DiffView::SideBySide);
         let positions = lines
             .iter()
             .filter_map(|line| {

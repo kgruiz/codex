@@ -1366,7 +1366,6 @@ impl ChatWidget {
             event.changes,
             &self.config.cwd,
             self.config.diff_view,
-            self.config.diff_highlighter,
         ));
     }
 
@@ -1712,7 +1711,6 @@ impl ChatWidget {
             changes: ev.changes.clone(),
             cwd: self.config.cwd.clone(),
             diff_view: self.config.diff_view,
-            diff_highlighter: self.config.diff_highlighter,
         };
         self.bottom_pane
             .push_approval_request(request, &self.config.features);
@@ -3496,14 +3494,12 @@ impl ChatWidget {
                             return;
                         }
                     };
-                let diff_highlighter = self.config.diff_highlighter;
                 self.add_diff_in_progress();
                 let width = self.last_rendered_width.get().unwrap_or(80);
                 let tx = self.app_event_tx.clone();
                 let cwd = self.config.cwd.clone();
                 tokio::spawn(async move {
-                    let result = match get_git_diff(&cwd, diff_view, diff_highlighter, width).await
-                    {
+                    let result = match get_git_diff(&cwd, diff_view, width).await {
                         Ok(result) => result,
                         Err(e) => GitDiffResult::Error(format!("Failed to compute diff: {e}")),
                     };

@@ -1283,8 +1283,7 @@ impl App {
                     ..
                 } => {
                     let _ = tui.enter_alt_screen();
-                    let diff_summary =
-                        DiffSummary::new(changes, cwd, diff_view, self.config.diff_highlighter);
+                    let diff_summary = DiffSummary::new(changes, cwd, diff_view);
                     self.overlay = Some(Overlay::new_static_with_renderables(
                         vec![diff_summary.into()],
                         "P A T C H".to_string(),

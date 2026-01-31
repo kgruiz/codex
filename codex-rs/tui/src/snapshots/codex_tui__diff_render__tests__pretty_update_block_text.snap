@@ -2,7 +2,7 @@
 source: tui/src/diff_render.rs
 expression: text
 ---
-Edited(example.txt)
+Edited example.txt
 Added 1 lines, removed 1 lines
 1   line one
 2 - line two

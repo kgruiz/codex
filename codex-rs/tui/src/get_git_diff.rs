@@ -5,7 +5,6 @@
 //! untracked files. When the current directory is not inside a Git
 //! repository, the function returns `Ok(GitDiffResult::NotGitRepo)`.
 
-use codex_core::config::types::DiffHighlighter;
 use codex_core::config::types::DiffView;
 use codex_core::protocol::FileChange;
 use diffy::create_patch;
@@ -30,7 +29,6 @@ pub(crate) enum GitDiffResult {
 pub(crate) async fn get_git_diff(
     cwd: &Path,
     view: DiffView,
-    highlighter: DiffHighlighter,
     width: usize,
 ) -> io::Result<GitDiffResult> {
     // First check if we are inside a Git repository.
@@ -39,7 +37,7 @@ pub(crate) async fn get_git_diff(
     }
 
     let GitChanges { changes, warnings } = collect_git_changes(cwd).await?;
-    let view_lines = render_diff_view(&changes, cwd, width, view, highlighter);
+    let view_lines = render_diff_view(&changes, cwd, width, view);
     let mut lines = if view_lines.is_empty() {
         vec![RtLine::from("(no changes)".dim().italic())]
     } else {

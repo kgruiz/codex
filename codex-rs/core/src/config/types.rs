@@ -405,19 +405,6 @@ impl Default for DiffView {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum DiffHighlighter {
-    TreeSitter,
-    Syntect,
-}
-
-impl Default for DiffHighlighter {
-    fn default() -> Self {
-        Self::TreeSitter
-    }
-}
-
 /// How TUI2 should interpret mouse scroll events.
 ///
 /// Terminals generally encode both mouse wheels and trackpads as the same "scroll up/down" mouse
@@ -472,11 +459,6 @@ pub struct Tui {
     /// Defaults to `pretty`.
     #[serde(default)]
     pub diff_view: DiffView,
-
-    /// Highlighting engine used for pretty diff views.
-    /// Defaults to `tree-sitter`.
-    #[serde(default)]
-    pub diff_highlighter: DiffHighlighter,
 
     /// Default directory for chat exports. When set, `/export` writes here.
     pub export_dir: Option<PathBuf>,

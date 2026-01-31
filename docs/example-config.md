@@ -155,7 +155,6 @@ diff_view = "pretty"
 
 # Highlighting engine for pretty diff views. Default: tree-sitter
 # Options: "tree-sitter" or "syntect"
-diff_highlighter = "tree-sitter"
 
 # Default export directory for /export (relative to cwd). Optional.
 # export_dir = "exports"

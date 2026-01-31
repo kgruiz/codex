@@ -1,6 +1,5 @@
 use crate::auth::AuthCredentialsStoreMode;
 use crate::config::types::DEFAULT_OTEL_ENVIRONMENT;
-use crate::config::types::DiffHighlighter;
 use crate::config::types::DiffView;
 use crate::config::types::ExportFormat;
 use crate::config::types::History;
@@ -195,9 +194,6 @@ pub struct Config {
 
     /// Default diff format shown in the TUI.
     pub diff_view: DiffView,
-
-    /// Highlighting engine used for pretty diff views.
-    pub diff_highlighter: DiffHighlighter,
 
     /// Default export directory for `/export`.
     pub tui_export_dir: Option<PathBuf>,
@@ -1481,11 +1477,6 @@ impl Config {
                 .map(|t| t.keep_queue_on_branch)
                 .unwrap_or(false),
             diff_view: cfg.tui.as_ref().map(|t| t.diff_view).unwrap_or_default(),
-            diff_highlighter: cfg
-                .tui
-                .as_ref()
-                .map(|t| t.diff_highlighter)
-                .unwrap_or_default(),
             tui_export_dir: cfg.tui.as_ref().and_then(|t| t.export_dir.clone()),
             tui_export_name: cfg.tui.as_ref().and_then(|t| t.export_name.clone()),
             tui_export_format: cfg.tui.as_ref().and_then(|t| t.export_format),
@@ -1705,7 +1696,6 @@ persistence = "none"
                 status_line: None,
                 keep_queue_on_branch: false,
                 diff_view: DiffView::Pretty,
-                diff_highlighter: DiffHighlighter::TreeSitter,
                 export_dir: None,
                 export_name: None,
                 export_format: None,
@@ -3322,7 +3312,6 @@ model_verbosity = "high"
                 status_line_items: Config::default_status_line_items(),
                 keep_queue_on_branch: false,
                 diff_view: DiffView::Pretty,
-                diff_highlighter: DiffHighlighter::TreeSitter,
                 tui_export_dir: None,
                 tui_export_name: None,
                 tui_export_format: None,
@@ -3417,7 +3406,6 @@ model_verbosity = "high"
             status_line_items: Config::default_status_line_items(),
             keep_queue_on_branch: false,
             diff_view: DiffView::Pretty,
-            diff_highlighter: DiffHighlighter::TreeSitter,
             tui_export_dir: None,
             tui_export_name: None,
             tui_export_format: None,
@@ -3527,7 +3515,6 @@ model_verbosity = "high"
             status_line_items: Config::default_status_line_items(),
             keep_queue_on_branch: false,
             diff_view: DiffView::Pretty,
-            diff_highlighter: DiffHighlighter::TreeSitter,
             tui_export_dir: None,
             tui_export_name: None,
             tui_export_format: None,
@@ -3623,7 +3610,6 @@ model_verbosity = "high"
             status_line_items: Config::default_status_line_items(),
             keep_queue_on_branch: false,
             diff_view: DiffView::Pretty,
-            diff_highlighter: DiffHighlighter::TreeSitter,
             tui_export_dir: None,
             tui_export_name: None,
             tui_export_format: None,
