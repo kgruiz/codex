@@ -18,7 +18,7 @@
   - codex-rs/tui/src/bottom_pane/chat_composer.rs:2928
 
 ## 3. Status line stats and model info
-- [ ]
+- [x]
 - Commits: 8ce97dfab, 3a53f2668
 - Code anchors:
   - codex-rs/core/src/config/mod.rs:190
