@@ -49,7 +49,7 @@
   - codex-rs/tui/src/chatwidget.rs:3969
 
 ## 7. Diff view and pretty diff rendering
-- [ ]
+- [x]
 - Commits: 985dbe747, 515b8c8e5, 18b770ee2, 356ef95e6, f7e6da496, 59fa25682, 0759101ba
 - Code anchors:
   - codex-rs/tui/src/diff_render.rs:110

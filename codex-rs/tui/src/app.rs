@@ -18,6 +18,7 @@ use crate::diff_render::DiffSummary;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::external_editor;
 use crate::file_search::FileSearchManager;
+use crate::get_git_diff::GitDiffResult;
 use crate::history_cell;
 use crate::history_cell::HistoryCell;
 #[cfg(not(debug_assertions))]
@@ -33,7 +34,6 @@ use crate::sessions_picker::SessionSelection as ManagedSessionSelection;
 use crate::tui;
 use crate::tui::TuiEvent;
 use crate::update_action::UpdateAction;
-use codex_ansi_escape::ansi_escape_line;
 use codex_app_server_protocol::ConfigLayerSource;
 use codex_core::AuthManager;
 use codex_core::CodexAuth;
@@ -1653,10 +1653,12 @@ impl App {
                 self.chat_widget.on_diff_complete();
                 // Enter alternate screen using TUI helper and build pager lines
                 let _ = tui.enter_alt_screen();
-                let pager_lines: Vec<ratatui::text::Line<'static>> = if text.trim().is_empty() {
-                    vec!["No changes detected.".italic().into()]
-                } else {
-                    text.lines().map(ansi_escape_line).collect()
+                let pager_lines: Vec<ratatui::text::Line<'static>> = match text {
+                    GitDiffResult::NotGitRepo => {
+                        vec!["`/diff` — _not inside a git repository_".to_string().into()]
+                    }
+                    GitDiffResult::Error(message) => vec![message.red().into()],
+                    GitDiffResult::Lines(lines) => lines,
                 };
                 self.overlay = Some(Overlay::new_static_with_lines(
                     pager_lines,
@@ -2323,9 +2325,14 @@ impl App {
                 self.chat_widget.handle_manage_skills_closed();
             }
             AppEvent::FullScreenApprovalRequest(request) => match request {
-                ApprovalRequest::ApplyPatch { cwd, changes, .. } => {
+                ApprovalRequest::ApplyPatch {
+                    cwd,
+                    changes,
+                    diff_view,
+                    ..
+                } => {
                     let _ = tui.enter_alt_screen();
-                    let diff_summary = DiffSummary::new(changes, cwd);
+                    let diff_summary = DiffSummary::new(changes, cwd, diff_view);
                     self.overlay = Some(Overlay::new_static_with_renderables(
                         vec![diff_summary.into()],
                         "P A T C H".to_string(),

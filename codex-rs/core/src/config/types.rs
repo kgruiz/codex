@@ -447,6 +447,21 @@ impl fmt::Display for NotificationMethod {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum DiffView {
+    Pretty,
+    Line,
+    Inline,
+    SideBySide,
+}
+
+impl Default for DiffView {
+    fn default() -> Self {
+        Self::Pretty
+    }
+}
+
 /// Collection of settings that are specific to the TUI.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -492,6 +507,12 @@ pub struct Tui {
     /// When set, the TUI renders the selected items as the status line.
     #[serde(default)]
     pub status_line: Option<Vec<String>>,
+
+    /// Default diff format shown in the TUI.
+    ///
+    /// Defaults to `pretty`.
+    #[serde(default)]
+    pub diff_view: DiffView,
 }
 
 const fn default_true() -> bool {

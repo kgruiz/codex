@@ -183,6 +183,7 @@ use crate::exec_cell::ExecCell;
 use crate::exec_cell::new_active_exec_command;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::export_markdown;
+use crate::get_git_diff::GitDiffResult;
 use crate::get_git_diff::get_git_diff;
 use crate::history_cell;
 use crate::history_cell::AgentMessageCell;
@@ -228,6 +229,7 @@ use codex_common::approval_presets::builtin_approval_presets;
 use codex_core::AuthManager;
 use codex_core::CodexAuth;
 use codex_core::ThreadManager;
+use codex_core::config::types::DiffView;
 use codex_core::protocol::AskForApproval;
 use codex_core::protocol::SandboxPolicy;
 use codex_file_search::FileMatch;
@@ -1811,6 +1813,7 @@ impl ChatWidget {
         self.add_to_history(history_cell::new_patch_event(
             event.changes,
             &self.config.cwd,
+            self.config.diff_view,
         ));
     }
 
@@ -2278,6 +2281,7 @@ impl ChatWidget {
             reason: ev.reason,
             changes: ev.changes.clone(),
             cwd: self.config.cwd.clone(),
+            diff_view: self.config.diff_view,
         };
         self.bottom_pane
             .push_approval_request(request, &self.config.features);
@@ -3317,18 +3321,15 @@ impl ChatWidget {
             SlashCommand::Diff => {
                 self.add_diff_in_progress();
                 let tx = self.app_event_tx.clone();
+                let cwd = self.config.cwd.clone();
+                let diff_view = self.config.diff_view;
+                let width = self.last_rendered_width.get().unwrap_or(80);
                 tokio::spawn(async move {
-                    let text = match get_git_diff().await {
-                        Ok((is_git_repo, diff_text)) => {
-                            if is_git_repo {
-                                diff_text
-                            } else {
-                                "`/diff` — _not inside a git repository_".to_string()
-                            }
-                        }
-                        Err(e) => format!("Failed to compute diff: {e}"),
+                    let result = match get_git_diff(&cwd, diff_view, width).await {
+                        Ok(result) => result,
+                        Err(e) => GitDiffResult::Error(format!("Failed to compute diff: {e}")),
                     };
-                    tx.send(AppEvent::DiffResult(text));
+                    tx.send(AppEvent::DiffResult(result));
                 });
             }
             SlashCommand::Mention => {
@@ -3499,6 +3500,26 @@ impl ChatWidget {
                     },
                 });
                 self.bottom_pane.drain_pending_submission_state();
+            }
+            SlashCommand::Diff => {
+                let diff_view = match diff_view_override_from_args(trimmed, self.config.diff_view) {
+                    Ok(view) => view,
+                    Err(message) => {
+                        self.add_error_message(message);
+                        return;
+                    }
+                };
+                self.add_diff_in_progress();
+                let tx = self.app_event_tx.clone();
+                let cwd = self.config.cwd.clone();
+                let width = self.last_rendered_width.get().unwrap_or(80);
+                tokio::spawn(async move {
+                    let result = match get_git_diff(&cwd, diff_view, width).await {
+                        Ok(result) => result,
+                        Err(e) => GitDiffResult::Error(format!("Failed to compute diff: {e}")),
+                    };
+                    tx.send(AppEvent::DiffResult(result));
+                });
             }
             _ => self.dispatch_command(cmd),
         }
@@ -7513,6 +7534,65 @@ fn format_from_extension(path: &Path) -> Option<ChatExportFormat> {
         "md" | "markdown" => Some(ChatExportFormat::Markdown),
         "json" => Some(ChatExportFormat::Json),
         _ => None,
+    }
+}
+
+fn diff_view_override_from_args(args: &str, default_view: DiffView) -> Result<DiffView, String> {
+    if args.trim().is_empty() {
+        return Ok(default_view);
+    }
+
+    let Some(tokens) = shlex::split(args) else {
+        return Err("Failed to parse /diff arguments.".to_string());
+    };
+
+    if tokens.is_empty() {
+        return Ok(default_view);
+    }
+
+    let mut view_override = None;
+    let mut args_iter = tokens.iter();
+    while let Some(arg) = args_iter.next() {
+        if let Some(value) = arg.strip_prefix("--view=") {
+            view_override = Some(parse_diff_view_value(value)?);
+            continue;
+        }
+
+        match arg.as_str() {
+            "--pretty" => view_override = Some(DiffView::Pretty),
+            "--line" => view_override = Some(DiffView::Line),
+            "--inline" => view_override = Some(DiffView::Inline),
+            "--side-by-side" => view_override = Some(DiffView::SideBySide),
+            "--view" => {
+                let Some(value) = args_iter.next() else {
+                    return Err(
+                        "Expected a value after --view (pretty, line, inline, or side-by-side)."
+                            .to_string(),
+                    );
+                };
+                view_override = Some(parse_diff_view_value(value)?);
+            }
+            _ if arg.starts_with('-') => {
+                return Err(format!("Unknown /diff flag: {arg}"));
+            }
+            _ => {
+                return Err(format!("Unexpected /diff argument: {arg}"));
+            }
+        }
+    }
+
+    Ok(view_override.unwrap_or(default_view))
+}
+
+fn parse_diff_view_value(value: &str) -> Result<DiffView, String> {
+    match value {
+        "pretty" => Ok(DiffView::Pretty),
+        "line" => Ok(DiffView::Line),
+        "inline" => Ok(DiffView::Inline),
+        "side-by-side" | "side_by_side" | "side" => Ok(DiffView::SideBySide),
+        _ => Err(format!(
+            "Invalid /diff view '{value}'. Use 'pretty', 'line', 'inline', or 'side-by-side'."
+        )),
     }
 }
 

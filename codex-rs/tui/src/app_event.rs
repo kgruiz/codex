@@ -20,6 +20,7 @@ use codex_protocol::openai_models::ModelPreset;
 
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::StatusLineItem;
+use crate::get_git_diff::GitDiffResult;
 use crate::history_cell::HistoryCell;
 use crate::sessions_picker::SessionView;
 
@@ -135,7 +136,7 @@ pub(crate) enum AppEvent {
     ConnectorsLoaded(Result<ConnectorsSnapshot, String>),
 
     /// Result of computing a `/diff` command.
-    DiffResult(String),
+    DiffResult(GitDiffResult),
 
     /// Export the current chat in the selected format.
     ExportChat {

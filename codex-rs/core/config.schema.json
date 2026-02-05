@@ -301,6 +301,15 @@
       },
       "type": "object"
     },
+    "DiffView": {
+      "enum": [
+        "pretty",
+        "line",
+        "inline",
+        "side-by-side"
+      ],
+      "type": "string"
+    },
     "FeedbackConfigToml": {
       "additionalProperties": false,
       "properties": {
@@ -554,6 +563,19 @@
             "keyring"
           ],
           "type": "string"
+        }
+      ]
+    },
+    "OneOrManyStrings": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       ]
     },
@@ -1018,6 +1040,15 @@
           "description": "Enable animations (welcome screen, shimmer effects, spinners). Defaults to `true`.",
           "type": "boolean"
         },
+        "diff_view": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/DiffView"
+            }
+          ],
+          "default": "pretty",
+          "description": "Default diff format shown in the TUI.\n\nDefaults to `pretty`."
+        },
         "experimental_mode": {
           "allOf": [
             {
@@ -1341,6 +1372,14 @@
     "instructions": {
       "description": "System instructions.",
       "type": "string"
+    },
+    "keybindings": {
+      "additionalProperties": {
+        "$ref": "#/definitions/OneOrManyStrings"
+      },
+      "default": {},
+      "description": "Keybinding overrides loaded from `[keybindings]` in `config.toml`.",
+      "type": "object"
     },
     "log_dir": {
       "allOf": [

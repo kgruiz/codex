@@ -2,6 +2,7 @@ use crate::auth::AuthCredentialsStoreMode;
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
 use crate::config::types::DEFAULT_OTEL_ENVIRONMENT;
+use crate::config::types::DiffView;
 use crate::config::types::History;
 use crate::config::types::McpServerConfig;
 use crate::config::types::McpServerDisabledReason;
@@ -230,6 +231,9 @@ pub struct Config {
 
     /// Ordered list of status line item identifiers for the TUI.
     pub tui_status_line: Option<Vec<String>>,
+
+    /// Default diff format shown in the TUI.
+    pub diff_view: DiffView,
 
     /// The directory that should be treated as the current working directory
     /// for the session. All relative paths inside the business-logic layer are
@@ -1729,6 +1733,7 @@ impl Config {
                 .map(|t| t.alternate_screen)
                 .unwrap_or_default(),
             tui_status_line: cfg.tui.as_ref().and_then(|t| t.status_line.clone()),
+            diff_view: cfg.tui.as_ref().map(|t| t.diff_view).unwrap_or_default(),
             otel: {
                 let t: OtelConfigToml = cfg.otel.unwrap_or_default();
                 let log_user_prompt = t.log_user_prompt.unwrap_or(false);
@@ -3916,6 +3921,7 @@ model_verbosity = "high"
                 feedback_enabled: true,
                 tui_alternate_screen: AltScreenMode::Auto,
                 tui_status_line: None,
+                diff_view: DiffView::Pretty,
                 otel: OtelConfig::default(),
             },
             o3_profile_config
@@ -4003,6 +4009,7 @@ model_verbosity = "high"
             feedback_enabled: true,
             tui_alternate_screen: AltScreenMode::Auto,
             tui_status_line: None,
+            diff_view: DiffView::Pretty,
             otel: OtelConfig::default(),
         };
 
@@ -4105,6 +4112,7 @@ model_verbosity = "high"
             feedback_enabled: true,
             tui_alternate_screen: AltScreenMode::Auto,
             tui_status_line: None,
+            diff_view: DiffView::Pretty,
             otel: OtelConfig::default(),
         };
 
@@ -4193,6 +4201,7 @@ model_verbosity = "high"
             feedback_enabled: true,
             tui_alternate_screen: AltScreenMode::Auto,
             tui_status_line: None,
+            diff_view: DiffView::Pretty,
             otel: OtelConfig::default(),
         };
 
