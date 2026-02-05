@@ -41,7 +41,7 @@
   - codex-rs/tui/src/app.rs:701
 
 ## 6. Backtrack edit and resend flow (Esc, Shift+Esc, etc.)
-- [ ]
+- [x]
 - Commits: dca034e09, cb6493efb, c75e09adc, 0c1f89e54, 16d8d36e3, 9f7f8dfba
 - Code anchors:
   - codex-rs/tui/src/app_backtrack.rs:69
