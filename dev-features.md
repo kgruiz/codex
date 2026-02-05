@@ -56,7 +56,11 @@
   - codex-rs/tui/src/chatwidget.rs:6736
   - codex-rs/core/src/config/mod.rs:196
 
-## 8. Queue editing and queued message UI
+## 8. Update justfile with missing dev recipes
+- [ ]
+- Details: add sync (and full version), install-dev, id, install-dev-no-clean
+
+## 9. Queue editing and queued message UI
 - [ ]
 - Commits: 2bf5c4733, 120e36e45, 9d6d308e8, 761caf450, 02b0163e1, e6b69d90c, 5fa379366, 632a3ce2b, 1bd2e7af4
 - Code anchors:
@@ -64,27 +68,27 @@
   - codex-rs/tui/src/bottom_pane/queue_popup.rs:31
   - codex-rs/tui/src/bottom_pane/mod.rs:105
 
-## 9. Notification focus filtering
+## 10. Notification focus filtering
 - [ ]
 - Commits: eb808106a, 7cc6afd5d, 6f8d51022
 - Code anchors:
   - codex-rs/core/src/config/mod.rs:177
   - codex-rs/tui/src/chatwidget.rs:6279
 
-## 10. External editor handoff
+## 11. External editor handoff
 - [ ]
 - Commit: c8a9cf37e
 - Code anchors:
   - codex-rs/tui/src/app.rs:1350
 
-## 11. Live exec output in TUI
+## 12. Live exec output in TUI
 - [ ]
 - Commit: 29b75f9fc
 - Likely anchors:
   - codex-rs/tui/src/exec_cell/
   - codex-rs/tui/src/history_cell.rs
 
-## 12. Reverse history search (Ctrl+R)
+## 13. Reverse history search (Ctrl+R)
 - [ ]
 - Commit: 58158ef3d
 - Code anchors:
