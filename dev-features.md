@@ -34,7 +34,7 @@
   - codex-rs/tui/src/export_markdown.rs:15
 
 ## 5. Session manager and chat renaming
-- [ ]
+- [x]
 - Commits: 720cb8287, 6c05b8b94, 54791d145, b94fd60fd
 - Code anchors:
   - codex-rs/tui/src/sessions_picker.rs:118
