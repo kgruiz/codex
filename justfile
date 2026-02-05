@@ -81,3 +81,5 @@ sync-upstream-main:
     git branch --set-upstream-to=upstream/main
     git reset --hard upstream/main
     git push --force-with-lease origin main
+
+alias sync := sync-upstream-main
