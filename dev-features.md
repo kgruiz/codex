@@ -56,11 +56,22 @@
   - codex-rs/tui/src/chatwidget.rs:6736
   - codex-rs/core/src/config/mod.rs:196
 
-## 8. Update justfile with missing dev recipes
+## 8. /status includes global agents.md and chat title
+- [ ]
+- Details: include global agents.md, include current chat title
+
+## 9. Allow model changes during running; status line vs footer model display
+- [ ]
+- Details: status line shows currently running model; footer shows selected model; allow changing selected model during active runs without affecting the ongoing run
+
+## 10. Allow /status during runs
+- [ ]
+
+## 11. Update justfile with missing dev recipes
 - [ ]
 - Details: add sync (and full version), install-dev, id, install-dev-no-clean
 
-## 9. Queue editing and queued message UI
+## 12. Queue editing and queued message UI
 - [ ]
 - Commits: 2bf5c4733, 120e36e45, 9d6d308e8, 761caf450, 02b0163e1, e6b69d90c, 5fa379366, 632a3ce2b, 1bd2e7af4
 - Code anchors:
@@ -68,27 +79,27 @@
   - codex-rs/tui/src/bottom_pane/queue_popup.rs:31
   - codex-rs/tui/src/bottom_pane/mod.rs:105
 
-## 10. Notification focus filtering
+## 13. Notification focus filtering
 - [ ]
 - Commits: eb808106a, 7cc6afd5d, 6f8d51022
 - Code anchors:
   - codex-rs/core/src/config/mod.rs:177
   - codex-rs/tui/src/chatwidget.rs:6279
 
-## 11. External editor handoff
+## 14. External editor handoff
 - [ ]
 - Commit: c8a9cf37e
 - Code anchors:
   - codex-rs/tui/src/app.rs:1350
 
-## 12. Live exec output in TUI
+## 15. Live exec output in TUI
 - [ ]
 - Commit: 29b75f9fc
 - Likely anchors:
   - codex-rs/tui/src/exec_cell/
   - codex-rs/tui/src/history_cell.rs
 
-## 13. Reverse history search (Ctrl+R)
+## 16. Reverse history search (Ctrl+R)
 - [ ]
 - Commit: 58158ef3d
 - Code anchors:
