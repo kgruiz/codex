@@ -73,3 +73,11 @@ test:
 # Run the MCP server
 mcp-server-run *args:
     cargo run -p codex-mcp-server -- "$@"
+
+# Sync local and origin main to upstream/main.
+sync-upstream-main:
+    git fetch upstream
+    git switch main
+    git branch --set-upstream-to=upstream/main
+    git reset --hard upstream/main
+    git push --force-with-lease origin main
