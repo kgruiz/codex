@@ -16,6 +16,7 @@ In the codex-rs folder where the rust code lives:
 - When making a change that adds or changes an API, ensure that the documentation in the `docs/` folder is up to date if applicable.
 - If you change `ConfigToml` or nested config types, run `just write-config-schema` to update `codex-rs/core/config.schema.json`.
 - When asked to implement items from `dev-features.md`, reference the commits listed there, but prioritize the latest state of the `dev` branch as the source of truth.
+- For `dev-features.md` work, reimplement features manually in the current branch state; do not cherry-pick feature commits.
 
 Run `just fmt` (in `codex-rs` directory) automatically after you have finished making Rust code changes; do not ask for approval to run it. Additionally, run the tests:
 
