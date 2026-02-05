@@ -34,14 +34,14 @@
   - codex-rs/tui/src/export_markdown.rs:15
 
 ## 5. Session manager and chat renaming
-- [x]
+- [ ]
 - Commits: 720cb8287, 6c05b8b94, 54791d145, b94fd60fd
 - Code anchors:
   - codex-rs/tui/src/sessions_picker.rs:118
   - codex-rs/tui/src/app.rs:701
 
 ## 6. Backtrack edit and resend flow (Esc, Shift+Esc, etc.)
-- [x]
+- [ ]
 - Commits: dca034e09, cb6493efb, c75e09adc, 0c1f89e54, 16d8d36e3, 9f7f8dfba
 - Code anchors:
   - codex-rs/tui/src/app_backtrack.rs:69
@@ -49,7 +49,7 @@
   - codex-rs/tui/src/chatwidget.rs:3969
 
 ## 7. Diff view and pretty diff rendering
-- [x]
+- [ ]
 - Commits: 985dbe747, 515b8c8e5, 18b770ee2, 356ef95e6, f7e6da496, 59fa25682, 0759101ba
 - Code anchors:
   - codex-rs/tui/src/diff_render.rs:110
