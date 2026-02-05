@@ -1,7 +1,7 @@
 # Dev Feature Inventory
 
 ## 1. Model/thinking switching keybinds and related UI
-- [ ]
+- [x]
 - Commits: 09473dde6, 2cc820c48, 25e20d713, 7bd797386, 2c691ed1f, 45f6b7a9b, a5d60dcc8, 8e210a669, b209c360e, 57a84eda6, 180837e32, b4bd6fe16, e62ae0d5c, 19f74601d, 30281cd9d, ebf81bdf9, 35171777a, 57405f6c0, 3a53f2668, 708940b1a, 5fa379366, 718d7cd49, e6b69d90c, 1023b3242
 - Code anchors:
   - codex-rs/tui/src/bottom_pane/chat_composer.rs

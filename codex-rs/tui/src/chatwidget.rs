@@ -2566,6 +2566,7 @@ impl ChatWidget {
                 ),
         );
         widget.update_collaboration_mode_indicator();
+        widget.refresh_model_display();
 
         widget
             .bottom_pane
@@ -2877,6 +2878,7 @@ impl ChatWidget {
                 ),
         );
         widget.update_collaboration_mode_indicator();
+        widget.refresh_model_display();
 
         widget
     }
@@ -2941,6 +2943,50 @@ impl ChatWidget {
         }
 
         match key_event {
+            KeyEvent {
+                code: KeyCode::Right,
+                modifiers,
+                kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                ..
+            } if modifiers == (KeyModifiers::CONTROL | KeyModifiers::SHIFT)
+                && self.bottom_pane.no_modal_or_popup_active() =>
+            {
+                self.cycle_model_shortcut(1);
+                return;
+            }
+            KeyEvent {
+                code: KeyCode::Left,
+                modifiers,
+                kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                ..
+            } if modifiers == (KeyModifiers::CONTROL | KeyModifiers::SHIFT)
+                && self.bottom_pane.no_modal_or_popup_active() =>
+            {
+                self.cycle_model_shortcut(-1);
+                return;
+            }
+            KeyEvent {
+                code: KeyCode::Down,
+                modifiers,
+                kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                ..
+            } if modifiers == (KeyModifiers::CONTROL | KeyModifiers::SHIFT)
+                && self.bottom_pane.no_modal_or_popup_active() =>
+            {
+                self.cycle_reasoning_effort_shortcut(1);
+                return;
+            }
+            KeyEvent {
+                code: KeyCode::Up,
+                modifiers,
+                kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                ..
+            } if modifiers == (KeyModifiers::CONTROL | KeyModifiers::SHIFT)
+                && self.bottom_pane.no_modal_or_popup_active() =>
+            {
+                self.cycle_reasoning_effort_shortcut(-1);
+                return;
+            }
             KeyEvent {
                 code: KeyCode::BackTab,
                 kind: KeyEventKind::Press,
@@ -5938,6 +5984,10 @@ impl ChatWidget {
     fn refresh_model_display(&mut self) {
         let effective = self.effective_collaboration_mode();
         self.session_header.set_model(effective.model());
+        self.bottom_pane
+            .set_session_model(effective.model().to_string());
+        self.bottom_pane
+            .set_session_reasoning_effort(self.effective_reasoning_effort());
         // Keep composer paste affordances aligned with the currently effective model.
         self.sync_image_paste_enabled();
     }
@@ -6005,6 +6055,114 @@ impl ChatWidget {
         ) {
             self.set_collaboration_mask(next_mask);
         }
+    }
+
+    fn cycle_model_shortcut(&mut self, direction: isize) {
+        let current_model = self.current_model().to_string();
+        let presets: Vec<ModelPreset> = match self.models_manager.try_list_models(&self.config) {
+            Ok(models) => models,
+            Err(_) => {
+                self.add_info_message(
+                    "Models are being updated; please try again in a moment.".to_string(),
+                    None,
+                );
+                return;
+            }
+        };
+
+        let (mut auto_presets, other_presets): (Vec<ModelPreset>, Vec<ModelPreset>) = presets
+            .into_iter()
+            .partition(|preset| Self::is_auto_model(&preset.model));
+
+        let choices = if auto_presets.is_empty() {
+            let mut presets = other_presets;
+            presets.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+            presets
+        } else {
+            auto_presets.sort_by_key(|preset| Self::auto_model_order(&preset.model));
+            if auto_presets
+                .iter()
+                .any(|preset| preset.model == current_model)
+            {
+                auto_presets
+            } else {
+                let current_preset = other_presets
+                    .iter()
+                    .find(|preset| preset.model == current_model)
+                    .cloned();
+                if let Some(current_preset) = current_preset {
+                    auto_presets.insert(0, current_preset);
+                }
+                auto_presets
+            }
+        };
+
+        if choices.len() <= 1 {
+            return;
+        }
+
+        let current_idx = choices
+            .iter()
+            .position(|preset| preset.model == current_model)
+            .unwrap_or(0);
+
+        let len = choices.len() as isize;
+        let next_idx = (current_idx as isize + direction).rem_euclid(len) as usize;
+        let next = choices[next_idx].clone();
+        self.apply_model_and_effort(next.model.to_string(), Some(next.default_reasoning_effort));
+    }
+
+    fn cycle_reasoning_effort_shortcut(&mut self, direction: isize) {
+        let model_slug = self.current_model().to_string();
+        let current_effort = self.effective_reasoning_effort();
+
+        let presets = match self.models_manager.try_list_models(&self.config) {
+            Ok(presets) => presets,
+            Err(_) => {
+                self.add_info_message(
+                    "Models are being updated; please try again in a moment.".to_string(),
+                    None,
+                );
+                return;
+            }
+        };
+
+        let Some(preset) = presets
+            .into_iter()
+            .find(|preset| preset.model == model_slug)
+        else {
+            self.add_info_message(
+                format!("Model '{model_slug}' is not available right now."),
+                None,
+            );
+            return;
+        };
+
+        let default_effort = preset.default_reasoning_effort;
+        let mut supported: HashSet<ReasoningEffortConfig> = preset
+            .supported_reasoning_efforts
+            .into_iter()
+            .map(|option| option.effort)
+            .collect();
+        supported.insert(default_effort);
+
+        let choices: Vec<ReasoningEffortConfig> = ReasoningEffortConfig::iter()
+            .filter(|effort| *effort != ReasoningEffortConfig::None && supported.contains(effort))
+            .collect();
+
+        if choices.len() <= 1 {
+            return;
+        }
+
+        let current_idx = current_effort
+            .and_then(|effort| choices.iter().position(|choice| *choice == effort))
+            .or_else(|| choices.iter().position(|choice| *choice == default_effort))
+            .unwrap_or(0);
+
+        let len = choices.len() as isize;
+        let next_idx = (current_idx as isize + direction).rem_euclid(len) as usize;
+        let next_effort = Some(choices[next_idx]);
+        self.apply_model_and_effort(model_slug, next_effort);
     }
 
     /// Update the active collaboration mask.

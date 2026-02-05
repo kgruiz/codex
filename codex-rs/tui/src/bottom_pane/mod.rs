@@ -30,6 +30,7 @@ use bottom_pane_view::BottomPaneView;
 use codex_core::features::Features;
 use codex_core::skills::model::SkillMetadata;
 use codex_file_search::FileMatch;
+use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::request_user_input::RequestUserInputEvent;
 use codex_protocol::user_input::TextElement;
 use crossterm::event::KeyCode;
@@ -595,6 +596,18 @@ impl BottomPane {
         } else {
             // Hide the status indicator when a task completes, but keep other modal views.
             self.hide_status_indicator();
+        }
+    }
+
+    pub(crate) fn set_session_model(&mut self, model: String) {
+        if self.composer.set_session_model(model) {
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn set_session_reasoning_effort(&mut self, effort: Option<ReasoningEffort>) {
+        if self.composer.set_session_reasoning_effort(effort) {
+            self.request_redraw();
         }
     }
 

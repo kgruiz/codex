@@ -150,6 +150,7 @@ use codex_common::fuzzy_match::fuzzy_match;
 use codex_protocol::custom_prompts::CustomPrompt;
 use codex_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
 use codex_protocol::models::local_image_label_text;
+use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use codex_protocol::user_input::ByteRange;
 use codex_protocol::user_input::TextElement;
 
@@ -299,6 +300,8 @@ pub(crate) struct ChatComposer {
     connectors_enabled: bool,
     personality_command_enabled: bool,
     windows_degraded_sandbox_active: bool,
+    session_model: String,
+    session_reasoning_effort: Option<ReasoningEffortConfig>,
     status_line_value: Option<Line<'static>>,
     status_line_enabled: bool,
 }
@@ -390,6 +393,8 @@ impl ChatComposer {
             connectors_enabled: false,
             personality_command_enabled: false,
             windows_degraded_sandbox_active: false,
+            session_model: String::new(),
+            session_reasoning_effort: None,
             status_line_value: None,
             status_line_enabled: false,
         };
@@ -2532,6 +2537,8 @@ impl ChatComposer {
             is_wsl,
             context_window_percent: self.context_window_percent,
             context_window_used_tokens: self.context_window_used_tokens,
+            model: self.session_model.clone(),
+            reasoning_effort: self.session_reasoning_effort,
             status_line_value: self.status_line_value.clone(),
             status_line_enabled: self.status_line_enabled,
         }
@@ -2997,6 +3004,25 @@ impl ChatComposer {
 
     pub fn set_task_running(&mut self, running: bool) {
         self.is_task_running = running;
+    }
+
+    pub(crate) fn set_session_model(&mut self, model: String) -> bool {
+        if self.session_model == model {
+            return false;
+        }
+        self.session_model = model;
+        true
+    }
+
+    pub(crate) fn set_session_reasoning_effort(
+        &mut self,
+        effort: Option<ReasoningEffortConfig>,
+    ) -> bool {
+        if self.session_reasoning_effort == effort {
+            return false;
+        }
+        self.session_reasoning_effort = effort;
+        true
     }
 
     pub(crate) fn set_context_window(&mut self, percent: Option<i64>, used_tokens: Option<i64>) {
