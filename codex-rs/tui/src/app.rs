@@ -1567,6 +1567,29 @@ impl App {
                 ));
                 tui.frame_requester().schedule_frame();
             }
+            AppEvent::ExportChat { format, overrides } => {
+                self.chat_widget.start_export(format, overrides);
+            }
+            AppEvent::ExportResult {
+                path,
+                messages,
+                error,
+                format,
+            } => {
+                if let Some(error) = error {
+                    self.chat_widget
+                        .add_error_message(format!("Failed to export chat: {error}"));
+                } else {
+                    let label = format.label();
+                    self.chat_widget.add_info_message(
+                        format!("Exported chat as {label}: {}", path.display()),
+                        Some(format!("{messages} messages")),
+                    );
+                }
+            }
+            AppEvent::OpenExportPathPrompt { format } => {
+                self.chat_widget.open_export_path_prompt(format);
+            }
             AppEvent::OpenAppLink {
                 title,
                 description,

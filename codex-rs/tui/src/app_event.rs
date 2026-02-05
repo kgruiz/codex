@@ -30,6 +30,35 @@ use codex_protocol::config_types::Personality;
 use codex_protocol::openai_models::ReasoningEffort;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChatExportFormat {
+    Markdown,
+    Json,
+}
+
+impl ChatExportFormat {
+    pub(crate) const fn extension(self) -> &'static str {
+        match self {
+            Self::Markdown => "md",
+            Self::Json => "json",
+        }
+    }
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Markdown => "Markdown",
+            Self::Json => "JSON",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ExportOverrides {
+    pub(crate) output_path: Option<PathBuf>,
+    pub(crate) output_dir: Option<PathBuf>,
+    pub(crate) name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub(crate) enum WindowsSandboxEnableMode {
     Elevated,
@@ -101,6 +130,25 @@ pub(crate) enum AppEvent {
 
     /// Result of computing a `/diff` command.
     DiffResult(String),
+
+    /// Export the current chat in the selected format.
+    ExportChat {
+        format: Option<ChatExportFormat>,
+        overrides: ExportOverrides,
+    },
+
+    /// Prompt for a custom export path.
+    OpenExportPathPrompt {
+        format: ChatExportFormat,
+    },
+
+    /// Result of exporting the current chat.
+    ExportResult {
+        path: PathBuf,
+        messages: usize,
+        error: Option<String>,
+        format: ChatExportFormat,
+    },
 
     /// Open the app link view in the bottom pane.
     OpenAppLink {

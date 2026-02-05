@@ -26,7 +26,7 @@
   - codex-rs/tui/src/bottom_pane/chat_composer.rs:195
 
 ## 4. Chat export (/export) with defaults and path prompt
-- [ ]
+- [x]
 - Commits: 29a60f56a, 2d494d3c3, be057fd3e
 - Code anchors:
   - codex-rs/tui/src/chatwidget.rs:3421

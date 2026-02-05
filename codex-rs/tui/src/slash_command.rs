@@ -21,6 +21,7 @@ pub enum SlashCommand {
     Skills,
     Review,
     Rename,
+    Export,
     New,
     Resume,
     Fork,
@@ -57,6 +58,7 @@ impl SlashCommand {
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",
             SlashCommand::Review => "review my current changes and find issues",
             SlashCommand::Rename => "rename the current thread",
+            SlashCommand::Export => "export this chat",
             SlashCommand::Resume => "resume a saved chat",
             SlashCommand::Fork => "fork the current chat",
             // SlashCommand::Undo => "ask Codex to undo a turn",
@@ -95,7 +97,7 @@ impl SlashCommand {
     pub fn supports_inline_args(self) -> bool {
         matches!(
             self,
-            SlashCommand::Review | SlashCommand::Rename | SlashCommand::Plan
+            SlashCommand::Review | SlashCommand::Rename | SlashCommand::Plan | SlashCommand::Export
         )
     }
 
@@ -105,6 +107,7 @@ impl SlashCommand {
             SlashCommand::New
             | SlashCommand::Resume
             | SlashCommand::Fork
+            | SlashCommand::Export
             | SlashCommand::Init
             | SlashCommand::Compact
             // | SlashCommand::Undo
