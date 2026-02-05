@@ -3173,6 +3173,16 @@ impl ChatWidget {
             SlashCommand::Resume => {
                 self.app_event_tx.send(AppEvent::OpenResumePicker);
             }
+            SlashCommand::Session => {
+                self.app_event_tx.send(AppEvent::OpenSessionsPicker {
+                    view: crate::sessions_picker::SessionView::Active,
+                });
+            }
+            SlashCommand::Archived => {
+                self.app_event_tx.send(AppEvent::OpenSessionsPicker {
+                    view: crate::sessions_picker::SessionView::Archived,
+                });
+            }
             SlashCommand::Fork => {
                 self.app_event_tx.send(AppEvent::ForkCurrentSession);
             }

@@ -21,6 +21,7 @@ use codex_protocol::openai_models::ModelPreset;
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::StatusLineItem;
 use crate::history_cell::HistoryCell;
+use crate::sessions_picker::SessionView;
 
 use codex_core::features::Feature;
 use codex_core::protocol::AskForApproval;
@@ -90,6 +91,11 @@ pub(crate) enum AppEvent {
 
     /// Open the resume picker inside the running TUI session.
     OpenResumePicker,
+
+    /// Open the sessions manager picker inside the running TUI session.
+    OpenSessionsPicker {
+        view: SessionView,
+    },
 
     /// Fork the current session into a new thread.
     ForkCurrentSession,

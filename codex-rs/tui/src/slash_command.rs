@@ -24,6 +24,9 @@ pub enum SlashCommand {
     Export,
     New,
     Resume,
+    #[strum(serialize = "sessions", serialize = "session")]
+    Session,
+    Archived,
     Fork,
     Init,
     Compact,
@@ -60,6 +63,8 @@ impl SlashCommand {
             SlashCommand::Rename => "rename the current thread",
             SlashCommand::Export => "export this chat",
             SlashCommand::Resume => "resume a saved chat",
+            SlashCommand::Session => "manage saved chats",
+            SlashCommand::Archived => "view archived chats",
             SlashCommand::Fork => "fork the current chat",
             // SlashCommand::Undo => "ask Codex to undo a turn",
             SlashCommand::Quit | SlashCommand::Exit => "exit Codex",
@@ -106,6 +111,8 @@ impl SlashCommand {
         match self {
             SlashCommand::New
             | SlashCommand::Resume
+            | SlashCommand::Session
+            | SlashCommand::Archived
             | SlashCommand::Fork
             | SlashCommand::Export
             | SlashCommand::Init

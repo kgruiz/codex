@@ -28,7 +28,8 @@ use crate::model_migration::run_model_migration_prompt;
 use crate::pager_overlay::Overlay;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::render::renderable::Renderable;
-use crate::resume_picker::SessionSelection;
+use crate::resume_picker::SessionSelection as ResumeSessionSelection;
+use crate::sessions_picker::SessionSelection as ManagedSessionSelection;
 use crate::tui;
 use crate::tui::TuiEvent;
 use crate::update_action::UpdateAction;
@@ -923,7 +924,7 @@ impl App {
         active_profile: Option<String>,
         initial_prompt: Option<String>,
         initial_images: Vec<PathBuf>,
-        session_selection: SessionSelection,
+        session_selection: ResumeSessionSelection,
         feedback: codex_feedback::CodexFeedback,
         is_first_run: bool,
     ) -> Result<AppExitInfo> {
@@ -1002,7 +1003,7 @@ impl App {
 
         let enhanced_keys_supported = tui.enhanced_keys_supported();
         let mut chat_widget = match session_selection {
-            SessionSelection::StartFresh | SessionSelection::Exit => {
+            ResumeSessionSelection::StartFresh | ResumeSessionSelection::Exit => {
                 let init = crate::chatwidget::ChatWidgetInit {
                     config: config.clone(),
                     frame_requester: tui.frame_requester(),
@@ -1025,7 +1026,7 @@ impl App {
                 };
                 ChatWidget::new(init, thread_manager.clone())
             }
-            SessionSelection::Resume(path) => {
+            ResumeSessionSelection::Resume(path) => {
                 let resumed = thread_manager
                     .resume_thread_from_rollout(config.clone(), path.clone(), auth_manager.clone())
                     .await
@@ -1055,7 +1056,7 @@ impl App {
                 };
                 ChatWidget::new_from_existing(init, resumed.thread, resumed.session_configured)
             }
-            SessionSelection::Fork(path) => {
+            ResumeSessionSelection::Fork(path) => {
                 otel_manager.counter("codex.thread.fork", 1, &[("source", "cli_subcommand")]);
                 let forked = thread_manager
                     .fork_thread(usize::MAX, config.clone(), path.clone())
@@ -1346,7 +1347,7 @@ impl App {
                 )
                 .await?
                 {
-                    SessionSelection::Resume(path) => {
+                    ResumeSessionSelection::Resume(path) => {
                         let current_cwd = self.config.cwd.clone();
                         let resume_cwd = match crate::resolve_cwd_for_resume_or_fork(
                             tui,
@@ -1425,9 +1426,105 @@ impl App {
                             }
                         }
                     }
-                    SessionSelection::Exit
-                    | SessionSelection::StartFresh
-                    | SessionSelection::Fork(_) => {}
+                    ResumeSessionSelection::Exit
+                    | ResumeSessionSelection::StartFresh
+                    | ResumeSessionSelection::Fork(_) => {}
+                }
+
+                // Leaving alt-screen may blank the inline viewport; force a redraw either way.
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::OpenSessionsPicker { view } => {
+                match crate::sessions_picker::run_sessions_picker(
+                    tui,
+                    &self.config.codex_home,
+                    &self.config.model_provider_id,
+                    false,
+                    view,
+                    crate::sessions_picker::SessionPickerExit::Close,
+                    self.chat_widget.rollout_path(),
+                )
+                .await?
+                {
+                    ManagedSessionSelection::Resume(path) => {
+                        let current_cwd = self.config.cwd.clone();
+                        let resume_cwd = match crate::resolve_cwd_for_resume_or_fork(
+                            tui,
+                            &current_cwd,
+                            &path,
+                            CwdPromptAction::Resume,
+                            true,
+                        )
+                        .await?
+                        {
+                            Some(cwd) => cwd,
+                            None => current_cwd.clone(),
+                        };
+                        let mut resume_config = if crate::cwds_differ(&current_cwd, &resume_cwd) {
+                            match self.rebuild_config_for_cwd(resume_cwd).await {
+                                Ok(cfg) => cfg,
+                                Err(err) => {
+                                    self.chat_widget.add_error_message(format!(
+                                        "Failed to rebuild configuration for resume: {err}"
+                                    ));
+                                    return Ok(AppRunControl::Continue);
+                                }
+                            }
+                        } else {
+                            self.config.clone()
+                        };
+                        self.apply_runtime_policy_overrides(&mut resume_config);
+                        let summary = session_summary(
+                            self.chat_widget.token_usage(),
+                            self.chat_widget.thread_id(),
+                            self.chat_widget.thread_name(),
+                        );
+                        match self
+                            .server
+                            .resume_thread_from_rollout(
+                                resume_config.clone(),
+                                path.clone(),
+                                self.auth_manager.clone(),
+                            )
+                            .await
+                        {
+                            Ok(resumed) => {
+                                self.shutdown_current_thread().await;
+                                self.config = resume_config;
+                                tui.set_notification_method(self.config.tui_notification_method);
+                                self.file_search.update_search_dir(self.config.cwd.clone());
+                                let init = self.chatwidget_init_for_forked_or_resumed_thread(
+                                    tui,
+                                    self.config.clone(),
+                                );
+                                self.chat_widget = ChatWidget::new_from_existing(
+                                    init,
+                                    resumed.thread,
+                                    resumed.session_configured,
+                                );
+                                self.reset_thread_event_state();
+                                if let Some(summary) = summary {
+                                    let mut lines: Vec<Line<'static>> =
+                                        vec![summary.usage_line.clone().into()];
+                                    if let Some(command) = summary.resume_command {
+                                        let spans = vec![
+                                            "To continue this session, run ".into(),
+                                            command.cyan(),
+                                        ];
+                                        lines.push(spans.into());
+                                    }
+                                    self.chat_widget.add_plain_history_lines(lines);
+                                }
+                            }
+                            Err(err) => {
+                                let path_display = path.display();
+                                self.chat_widget.add_error_message(format!(
+                                    "Failed to resume session from {path_display}: {err}"
+                                ));
+                            }
+                        }
+                    }
+                    ManagedSessionSelection::Exit | ManagedSessionSelection::StartFresh => {}
                 }
 
                 // Leaving alt-screen may blank the inline viewport; force a redraw either way.
