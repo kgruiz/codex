@@ -169,7 +169,10 @@ use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
 use crate::bottom_pane::custom_prompt_view::CustomPromptView;
 use crate::bottom_pane::popup_consts::standard_popup_hint_line;
+use crate::clipboard_paste::PasteImageError;
+use crate::clipboard_paste::copy_text_to_clipboard;
 use crate::clipboard_paste::paste_image_to_temp_png;
+use crate::clipboard_paste::paste_text_from_clipboard;
 use crate::collab;
 use crate::collaboration_modes;
 use crate::diff_render::display_path_for;
@@ -186,6 +189,7 @@ use crate::history_cell::PlainHistoryCell;
 use crate::history_cell::WebSearchCell;
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
+use crate::keybindings::Keybindings;
 use crate::markdown::append_markdown;
 use crate::render::Insets;
 use crate::render::renderable::ColumnRenderable;
@@ -486,6 +490,7 @@ pub(crate) struct ChatWidget {
     /// where the overlay may briefly treat new tail content as already cached.
     active_cell_revision: u64,
     config: Config,
+    keybindings: Keybindings,
     /// The unmasked collaboration mode settings (always Default mode).
     ///
     /// Masks are applied on top of this base mode to derive the effective mode.
@@ -2415,6 +2420,15 @@ impl ChatWidget {
         self.had_work_activity = true;
     }
 
+    fn resolve_keybindings(config: &Config, enhanced_keys_supported: bool) -> Keybindings {
+        #[cfg(target_os = "linux")]
+        let is_wsl = crate::clipboard_paste::is_probably_wsl();
+        #[cfg(not(target_os = "linux"))]
+        let is_wsl = false;
+
+        Keybindings::from_config(&config.keybindings, enhanced_keys_supported, is_wsl)
+    }
+
     pub(crate) fn new(common: ChatWidgetInit, thread_manager: Arc<ThreadManager>) -> Self {
         let ChatWidgetInit {
             config,
@@ -2434,6 +2448,7 @@ impl ChatWidget {
         let model = model.filter(|m| !m.trim().is_empty());
         let mut config = config;
         config.model = model.clone();
+        let keybindings = Self::resolve_keybindings(&config, enhanced_keys_supported);
         let mut rng = rand::rng();
         let placeholder = PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string();
         let codex_op_tx = spawn_agent(config.clone(), app_event_tx.clone(), thread_manager);
@@ -2479,6 +2494,7 @@ impl ChatWidget {
             active_cell,
             active_cell_revision: 0,
             config,
+            keybindings: keybindings.clone(),
             skills_all: Vec::new(),
             skills_initial_state: None,
             current_collaboration_mode,
@@ -2542,6 +2558,9 @@ impl ChatWidget {
             external_editor_state: ExternalEditorState::Closed,
         };
 
+        widget
+            .bottom_pane
+            .set_keybindings(widget.keybindings.clone());
         widget.prefetch_rate_limits();
         widget
             .bottom_pane
@@ -2597,6 +2616,7 @@ impl ChatWidget {
         let model = model.filter(|m| !m.trim().is_empty());
         let mut config = config;
         config.model = model.clone();
+        let keybindings = Self::resolve_keybindings(&config, enhanced_keys_supported);
         let mut rng = rand::rng();
         let placeholder = PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string();
 
@@ -2641,6 +2661,7 @@ impl ChatWidget {
             active_cell,
             active_cell_revision: 0,
             config,
+            keybindings: keybindings.clone(),
             skills_all: Vec::new(),
             skills_initial_state: None,
             current_collaboration_mode,
@@ -2704,6 +2725,9 @@ impl ChatWidget {
             external_editor_state: ExternalEditorState::Closed,
         };
 
+        widget
+            .bottom_pane
+            .set_keybindings(widget.keybindings.clone());
         widget.prefetch_rate_limits();
         widget
             .bottom_pane
@@ -2745,6 +2769,7 @@ impl ChatWidget {
             otel_manager,
         } = common;
         let model = model.filter(|m| !m.trim().is_empty());
+        let keybindings = Self::resolve_keybindings(&config, enhanced_keys_supported);
         let mut rng = rand::rng();
         let placeholder = PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string();
 
@@ -2791,6 +2816,7 @@ impl ChatWidget {
             active_cell: None,
             active_cell_revision: 0,
             config,
+            keybindings: keybindings.clone(),
             skills_all: Vec::new(),
             skills_initial_state: None,
             current_collaboration_mode,
@@ -2854,6 +2880,9 @@ impl ChatWidget {
             external_editor_state: ExternalEditorState::Closed,
         };
 
+        widget
+            .bottom_pane
+            .set_keybindings(widget.keybindings.clone());
         widget.prefetch_rate_limits();
         widget
             .bottom_pane
@@ -2907,31 +2936,26 @@ impl ChatWidget {
                 self.quit_shortcut_expires_at = None;
                 self.quit_shortcut_key = None;
             }
-            KeyEvent {
-                code: KeyCode::Char(c),
-                modifiers,
-                kind: KeyEventKind::Press,
-                ..
-            } if modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-                && c.eq_ignore_ascii_case(&'v') =>
+            key_event
+                if key_event.kind == KeyEventKind::Press
+                    && self
+                        .keybindings
+                        .paste
+                        .iter()
+                        .any(|binding| binding.matches(&key_event)) =>
             {
-                match paste_image_to_temp_png() {
-                    Ok((path, info)) => {
-                        tracing::debug!(
-                            "pasted image size={}x{} format={}",
-                            info.width,
-                            info.height,
-                            info.encoded_format.label()
-                        );
-                        self.attach_image(path);
-                    }
-                    Err(err) => {
-                        tracing::warn!("failed to paste image: {err}");
-                        self.add_to_history(history_cell::new_error_event(format!(
-                            "Failed to paste image: {err}",
-                        )));
-                    }
-                }
+                self.paste_from_clipboard();
+                return;
+            }
+            key_event
+                if key_event.kind == KeyEventKind::Press
+                    && self
+                        .keybindings
+                        .copy_prompt
+                        .iter()
+                        .any(|binding| binding.matches(&key_event)) =>
+            {
+                self.copy_prompt_to_clipboard();
                 return;
             }
             other if other.kind == KeyEventKind::Press => {
@@ -4037,6 +4061,62 @@ impl ChatWidget {
         }
         // Update the list to reflect the remaining queued messages (if any).
         self.refresh_queued_user_messages();
+    }
+
+    fn paste_from_clipboard(&mut self) {
+        let active_view = !self.bottom_pane.no_modal_or_popup_active();
+
+        let mut image_error: Option<PasteImageError> = None;
+        if !active_view {
+            match paste_image_to_temp_png() {
+                Ok((path, info)) => {
+                    tracing::debug!(
+                        "pasted image size={}x{} format={}",
+                        info.width,
+                        info.height,
+                        info.encoded_format.label()
+                    );
+                    self.attach_image(path);
+                    return;
+                }
+                Err(err) => {
+                    image_error = Some(err);
+                }
+            }
+        }
+
+        match paste_text_from_clipboard() {
+            Ok(text) => {
+                self.bottom_pane.handle_paste(text);
+            }
+            Err(err) => {
+                let message = if let Some(img_err) = image_error {
+                    format!("Failed to paste from clipboard: {img_err}; {err}")
+                } else {
+                    format!("Failed to paste from clipboard: {err}")
+                };
+                self.add_to_history(history_cell::new_error_event(message));
+                self.request_redraw();
+            }
+        }
+    }
+
+    fn copy_prompt_to_clipboard(&mut self) {
+        if !self.bottom_pane.no_modal_or_popup_active() {
+            return;
+        }
+
+        let text = self.bottom_pane.composer_text();
+        if text.trim().is_empty() {
+            return;
+        }
+
+        if let Err(err) = copy_text_to_clipboard(&text) {
+            self.add_to_history(history_cell::new_error_event(format!(
+                "Failed to copy prompt to clipboard: {err}",
+            )));
+            self.request_redraw();
+        }
     }
 
     /// Rebuild and update the queued user messages from the current queue.

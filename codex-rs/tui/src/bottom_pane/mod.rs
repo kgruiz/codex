@@ -22,6 +22,7 @@ use crate::bottom_pane::queued_user_messages::QueuedUserMessages;
 use crate::bottom_pane::unified_exec_footer::UnifiedExecFooter;
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
+use crate::keybindings::Keybindings;
 use crate::render::renderable::FlexRenderable;
 use crate::render::renderable::Renderable;
 use crate::render::renderable::RenderableItem;
@@ -603,6 +604,11 @@ impl BottomPane {
         if self.composer.set_session_model(model) {
             self.request_redraw();
         }
+    }
+
+    pub(crate) fn set_keybindings(&mut self, keybindings: Keybindings) {
+        self.composer.set_keybindings(keybindings);
+        self.request_redraw();
     }
 
     pub(crate) fn set_session_reasoning_effort(&mut self, effort: Option<ReasoningEffort>) {

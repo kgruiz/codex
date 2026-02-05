@@ -34,6 +34,7 @@
 //! `FooterProps` mapping.
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
+use crate::keybindings::Keybindings;
 use crate::render::line_utils::prefix_lines;
 use crate::status::format_tokens_compact;
 use crate::ui_consts::FOOTER_INDENT_COLS;
@@ -72,6 +73,7 @@ pub(crate) struct FooterProps {
     pub(crate) context_window_used_tokens: Option<i64>,
     pub(crate) model: String,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
+    pub(crate) keybindings: Keybindings,
     pub(crate) status_line_value: Option<Line<'static>>,
     pub(crate) status_line_enabled: bool,
 }
@@ -600,6 +602,7 @@ fn footer_from_props_lines(
                 collaboration_modes_enabled: props.collaboration_modes_enabled,
                 model: props.model.clone(),
                 reasoning_effort: props.reasoning_effort,
+                keybindings: props.keybindings.clone(),
             };
             shortcut_overlay_lines(state)
         }
@@ -665,6 +668,7 @@ struct ShortcutsState {
     collaboration_modes_enabled: bool,
     model: String,
     reasoning_effort: Option<ReasoningEffort>,
+    keybindings: Keybindings,
 }
 
 fn quit_shortcut_reminder_line(key: KeyBinding) -> Line<'static> {
@@ -689,13 +693,33 @@ fn esc_hint_line(esc_backtrack_hint: bool) -> Line<'static> {
 fn shortcut_overlay_lines(state: ShortcutsState) -> Vec<Line<'static>> {
     let mut commands = Line::from("");
     let mut shell_commands = Line::from("");
-    let mut newline = Line::from("");
+    let newline_key = state
+        .keybindings
+        .newline
+        .first()
+        .copied()
+        .unwrap_or_else(|| key_hint::shift(KeyCode::Enter));
+    let newline = Line::from(vec![newline_key.into(), " for newline".into()]);
     let mut change_model = Line::from("");
     let mut change_thinking = Line::from("");
     let mut current_model = Line::from("");
     let mut queue_message_tab = Line::from("");
     let mut file_paths = Line::from("");
-    let mut paste_image = Line::from("");
+    let paste_key = state
+        .keybindings
+        .paste
+        .first()
+        .copied()
+        .unwrap_or_else(|| key_hint::ctrl(KeyCode::Char('v')));
+    let paste_image = Line::from(vec![paste_key.into(), " to paste from clipboard".into()]);
+
+    let copy_prompt_key = state
+        .keybindings
+        .copy_prompt
+        .first()
+        .copied()
+        .unwrap_or_else(|| key_hint::alt(KeyCode::Char('c')));
+    let copy_prompt = Line::from(vec![copy_prompt_key.into(), " to copy prompt".into()]);
     let mut external_editor = Line::from("");
     let mut edit_previous = Line::from("");
     let mut quit = Line::from("");
@@ -707,13 +731,13 @@ fn shortcut_overlay_lines(state: ShortcutsState) -> Vec<Line<'static>> {
             match descriptor.id {
                 ShortcutId::Commands => commands = text,
                 ShortcutId::ShellCommands => shell_commands = text,
-                ShortcutId::InsertNewline => newline = text,
+                ShortcutId::InsertNewline => {}
                 ShortcutId::ChangeModel => change_model = text,
                 ShortcutId::ChangeThinking => change_thinking = text,
                 ShortcutId::CurrentModel => current_model = text,
                 ShortcutId::QueueMessageTab => queue_message_tab = text,
                 ShortcutId::FilePaths => file_paths = text,
-                ShortcutId::PasteImage => paste_image = text,
+                ShortcutId::PasteImage => {}
                 ShortcutId::ExternalEditor => external_editor = text,
                 ShortcutId::EditPrevious => edit_previous = text,
                 ShortcutId::Quit => quit = text,
@@ -733,6 +757,7 @@ fn shortcut_overlay_lines(state: ShortcutsState) -> Vec<Line<'static>> {
         queue_message_tab,
         file_paths,
         paste_image,
+        copy_prompt,
         external_editor,
         edit_previous,
         quit,
@@ -1078,6 +1103,11 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::Backend;
     use ratatui::backend::TestBackend;
+    use std::collections::HashMap;
+
+    fn default_keybindings(use_shift_enter_hint: bool) -> Keybindings {
+        Keybindings::from_config(&HashMap::new(), use_shift_enter_hint, false)
+    }
 
     fn snapshot_footer(name: &str, props: FooterProps) {
         snapshot_footer_with_mode_indicator(name, 80, &props, None);
@@ -1278,6 +1308,7 @@ mod tests {
                 context_window_used_tokens: None,
                 model: String::new(),
                 reasoning_effort: None,
+                keybindings: default_keybindings(true),
                 status_line_value: None,
                 status_line_enabled: false,
             },
@@ -1298,6 +1329,7 @@ mod tests {
                 context_window_used_tokens: None,
                 model: String::new(),
                 reasoning_effort: None,
+                keybindings: default_keybindings(false),
                 status_line_value: None,
                 status_line_enabled: false,
             },
@@ -1318,6 +1350,7 @@ mod tests {
                 context_window_used_tokens: None,
                 model: String::new(),
                 reasoning_effort: None,
+                keybindings: default_keybindings(false),
                 status_line_value: None,
                 status_line_enabled: false,
             },
@@ -1338,6 +1371,7 @@ mod tests {
                 context_window_used_tokens: None,
                 model: String::new(),
                 reasoning_effort: None,
+                keybindings: default_keybindings(false),
                 status_line_value: None,
                 status_line_enabled: false,
             },
@@ -1358,6 +1392,7 @@ mod tests {
                 context_window_used_tokens: None,
                 model: String::new(),
                 reasoning_effort: None,
+                keybindings: default_keybindings(false),
                 status_line_value: None,
                 status_line_enabled: false,
             },
@@ -1378,6 +1413,7 @@ mod tests {
                 context_window_used_tokens: None,
                 model: String::new(),
                 reasoning_effort: None,
+                keybindings: default_keybindings(false),
                 status_line_value: None,
                 status_line_enabled: false,
             },
@@ -1398,6 +1434,7 @@ mod tests {
                 context_window_used_tokens: None,
                 model: String::new(),
                 reasoning_effort: None,
+                keybindings: default_keybindings(false),
                 status_line_value: None,
                 status_line_enabled: false,
             },
@@ -1418,6 +1455,7 @@ mod tests {
                 context_window_used_tokens: None,
                 model: String::new(),
                 reasoning_effort: None,
+                keybindings: default_keybindings(false),
                 status_line_value: None,
                 status_line_enabled: false,
             },
@@ -1438,6 +1476,7 @@ mod tests {
                 context_window_used_tokens: Some(123_456),
                 model: String::new(),
                 reasoning_effort: None,
+                keybindings: default_keybindings(false),
                 status_line_value: None,
                 status_line_enabled: false,
             },
@@ -1458,6 +1497,7 @@ mod tests {
                 context_window_used_tokens: None,
                 model: String::new(),
                 reasoning_effort: None,
+                keybindings: default_keybindings(false),
                 status_line_value: None,
                 status_line_enabled: false,
             },
@@ -1478,6 +1518,7 @@ mod tests {
                 context_window_used_tokens: None,
                 model: String::new(),
                 reasoning_effort: None,
+                keybindings: default_keybindings(false),
                 status_line_value: None,
                 status_line_enabled: false,
             },
@@ -1496,6 +1537,7 @@ mod tests {
             context_window_used_tokens: None,
             model: String::new(),
             reasoning_effort: None,
+            keybindings: default_keybindings(false),
             status_line_value: None,
             status_line_enabled: false,
         };
@@ -1527,6 +1569,7 @@ mod tests {
             context_window_used_tokens: None,
             model: String::new(),
             reasoning_effort: None,
+            keybindings: default_keybindings(false),
             status_line_value: None,
             status_line_enabled: false,
         };
@@ -1551,6 +1594,7 @@ mod tests {
             context_window_used_tokens: None,
             model: String::new(),
             reasoning_effort: None,
+            keybindings: default_keybindings(false),
             status_line_value: Some(Line::from("Status line content".to_string())),
             status_line_enabled: true,
         };
@@ -1570,6 +1614,7 @@ mod tests {
             context_window_used_tokens: None,
             model: String::new(),
             reasoning_effort: None,
+            keybindings: default_keybindings(false),
             status_line_value: None, // command timed out / empty
             status_line_enabled: true,
         };
@@ -1594,6 +1639,7 @@ mod tests {
             context_window_used_tokens: None,
             model: String::new(),
             reasoning_effort: None,
+            keybindings: default_keybindings(false),
             status_line_value: None,
             status_line_enabled: false,
         };
@@ -1618,6 +1664,7 @@ mod tests {
             context_window_used_tokens: None,
             model: String::new(),
             reasoning_effort: None,
+            keybindings: default_keybindings(false),
             status_line_value: None,
             status_line_enabled: true,
         };
@@ -1643,6 +1690,7 @@ mod tests {
             context_window_used_tokens: None,
             model: String::new(),
             reasoning_effort: None,
+            keybindings: default_keybindings(false),
             status_line_value: Some(Line::from(
                 "Status line content that should truncate before the mode indicator".to_string(),
             )),
@@ -1672,6 +1720,7 @@ mod tests {
             context_window_used_tokens: None,
             model: String::new(),
             reasoning_effort: None,
+            keybindings: default_keybindings(false),
             status_line_value: Some(Line::from(
                 "Status line content that is definitely too long to fit alongside the mode label"
                     .to_string(),
@@ -1728,6 +1777,7 @@ mod tests {
                 collaboration_modes_enabled: false,
                 model: String::new(),
                 reasoning_effort: None,
+                keybindings: default_keybindings(false),
             })
             .expect("shortcut binding")
             .key;

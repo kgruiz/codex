@@ -10,7 +10,7 @@
   - codex-rs/core/src/config/mod.rs
 
 ## 2. Configurable keybindings
-- [ ]
+- [x]
 - Commits: 8eddbc636, 7a6886313
 - Code anchors:
   - codex-rs/core/src/config/mod.rs:207

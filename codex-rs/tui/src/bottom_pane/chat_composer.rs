@@ -160,9 +160,12 @@ use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::LocalImageAttachment;
 use crate::bottom_pane::textarea::TextArea;
 use crate::bottom_pane::textarea::TextAreaState;
+#[cfg(target_os = "linux")]
+use crate::clipboard_paste::is_probably_wsl;
 use crate::clipboard_paste::normalize_pasted_path;
 use crate::clipboard_paste::pasted_image_format;
 use crate::history_cell;
+use crate::keybindings::Keybindings;
 use crate::ui_consts::LIVE_PREFIX_COLS;
 use codex_chatgpt::connectors;
 use codex_chatgpt::connectors::AppInfo;
@@ -266,6 +269,7 @@ pub(crate) struct ChatComposer {
     quit_shortcut_key: KeyBinding,
     esc_backtrack_hint: bool,
     use_shift_enter_hint: bool,
+    keybindings: Keybindings,
     dismissed_file_popup_token: Option<String>,
     current_file_query: Option<String>,
     pending_pastes: Vec<(String, String)>,
@@ -353,6 +357,10 @@ impl ChatComposer {
         config: ChatComposerConfig,
     ) -> Self {
         let use_shift_enter_hint = enhanced_keys_supported;
+        #[cfg(target_os = "linux")]
+        let is_wsl = is_probably_wsl();
+        #[cfg(not(target_os = "linux"))]
+        let is_wsl = false;
 
         let mut this = Self {
             textarea: TextArea::new(),
@@ -364,6 +372,7 @@ impl ChatComposer {
             quit_shortcut_key: key_hint::ctrl(KeyCode::Char('c')),
             esc_backtrack_hint: false,
             use_shift_enter_hint,
+            keybindings: Keybindings::from_config(&HashMap::new(), enhanced_keys_supported, is_wsl),
             dismissed_file_popup_token: None,
             current_file_query: None,
             pending_pastes: Vec::new(),
@@ -401,6 +410,14 @@ impl ChatComposer {
         // Apply configuration via the setter to keep side-effects centralized.
         this.set_disable_paste_burst(disable_paste_burst);
         this
+    }
+
+    pub(crate) fn set_keybindings(&mut self, keybindings: Keybindings) {
+        self.use_shift_enter_hint = keybindings
+            .newline
+            .iter()
+            .any(|binding| *binding == key_hint::shift(KeyCode::Enter));
+        self.keybindings = keybindings;
     }
 
     pub fn set_skill_mentions(&mut self, skills: Option<Vec<SkillMetadata>>) {
@@ -1021,6 +1038,7 @@ impl ChatComposer {
         } else {
             self.footer_mode = reset_mode_after_activity(self.footer_mode);
         }
+        let is_submit = self.is_submit_key_event(&key_event);
         let ActivePopup::Command(popup) = &mut self.active_popup else {
             unreachable!();
         };
@@ -1108,11 +1126,7 @@ impl ChatComposer {
                 }
                 (InputResult::None, true)
             }
-            KeyEvent {
-                code: KeyCode::Enter,
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
+            key_event if is_submit => {
                 // If the current line starts with a custom prompt name and includes
                 // positional args for a numeric-style template, expand and submit
                 // immediately regardless of the popup selection.
@@ -2266,16 +2280,19 @@ impl ChatComposer {
                 kind: KeyEventKind::Press,
                 ..
             } if self.is_task_running => self.handle_submission(true),
-            KeyEvent {
-                code: KeyCode::Enter,
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
+            key_event if self.is_submit_key_event(&key_event) => {
                 let should_queue = !self.steer_enabled;
                 self.handle_submission(should_queue)
             }
             input => self.handle_input_basic(input),
         }
+    }
+
+    fn is_submit_key_event(&self, key_event: &KeyEvent) -> bool {
+        self.keybindings
+            .submit
+            .iter()
+            .any(|binding| binding.matches(key_event))
     }
 
     /// Applies any due `PasteBurst` flush at time `now`.
@@ -2332,6 +2349,26 @@ impl ChatComposer {
 
         if !matches!(input.code, KeyCode::Esc) {
             self.footer_mode = reset_mode_after_activity(self.footer_mode);
+        }
+
+        if self
+            .keybindings
+            .newline
+            .iter()
+            .any(|binding| binding.matches(&input))
+        {
+            self.textarea.insert_str("\n");
+            self.paste_burst.clear_window_after_non_char();
+            self.sync_popups();
+            self.sync_placeholders_after_text_mutation();
+            return (InputResult::None, true);
+        }
+
+        if self.handle_custom_editor_keybindings(&input) {
+            self.paste_burst.clear_window_after_non_char();
+            self.sync_popups();
+            self.sync_placeholders_after_text_mutation();
+            return (InputResult::None, true);
         }
 
         // If we're capturing a burst and receive Enter, accumulate it instead of inserting.
@@ -2450,6 +2487,127 @@ impl ChatComposer {
         (InputResult::None, true)
     }
 
+    fn sync_placeholders_after_text_mutation(&mut self) {
+        let text_after = self.textarea.text();
+
+        self.pending_pastes
+            .retain(|(placeholder, _)| text_after.contains(placeholder));
+
+        if self.attached_images.is_empty() {
+            return;
+        }
+
+        let mut needed: HashMap<String, usize> = HashMap::new();
+        for img in &self.attached_images {
+            needed
+                .entry(img.placeholder.clone())
+                .or_insert_with(|| text_after.matches(&img.placeholder).count());
+        }
+
+        let mut used: HashMap<String, usize> = HashMap::new();
+        let mut kept: Vec<AttachedImage> = Vec::with_capacity(self.attached_images.len());
+        for img in self.attached_images.drain(..) {
+            let total_needed = *needed.get(&img.placeholder).unwrap_or(&0);
+            let used_count = used.entry(img.placeholder.clone()).or_insert(0);
+            if *used_count < total_needed {
+                kept.push(img);
+                *used_count += 1;
+            }
+        }
+        self.attached_images = kept;
+    }
+
+    fn handle_custom_editor_keybindings(&mut self, input: &KeyEvent) -> bool {
+        let editor = &self.keybindings.editor;
+        if editor
+            .move_left
+            .iter()
+            .any(|binding| binding.matches(input))
+        {
+            self.textarea.move_cursor_left();
+            return true;
+        }
+        if editor
+            .move_right
+            .iter()
+            .any(|binding| binding.matches(input))
+        {
+            self.textarea.move_cursor_right();
+            return true;
+        }
+        if editor.move_up.iter().any(|binding| binding.matches(input)) {
+            self.textarea.move_cursor_up();
+            return true;
+        }
+        if editor
+            .move_down
+            .iter()
+            .any(|binding| binding.matches(input))
+        {
+            self.textarea.move_cursor_down();
+            return true;
+        }
+        if editor
+            .move_word_left
+            .iter()
+            .any(|binding| binding.matches(input))
+        {
+            self.textarea
+                .set_cursor(self.textarea.beginning_of_previous_word());
+            return true;
+        }
+        if editor
+            .move_word_right
+            .iter()
+            .any(|binding| binding.matches(input))
+        {
+            self.textarea.set_cursor(self.textarea.end_of_next_word());
+            return true;
+        }
+        if editor.home.iter().any(|binding| binding.matches(input)) {
+            self.textarea.move_cursor_to_beginning_of_line(false);
+            return true;
+        }
+        if editor.end.iter().any(|binding| binding.matches(input)) {
+            self.textarea.move_cursor_to_end_of_line(false);
+            return true;
+        }
+        if editor
+            .delete_word_backward
+            .iter()
+            .any(|binding| binding.matches(input))
+        {
+            self.textarea.delete_backward_word();
+            return true;
+        }
+        if editor
+            .delete_word_forward
+            .iter()
+            .any(|binding| binding.matches(input))
+        {
+            self.textarea.delete_forward_word();
+            return true;
+        }
+        if editor
+            .delete_backward
+            .iter()
+            .any(|binding| binding.matches(input))
+        {
+            self.textarea.delete_backward(1);
+            return true;
+        }
+        if editor
+            .delete_forward
+            .iter()
+            .any(|binding| binding.matches(input))
+        {
+            self.textarea.delete_forward(1);
+            return true;
+        }
+
+        false
+    }
+
     fn reconcile_deleted_elements(&mut self, elements_before: Vec<String>) {
         let elements_after: HashSet<String> =
             self.textarea.element_payloads().into_iter().collect();
@@ -2539,6 +2697,7 @@ impl ChatComposer {
             context_window_used_tokens: self.context_window_used_tokens,
             model: self.session_model.clone(),
             reasoning_effort: self.session_reasoning_effort,
+            keybindings: self.keybindings.clone(),
             status_line_value: self.status_line_value.clone(),
             status_line_enabled: self.status_line_enabled,
         }

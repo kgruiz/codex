@@ -9,6 +9,7 @@ use crate::config::types::McpServerTransportConfig;
 use crate::config::types::Notice;
 use crate::config::types::NotificationMethod;
 use crate::config::types::Notifications;
+use crate::config::types::OneOrManyStrings;
 use crate::config::types::OtelConfig;
 use crate::config::types::OtelConfigToml;
 use crate::config::types::OtelExporterKind;
@@ -212,6 +213,9 @@ pub struct Config {
 
     /// Show startup tooltips in the TUI welcome screen.
     pub show_tooltips: bool,
+
+    /// Keybinding overrides loaded from `[keybindings]` in `config.toml`.
+    pub keybindings: HashMap<String, Vec<String>>,
 
     /// Start the TUI in the specified collaboration mode (plan/default).
     pub experimental_mode: Option<ModeKind>,
@@ -912,6 +916,10 @@ pub struct ConfigToml {
 
     /// Collection of settings that are specific to the TUI.
     pub tui: Option<Tui>,
+
+    /// Keybinding overrides loaded from `[keybindings]` in `config.toml`.
+    #[serde(default)]
+    pub keybindings: HashMap<String, OneOrManyStrings>,
 
     /// When set to `true`, `AgentReasoning` events will be hidden from the
     /// UI/output. Defaults to `false`.
@@ -1709,6 +1717,11 @@ impl Config {
                 .unwrap_or_default(),
             animations: cfg.tui.as_ref().map(|t| t.animations).unwrap_or(true),
             show_tooltips: cfg.tui.as_ref().map(|t| t.show_tooltips).unwrap_or(true),
+            keybindings: cfg
+                .keybindings
+                .into_iter()
+                .map(|(key, value)| (key, value.into_vec()))
+                .collect(),
             experimental_mode: cfg.tui.as_ref().and_then(|t| t.experimental_mode),
             tui_alternate_screen: cfg
                 .tui
