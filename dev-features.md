@@ -64,14 +64,11 @@
 - [ ]
 - Details: status line shows currently running model; footer shows selected model; allow changing selected model during active runs without affecting the ongoing run
 
-## 10. Allow /status during runs
-- [ ]
-
-## 11. Update justfile with missing dev recipes
+## 10. Update justfile with missing dev recipes
 - [ ]
 - Details: add sync (and full version), install-dev, id, install-dev-no-clean
 
-## 12. Queue editing and queued message UI
+## 11. Queue editing and queued message UI
 - [ ]
 - Commits: 2bf5c4733, 120e36e45, 9d6d308e8, 761caf450, 02b0163e1, e6b69d90c, 5fa379366, 632a3ce2b, 1bd2e7af4
 - Code anchors:
@@ -79,27 +76,27 @@
   - codex-rs/tui/src/bottom_pane/queue_popup.rs:31
   - codex-rs/tui/src/bottom_pane/mod.rs:105
 
-## 13. Notification focus filtering
+## 12. Notification focus filtering
 - [ ]
 - Commits: eb808106a, 7cc6afd5d, 6f8d51022
 - Code anchors:
   - codex-rs/core/src/config/mod.rs:177
   - codex-rs/tui/src/chatwidget.rs:6279
 
-## 14. External editor handoff
+## 13. External editor handoff
 - [ ]
 - Commit: c8a9cf37e
 - Code anchors:
   - codex-rs/tui/src/app.rs:1350
 
-## 15. Live exec output in TUI
+## 14. Live exec output in TUI
 - [ ]
 - Commit: 29b75f9fc
 - Likely anchors:
   - codex-rs/tui/src/exec_cell/
   - codex-rs/tui/src/history_cell.rs
 
-## 16. Reverse history search (Ctrl+R)
+## 15. Reverse history search (Ctrl+R)
 - [ ]
 - Commit: 58158ef3d
 - Code anchors:
