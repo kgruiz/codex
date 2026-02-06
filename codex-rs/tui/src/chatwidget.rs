@@ -875,12 +875,12 @@ impl ChatWidget {
 
     /// Applies status-line item selection from the setup view to in-memory config.
     ///
-    /// An empty selection is normalized to `None` so the status line is fully disabled and the
-    /// behavior matches an unset `tui.status_line` config value.
+    /// We persist an explicit empty list when all items are deselected so "unset"
+    /// (`None`) can retain the built-in default footer status line configuration.
     pub(crate) fn setup_status_line(&mut self, items: Vec<StatusLineItem>) {
         tracing::info!("status line setup confirmed with items: {items:#?}");
         let ids = items.iter().map(ToString::to_string).collect::<Vec<_>>();
-        self.config.tui_status_line = if ids.is_empty() { None } else { Some(ids) };
+        self.config.tui_status_line = Some(ids);
         self.refresh_status_line();
     }
 
@@ -2486,13 +2486,10 @@ impl ChatWidget {
         widget
             .bottom_pane
             .set_steer_enabled(widget.config.features.enabled(Feature::Steer));
-        widget.bottom_pane.set_status_line_enabled(
-            widget
-                .config
-                .tui_status_line
-                .as_ref()
-                .is_some_and(|items| !items.is_empty()),
-        );
+        let status_line_enabled = !widget.status_line_items_with_invalids().0.is_empty();
+        widget
+            .bottom_pane
+            .set_status_line_enabled(status_line_enabled);
         widget.bottom_pane.set_collaboration_modes_enabled(
             widget.config.features.enabled(Feature::CollaborationModes),
         );
@@ -2507,6 +2504,7 @@ impl ChatWidget {
         );
         widget.update_collaboration_mode_indicator();
         widget.refresh_model_display();
+        widget.refresh_status_line();
 
         widget
             .bottom_pane
@@ -2657,17 +2655,15 @@ impl ChatWidget {
         widget
             .bottom_pane
             .set_steer_enabled(widget.config.features.enabled(Feature::Steer));
-        widget.bottom_pane.set_status_line_enabled(
-            widget
-                .config
-                .tui_status_line
-                .as_ref()
-                .is_some_and(|items| !items.is_empty()),
-        );
+        let status_line_enabled = !widget.status_line_items_with_invalids().0.is_empty();
+        widget
+            .bottom_pane
+            .set_status_line_enabled(status_line_enabled);
         widget.bottom_pane.set_collaboration_modes_enabled(
             widget.config.features.enabled(Feature::CollaborationModes),
         );
         widget.sync_personality_command_enabled();
+        widget.refresh_status_line();
 
         widget
     }
@@ -2816,13 +2812,10 @@ impl ChatWidget {
         widget
             .bottom_pane
             .set_steer_enabled(widget.config.features.enabled(Feature::Steer));
-        widget.bottom_pane.set_status_line_enabled(
-            widget
-                .config
-                .tui_status_line
-                .as_ref()
-                .is_some_and(|items| !items.is_empty()),
-        );
+        let status_line_enabled = !widget.status_line_items_with_invalids().0.is_empty();
+        widget
+            .bottom_pane
+            .set_status_line_enabled(status_line_enabled);
         widget.bottom_pane.set_collaboration_modes_enabled(
             widget.config.features.enabled(Feature::CollaborationModes),
         );
@@ -2837,6 +2830,7 @@ impl ChatWidget {
         );
         widget.update_collaboration_mode_indicator();
         widget.refresh_model_display();
+        widget.refresh_status_line();
 
         widget
     }
@@ -5145,11 +5139,30 @@ impl ChatWidget {
     }
 
     fn open_status_line_setup(&mut self) {
-        let view = StatusLineSetupView::new(
-            self.config.tui_status_line.as_deref(),
-            self.app_event_tx.clone(),
-        );
+        let selected_items = self
+            .config
+            .tui_status_line
+            .clone()
+            .unwrap_or_else(Self::default_status_line_item_ids);
+        let view =
+            StatusLineSetupView::new(Some(selected_items.as_slice()), self.app_event_tx.clone());
         self.bottom_pane.show_view(Box::new(view));
+    }
+
+    fn default_status_line_items() -> Vec<StatusLineItem> {
+        vec![
+            StatusLineItem::ModelWithReasoning,
+            StatusLineItem::ContextRemaining,
+            StatusLineItem::CurrentDir,
+            StatusLineItem::GitBranch,
+        ]
+    }
+
+    fn default_status_line_item_ids() -> Vec<String> {
+        Self::default_status_line_items()
+            .into_iter()
+            .map(|item| item.to_string())
+            .collect()
     }
 
     /// Parses configured status-line ids into known items and collects unknown ids.
@@ -5160,7 +5173,7 @@ impl ChatWidget {
         let mut invalid_seen = HashSet::new();
         let mut items = Vec::new();
         let Some(config_items) = self.config.tui_status_line.as_ref() else {
-            return (items, invalid);
+            return (Self::default_status_line_items(), invalid);
         };
         for id in config_items {
             match id.parse::<StatusLineItem>() {

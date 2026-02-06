@@ -56,12 +56,6 @@ pub enum ConfigEdit {
 }
 
 pub fn status_line_items_edit(items: &[String]) -> ConfigEdit {
-    if items.is_empty() {
-        return ConfigEdit::ClearPath {
-            segments: vec!["tui".to_string(), "status_line".to_string()],
-        };
-    }
-
     let mut array = toml_edit::Array::new();
     for item in items {
         array.push(item.clone());
@@ -869,6 +863,24 @@ mod tests {
             std::fs::read_to_string(codex_home.join(CONFIG_TOML_FILE)).expect("read config");
         let expected = r#"model = "gpt-5.1-codex"
 model_reasoning_effort = "high"
+"#;
+        assert_eq!(contents, expected);
+    }
+
+    #[test]
+    fn status_line_edit_persists_empty_array() {
+        let tmp = tempdir().expect("tmpdir");
+        let codex_home = tmp.path();
+
+        ConfigEditsBuilder::new(codex_home)
+            .with_edits([status_line_items_edit(&[])])
+            .apply_blocking()
+            .expect("persist");
+
+        let contents =
+            std::fs::read_to_string(codex_home.join(CONFIG_TOML_FILE)).expect("read config");
+        let expected = r#"[tui]
+status_line = []
 "#;
         assert_eq!(contents, expected);
     }

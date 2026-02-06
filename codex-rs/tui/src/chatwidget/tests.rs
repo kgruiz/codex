@@ -4868,6 +4868,34 @@ async fn status_line_invalid_items_warn_once() {
 }
 
 #[tokio::test]
+async fn status_line_uses_dev_default_items_when_unset() {
+    let (chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    let (items, invalid) = chat.status_line_items_with_invalids();
+
+    assert!(invalid.is_empty());
+    assert_eq!(
+        items,
+        vec![
+            crate::bottom_pane::StatusLineItem::ModelWithReasoning,
+            crate::bottom_pane::StatusLineItem::ContextRemaining,
+            crate::bottom_pane::StatusLineItem::CurrentDir,
+            crate::bottom_pane::StatusLineItem::GitBranch,
+        ]
+    );
+}
+
+#[tokio::test]
+async fn status_line_explicit_empty_selection_stays_disabled() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.setup_status_line(Vec::new());
+
+    assert_eq!(chat.config.tui_status_line, Some(Vec::new()));
+    let (items, invalid) = chat.status_line_items_with_invalids();
+    assert!(items.is_empty());
+    assert!(invalid.is_empty());
+}
+
+#[tokio::test]
 async fn status_line_branch_state_resets_when_git_branch_disabled() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.status_line_branch = Some("main".to_string());
