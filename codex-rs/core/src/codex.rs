@@ -1136,6 +1136,38 @@ impl Session {
         }
     }
 
+    pub(crate) async fn set_thread_name(&self, name: String) -> std::io::Result<()> {
+        let Some(name) = crate::util::normalize_thread_name(&name) else {
+            return Err(std::io::Error::other("thread name cannot be empty"));
+        };
+
+        let persistence_enabled = {
+            let rollout = self.services.rollout.lock().await;
+            rollout.is_some()
+        };
+        if !persistence_enabled {
+            return Err(std::io::Error::other(
+                "session persistence is disabled; cannot rename thread",
+            ));
+        }
+
+        let codex_home = self.codex_home().await;
+        session_index::append_thread_name(&codex_home, self.conversation_id, &name).await?;
+
+        let mut state = self.state.lock().await;
+        state.session_configuration.thread_name = Some(name);
+        Ok(())
+    }
+
+    pub(crate) async fn prepare_auto_rename(&self) -> bool {
+        let mut state = self.state.lock().await;
+        if state.session_configuration.thread_name.is_some() || state.auto_rename_attempted() {
+            return false;
+        }
+        state.mark_auto_rename_attempted();
+        true
+    }
+
     fn next_internal_sub_id(&self) -> String {
         let id = self
             .next_internal_sub_id
@@ -2726,7 +2758,6 @@ mod handlers {
     use crate::mcp::collect_mcp_snapshot_from_manager;
     use crate::mcp::effective_mcp_servers;
     use crate::review_prompts::resolve_review_request;
-    use crate::rollout::session_index;
     use crate::tasks::CompactTask;
     use crate::tasks::RegularTask;
     use crate::tasks::UndoTask;
@@ -3275,26 +3306,7 @@ mod handlers {
             return;
         };
 
-        let persistence_enabled = {
-            let rollout = sess.services.rollout.lock().await;
-            rollout.is_some()
-        };
-        if !persistence_enabled {
-            let event = Event {
-                id: sub_id,
-                msg: EventMsg::Error(ErrorEvent {
-                    message: "Session persistence is disabled; cannot rename thread.".to_string(),
-                    codex_error_info: Some(CodexErrorInfo::Other),
-                }),
-            };
-            sess.send_event_raw(event).await;
-            return;
-        };
-
-        let codex_home = sess.codex_home().await;
-        if let Err(e) =
-            session_index::append_thread_name(&codex_home, sess.conversation_id, &name).await
-        {
+        if let Err(e) = sess.set_thread_name(name.clone()).await {
             let event = Event {
                 id: sub_id,
                 msg: EventMsg::Error(ErrorEvent {
@@ -3304,11 +3316,6 @@ mod handlers {
             };
             sess.send_event_raw(event).await;
             return;
-        }
-
-        {
-            let mut state = sess.state.lock().await;
-            state.session_configuration.thread_name = Some(name.clone());
         }
 
         sess.send_event_raw(Event {
@@ -6106,7 +6113,8 @@ mod tests {
         .await
         .expect("inject pending input into active turn");
 
-        sess.on_task_finished(Arc::clone(&tc), None).await;
+        sess.on_task_finished(Arc::clone(&tc), None, TaskKind::Regular)
+            .await;
 
         let history = sess.clone_history().await;
         let expected = ResponseItem::Message {
