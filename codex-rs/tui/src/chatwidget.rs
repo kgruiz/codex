@@ -3705,6 +3705,12 @@ impl ChatWidget {
     }
 
     pub(crate) fn handle_paste(&mut self, text: String) {
+        if text.is_empty() {
+            // Some terminals (like VS Code) route Cmd+V through terminal paste, which can
+            // yield an empty payload for images. Fall back to reading the clipboard.
+            self.paste_from_clipboard();
+            return;
+        }
         self.bottom_pane.handle_paste(text);
     }
 
