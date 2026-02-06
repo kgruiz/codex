@@ -939,6 +939,8 @@ async fn make_chatwidget_manual(
         full_reasoning_buffer: String::new(),
         current_status_header: String::from("Working"),
         retry_status_header: None,
+        running_turn_model: None,
+        running_turn_reasoning_effort: None,
         thread_id: None,
         thread_name: None,
         forked_from: None,
@@ -3749,22 +3751,21 @@ async fn user_shell_command_renders_output_not_exploring() {
 }
 
 #[tokio::test]
-async fn disabled_slash_command_while_task_running_snapshot() {
+async fn model_slash_command_is_available_while_task_running() {
     // Build a chat widget and simulate an active task
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.bottom_pane.set_task_running(true);
+    chat.thread_id = Some(ThreadId::new());
 
-    // Dispatch a command that is unavailable while a task runs (e.g., /model)
+    // /model should stay available during active runs.
     chat.dispatch_command(SlashCommand::Model);
 
-    // Drain history and snapshot the rendered error line(s)
+    // The model picker should open without emitting a "disabled while running" error.
     let cells = drain_insert_history(&mut rx);
     assert!(
-        !cells.is_empty(),
-        "expected an error message history cell to be emitted",
+        cells.is_empty(),
+        "did not expect an error message history cell"
     );
-    let blob = lines_to_single_string(cells.last().unwrap());
-    assert_snapshot!(blob);
 }
 
 #[tokio::test]
@@ -4994,6 +4995,41 @@ async fn status_line_branch_refreshes_after_interrupt() {
     });
 
     assert!(chat.status_line_branch_pending);
+}
+
+#[tokio::test]
+async fn status_line_model_tracks_running_turn_model() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.set_model("selected-model");
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::Low));
+    chat.running_turn_model = Some("running-model".to_string());
+    chat.running_turn_reasoning_effort = Some(ReasoningEffortConfig::High);
+    chat.agent_turn_running = true;
+
+    assert_eq!(
+        chat.status_line_value_for_item(&crate::bottom_pane::StatusLineItem::ModelName),
+        Some("running-model".to_string())
+    );
+    assert_eq!(
+        chat.status_line_value_for_item(&crate::bottom_pane::StatusLineItem::ModelWithReasoning),
+        Some("running-model high".to_string())
+    );
+
+    chat.handle_codex_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::TurnComplete(TurnCompleteEvent {
+            last_agent_message: None,
+        }),
+    });
+
+    assert_eq!(
+        chat.status_line_value_for_item(&crate::bottom_pane::StatusLineItem::ModelName),
+        Some("selected-model".to_string())
+    );
+    assert_eq!(
+        chat.status_line_value_for_item(&crate::bottom_pane::StatusLineItem::ModelWithReasoning),
+        Some("selected-model low".to_string())
+    );
 }
 
 #[tokio::test]

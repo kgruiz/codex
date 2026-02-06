@@ -61,7 +61,7 @@
 - Details: include global agents.md, include current chat title
 
 ## 9. Allow model changes during running; status line vs footer model display
-- [ ]
+- [x]
 - Details: status line shows currently running model; footer shows selected model; allow changing selected model during active runs without affecting the ongoing run
 
 ## 10. Update justfile with missing dev recipes

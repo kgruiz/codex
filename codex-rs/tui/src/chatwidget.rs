@@ -548,6 +548,10 @@ pub(crate) struct ChatWidget {
     current_status_header: String,
     // Previous status header to restore after a transient stream retry.
     retry_status_header: Option<String>,
+    // Model used by the currently running turn.
+    running_turn_model: Option<String>,
+    // Reasoning effort used by the currently running turn.
+    running_turn_reasoning_effort: Option<ReasoningEffortConfig>,
     thread_id: Option<ThreadId>,
     thread_name: Option<String>,
     forked_from: Option<ThreadId>,
@@ -958,6 +962,8 @@ impl ChatWidget {
         self.forked_from = event.forked_from_id;
         self.current_rollout_path = event.rollout_path.clone();
         self.current_cwd = Some(event.cwd.clone());
+        self.running_turn_model = None;
+        self.running_turn_reasoning_effort = None;
         let initial_messages = event.initial_messages.clone();
         let forked_from_id = event.forked_from_id;
         let model_for_header = event.model.clone();
@@ -1221,6 +1227,10 @@ impl ChatWidget {
     // Raw reasoning uses the same flow as summarized reasoning
 
     fn on_task_started(&mut self) {
+        if self.running_turn_model.is_none() {
+            self.running_turn_model = Some(self.current_model().to_string());
+            self.running_turn_reasoning_effort = self.effective_reasoning_effort();
+        }
         self.agent_turn_running = true;
         self.saw_plan_update_this_turn = false;
         self.saw_plan_item_this_turn = false;
@@ -1238,6 +1248,7 @@ impl ChatWidget {
         self.set_status_header(String::from("Working"));
         self.full_reasoning_buffer.clear();
         self.reasoning_buffer.clear();
+        self.refresh_status_line();
         self.request_redraw();
     }
 
@@ -1268,12 +1279,15 @@ impl ChatWidget {
         }
         // Mark task stopped and request redraw now that all content is in history.
         self.agent_turn_running = false;
+        self.running_turn_model = None;
+        self.running_turn_reasoning_effort = None;
         self.update_task_running_state();
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
         self.last_unified_wait = None;
         self.unified_exec_wait_streak = None;
         self.clear_unified_exec_processes();
+        self.refresh_status_line();
         self.request_redraw();
 
         if !from_replay && self.queued_user_messages.is_empty() {
@@ -1489,6 +1503,8 @@ impl ChatWidget {
         self.finalize_active_cell_as_failed();
         // Reset running state and clear streaming buffers.
         self.agent_turn_running = false;
+        self.running_turn_model = None;
+        self.running_turn_reasoning_effort = None;
         self.update_task_running_state();
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
@@ -1499,6 +1515,7 @@ impl ChatWidget {
         self.stream_controller = None;
         self.plan_stream_controller = None;
         self.request_status_line_branch_refresh();
+        self.refresh_status_line();
         self.maybe_show_pending_rate_limit_prompt();
     }
 
@@ -2534,6 +2551,8 @@ impl ChatWidget {
             full_reasoning_buffer: String::new(),
             current_status_header: String::from("Working"),
             retry_status_header: None,
+            running_turn_model: None,
+            running_turn_reasoning_effort: None,
             thread_id: None,
             thread_name: None,
             forked_from: None,
@@ -2701,6 +2720,8 @@ impl ChatWidget {
             full_reasoning_buffer: String::new(),
             current_status_header: String::from("Working"),
             retry_status_header: None,
+            running_turn_model: None,
+            running_turn_reasoning_effort: None,
             thread_id: None,
             thread_name: None,
             forked_from: None,
@@ -2856,6 +2877,8 @@ impl ChatWidget {
             full_reasoning_buffer: String::new(),
             current_status_header: String::from("Working"),
             retry_status_header: None,
+            running_turn_model: None,
+            running_turn_reasoning_effort: None,
             thread_id: None,
             thread_name: None,
             forked_from: None,
@@ -3895,6 +3918,8 @@ impl ChatWidget {
         }
 
         let effective_mode = self.effective_collaboration_mode();
+        let running_model = effective_mode.model().to_string();
+        let running_effort = effective_mode.reasoning_effort();
         let collaboration_mode = if self.collaboration_modes_enabled() {
             self.active_collaboration_mask
                 .as_ref()
@@ -3912,13 +3937,16 @@ impl ChatWidget {
             cwd: self.config.cwd.clone(),
             approval_policy: self.config.approval_policy.value(),
             sandbox_policy: self.config.sandbox_policy.get().clone(),
-            model: effective_mode.model().to_string(),
-            effort: effective_mode.reasoning_effort(),
+            model: running_model.clone(),
+            effort: running_effort,
             summary: self.config.model_reasoning_summary,
             final_output_json_schema: None,
             collaboration_mode,
             personality,
         };
+
+        self.running_turn_model = Some(running_model);
+        self.running_turn_reasoning_effort = running_effort;
 
         self.codex_op_tx.send(op).unwrap_or_else(|e| {
             tracing::error!("failed to send message: {e}");
@@ -3944,6 +3972,7 @@ impl ChatWidget {
         }
 
         self.needs_final_message_separator = false;
+        self.refresh_status_line();
     }
 
     /// Restore the blocked submission draft without losing mention resolution state.
@@ -4501,6 +4530,22 @@ impl ChatWidget {
         });
     }
 
+    fn status_line_model_display_name(&self) -> &str {
+        if self.agent_turn_running
+            && let Some(model) = self.running_turn_model.as_deref()
+        {
+            return model;
+        }
+        self.model_display_name()
+    }
+
+    fn status_line_reasoning_effort(&self) -> Option<ReasoningEffortConfig> {
+        if self.agent_turn_running {
+            return self.running_turn_reasoning_effort;
+        }
+        self.effective_reasoning_effort()
+    }
+
     /// Resolves a display string for one configured status-line item.
     ///
     /// Returning `None` means "omit this item for now", not "configuration error". Callers rely on
@@ -4508,11 +4553,11 @@ impl ChatWidget {
     /// git metadata.
     fn status_line_value_for_item(&self, item: &StatusLineItem) -> Option<String> {
         match item {
-            StatusLineItem::ModelName => Some(self.model_display_name().to_string()),
+            StatusLineItem::ModelName => Some(self.status_line_model_display_name().to_string()),
             StatusLineItem::ModelWithReasoning => {
                 let label =
-                    Self::status_line_reasoning_effort_label(self.effective_reasoning_effort());
-                Some(format!("{} {label}", self.model_display_name()))
+                    Self::status_line_reasoning_effort_label(self.status_line_reasoning_effort());
+                Some(format!("{} {label}", self.status_line_model_display_name()))
             }
             StatusLineItem::CurrentDir => {
                 Some(format_directory_display(self.status_line_cwd(), None))

@@ -122,7 +122,6 @@ impl SlashCommand {
             | SlashCommand::Init
             | SlashCommand::Compact
             // | SlashCommand::Undo
-            | SlashCommand::Model
             | SlashCommand::Personality
             | SlashCommand::Approvals
             | SlashCommand::Permissions
@@ -141,6 +140,7 @@ impl SlashCommand {
             | SlashCommand::Mcp
             | SlashCommand::Apps
             | SlashCommand::Feedback
+            | SlashCommand::Model
             | SlashCommand::Quit
             | SlashCommand::Exit => true,
             SlashCommand::Rollout => true,
