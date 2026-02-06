@@ -3302,6 +3302,44 @@ async fn model_picker_hides_show_in_picker_false_models_from_cache() {
     );
 }
 
+#[test]
+fn model_shortcut_choices_match_picker_visible_models() {
+    let preset = |slug: &str, show_in_picker: bool| ModelPreset {
+        id: slug.to_string(),
+        model: slug.to_string(),
+        display_name: slug.to_string(),
+        description: format!("{slug} description"),
+        default_reasoning_effort: ReasoningEffortConfig::Medium,
+        supported_reasoning_efforts: vec![ReasoningEffortPreset {
+            effort: ReasoningEffortConfig::Medium,
+            description: "medium".to_string(),
+        }],
+        supports_personality: false,
+        is_default: false,
+        upgrade: None,
+        show_in_picker,
+        supported_in_api: true,
+        input_modalities: default_input_modalities(),
+    };
+
+    let choices = ChatWidget::model_shortcut_choices(vec![
+        preset("hidden-model", false),
+        preset("visible-non-auto", true),
+        preset("codex-auto-balanced", true),
+        preset("codex-auto-fast", true),
+    ]);
+    let slugs: Vec<String> = choices.into_iter().map(|preset| preset.model).collect();
+
+    assert_eq!(
+        slugs,
+        vec![
+            "codex-auto-fast".to_string(),
+            "codex-auto-balanced".to_string(),
+            "visible-non-auto".to_string(),
+        ]
+    );
+}
+
 #[tokio::test]
 async fn model_cap_error_does_not_switch_models() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(Some("boomslang")).await;

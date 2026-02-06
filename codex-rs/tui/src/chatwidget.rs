@@ -3901,9 +3901,7 @@ impl ChatWidget {
         }
 
         let effective_mode = self.effective_collaboration_mode();
-        let running_model = model_override
-            
-            .unwrap_or_else(|| effective_mode.model().to_string());
+        let running_model = model_override.unwrap_or_else(|| effective_mode.model().to_string());
         let running_effort = effort_override.unwrap_or(effective_mode.reasoning_effort());
         let collaboration_mode = if self.collaboration_modes_enabled() {
             self.active_collaboration_mask
@@ -5698,10 +5696,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn open_model_popup_with_presets(&mut self, presets: Vec<ModelPreset>) {
-        let presets: Vec<ModelPreset> = presets
-            .into_iter()
-            .filter(|preset| preset.show_in_picker)
-            .collect();
+        let presets = Self::picker_visible_model_presets(presets);
 
         let current_model = self.current_model();
         let current_label = presets
@@ -5780,6 +5775,29 @@ impl ChatWidget {
 
     fn is_auto_model(model: &str) -> bool {
         model.starts_with("codex-auto-")
+    }
+
+    fn picker_visible_model_presets(presets: Vec<ModelPreset>) -> Vec<ModelPreset> {
+        presets
+            .into_iter()
+            .filter(|preset| preset.show_in_picker)
+            .collect()
+    }
+
+    fn model_shortcut_choices(presets: Vec<ModelPreset>) -> Vec<ModelPreset> {
+        let (mut auto_presets, other_presets): (Vec<ModelPreset>, Vec<ModelPreset>) =
+            Self::picker_visible_model_presets(presets)
+                .into_iter()
+                .partition(|preset| Self::is_auto_model(&preset.model));
+
+        auto_presets.sort_by_key(|preset| Self::auto_model_order(&preset.model));
+        if auto_presets.is_empty() {
+            return other_presets;
+        }
+
+        let mut choices = auto_presets;
+        choices.extend(other_presets);
+        choices
     }
 
     fn auto_model_order(model: &str) -> usize {
@@ -7146,44 +7164,24 @@ impl ChatWidget {
             }
         };
 
-        let (mut auto_presets, other_presets): (Vec<ModelPreset>, Vec<ModelPreset>) = presets
-            .into_iter()
-            .partition(|preset| Self::is_auto_model(&preset.model));
-
-        let choices = if auto_presets.is_empty() {
-            let mut presets = other_presets;
-            presets.sort_by(|a, b| a.display_name.cmp(&b.display_name));
-            presets
-        } else {
-            auto_presets.sort_by_key(|preset| Self::auto_model_order(&preset.model));
-            if auto_presets
-                .iter()
-                .any(|preset| preset.model == current_model)
-            {
-                auto_presets
-            } else {
-                let current_preset = other_presets
-                    .iter()
-                    .find(|preset| preset.model == current_model)
-                    .cloned();
-                if let Some(current_preset) = current_preset {
-                    auto_presets.insert(0, current_preset);
-                }
-                auto_presets
-            }
-        };
+        let choices = Self::model_shortcut_choices(presets);
 
         if choices.len() <= 1 {
             return;
         }
 
-        let current_idx = choices
+        let next_idx = if let Some(current_idx) = choices
             .iter()
             .position(|preset| preset.model == current_model)
-            .unwrap_or(0);
+        {
+            let len = choices.len() as isize;
+            (current_idx as isize + direction).rem_euclid(len) as usize
+        } else if direction >= 0 {
+            0
+        } else {
+            choices.len() - 1
+        };
 
-        let len = choices.len() as isize;
-        let next_idx = (current_idx as isize + direction).rem_euclid(len) as usize;
         let next = choices[next_idx].clone();
         self.apply_model_and_effort(next.model.to_string(), Some(next.default_reasoning_effort));
     }
@@ -7203,7 +7201,7 @@ impl ChatWidget {
             }
         };
 
-        let Some(preset) = presets
+        let Some(preset) = Self::picker_visible_model_presets(presets)
             .into_iter()
             .find(|preset| preset.model == model_slug)
         else {
