@@ -570,18 +570,20 @@ fn footer_from_props_lines(
     show_queue_hint: bool,
 ) -> Vec<Line<'static>> {
     // If status line content is present, show it for base modes.
-    if props.status_line_enabled
-        && let Some(status_line) = &props.status_line_value
+    if let Some(status_line) = effective_status_line_line(props)
         && matches!(
             props.mode,
             FooterMode::ComposerEmpty | FooterMode::ComposerHasDraft
         )
     {
-        return vec![status_line.clone().dim()];
+        return vec![status_line.dim()];
     }
     match props.mode {
         FooterMode::QuitShortcutReminder => {
-            vec![quit_shortcut_reminder_line(props.quit_shortcut_key)]
+            vec![quit_shortcut_reminder_line(
+                props.quit_shortcut_key,
+                props.is_task_running,
+            )]
         }
         FooterMode::ComposerEmpty => {
             let state = LeftSideState {
@@ -619,6 +621,31 @@ fn footer_from_props_lines(
             vec![left_side_line(collaboration_mode_indicator, state)]
         }
     }
+}
+
+pub(crate) fn effective_status_line_line(props: &FooterProps) -> Option<Line<'static>> {
+    if !props.status_line_enabled {
+        return None;
+    }
+
+    if let Some(line) = &props.status_line_value
+        && line.width() > 0
+    {
+        return Some(line.clone());
+    }
+
+    let model = props.model.trim();
+    if model.is_empty() {
+        return None;
+    }
+
+    let mut line = Line::from(vec![model.to_string().into()]);
+    if let Some(label) = thinking_label_for(model, props.reasoning_effort).or_else(|| {
+        (!model.starts_with("codex-auto-") && props.reasoning_effort.is_none()).then_some("default")
+    }) {
+        line.push_span(format!(" (reasoning {label})").dim());
+    }
+    Some(line)
 }
 
 pub(crate) fn footer_line_width(
@@ -671,20 +698,25 @@ struct ShortcutsState {
     keybindings: Keybindings,
 }
 
-fn quit_shortcut_reminder_line(key: KeyBinding) -> Line<'static> {
-    Line::from(vec![key.into(), " again to quit".into()]).dim()
+fn quit_shortcut_reminder_line(key: KeyBinding, is_task_running: bool) -> Line<'static> {
+    let action = if is_task_running { "interrupt" } else { "quit" };
+    Line::from(vec![key.into(), format!(" again to {action}").into()]).dim()
 }
 
 fn esc_hint_line(esc_backtrack_hint: bool) -> Line<'static> {
     let esc = key_hint::plain(KeyCode::Esc);
     if esc_backtrack_hint {
-        Line::from(vec![esc.into(), " again to edit previous message".into()]).dim()
+        Line::from(vec![
+            esc.into(),
+            " again to edit or branch previous message".into(),
+        ])
+        .dim()
     } else {
         Line::from(vec![
             esc.into(),
             " ".into(),
             esc.into(),
-            " to edit previous message".into(),
+            " to edit or branch previous message".into(),
         ])
         .dim()
     }
@@ -923,12 +955,12 @@ impl ShortcutDescriptor {
         match self.id {
             ShortcutId::EditPrevious => {
                 if state.esc_backtrack_hint {
-                    line.push_span(" again to edit previous message");
+                    line.push_span(" again to edit or branch previous message");
                 } else {
                     line.extend(vec![
                         " ".into(),
                         key_hint::plain(KeyCode::Esc).into(),
-                        " to edit previous message".into(),
+                        " to edit or branch previous message".into(),
                     ]);
                 }
             }
@@ -1143,16 +1175,16 @@ mod tests {
                     collaboration_mode_indicator
                 };
                 let available_width = area.width.saturating_sub(FOOTER_INDENT_COLS as u16) as usize;
+                let status_line =
+                    effective_status_line_line(props).map(ratatui::prelude::Stylize::dim);
                 let mut truncated_status_line = if props.status_line_enabled
                     && matches!(
                         props.mode,
                         FooterMode::ComposerEmpty | FooterMode::ComposerHasDraft
                     ) {
-                    props
-                        .status_line_value
-                        .as_ref()
-                        .map(|line| line.clone().dim())
-                        .map(|line| truncate_line_with_ellipsis_if_overflow(line, available_width))
+                    status_line.as_ref().map(|line| {
+                        truncate_line_with_ellipsis_if_overflow(line.clone(), available_width)
+                    })
                 } else {
                     None
                 };
@@ -1192,13 +1224,9 @@ mod tests {
                 if props.status_line_enabled
                     && let Some(max_left) = max_left_width_for_right(area, right_width)
                     && left_width > max_left
-                    && let Some(line) = props
-                        .status_line_value
-                        .as_ref()
-                        .map(|line| line.clone().dim())
-                        .map(|line| {
-                            truncate_line_with_ellipsis_if_overflow(line, max_left as usize)
-                        })
+                    && let Some(line) = status_line.as_ref().map(|line| {
+                        truncate_line_with_ellipsis_if_overflow(line.clone(), max_left as usize)
+                    })
                 {
                     left_width = line.width() as u16;
                     truncated_status_line = Some(line);
@@ -1672,6 +1700,31 @@ mod tests {
         // has status line and no collaboration mode
         snapshot_footer_with_mode_indicator(
             "footer_status_line_enabled_no_mode_right",
+            120,
+            &props,
+            None,
+        );
+
+        let props = FooterProps {
+            mode: FooterMode::ComposerEmpty,
+            esc_backtrack_hint: false,
+            use_shift_enter_hint: false,
+            is_task_running: false,
+            steer_enabled: false,
+            collaboration_modes_enabled: false,
+            is_wsl: false,
+            quit_shortcut_key: key_hint::ctrl(KeyCode::Char('c')),
+            context_window_percent: Some(50),
+            context_window_used_tokens: None,
+            model: "gpt-5.2-codex".to_string(),
+            reasoning_effort: None,
+            keybindings: default_keybindings(false),
+            status_line_value: None,
+            status_line_enabled: true,
+        };
+
+        snapshot_footer_with_mode_indicator(
+            "footer_status_line_enabled_model_fallback",
             120,
             &props,
             None,

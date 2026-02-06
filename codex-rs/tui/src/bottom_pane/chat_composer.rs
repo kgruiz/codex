@@ -116,6 +116,7 @@ use super::footer::FooterProps;
 use super::footer::SummaryLeft;
 use super::footer::can_show_left_with_context;
 use super::footer::context_window_line;
+use super::footer::effective_status_line_line;
 use super::footer::esc_hint_mode;
 use super::footer::footer_height;
 use super::footer::footer_hint_items_width;
@@ -3322,10 +3323,8 @@ impl ChatComposer {
                 };
                 let available_width =
                     hint_rect.width.saturating_sub(FOOTER_INDENT_COLS as u16) as usize;
-                let status_line = footer_props
-                    .status_line_value
-                    .as_ref()
-                    .map(|line| line.clone().dim());
+                let status_line =
+                    effective_status_line_line(&footer_props).map(ratatui::prelude::Stylize::dim);
                 let status_line_candidate = footer_props.status_line_enabled
                     && matches!(
                         footer_props.mode,
