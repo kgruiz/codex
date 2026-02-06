@@ -12,6 +12,7 @@ use crate::error::CodexErr;
 use crate::error::Result;
 use crate::instructions::SkillInstructions;
 use crate::instructions::UserInstructions;
+use crate::models_manager::manager::RefreshStrategy;
 use crate::parse_turn_item;
 use crate::stream_events_utils::last_assistant_message_from_item;
 use crate::truncate::TruncationPolicy;
@@ -141,6 +142,25 @@ async fn stream_title(
     turn_context: &TurnContext,
     prompt_text: &str,
 ) -> Result<Option<String>> {
+    let default_model = session
+        .services
+        .models_manager
+        .get_default_model(
+            &turn_context.config.model,
+            turn_context.config.as_ref(),
+            RefreshStrategy::OnlineIfUncached,
+        )
+        .await;
+    let model_info = if default_model.is_empty() {
+        turn_context.model_info.clone()
+    } else {
+        session
+            .services
+            .models_manager
+            .get_model_info(&default_model, turn_context.config.as_ref())
+            .await
+    };
+
     let prompt = Prompt {
         input: vec![ResponseItem::Message {
             id: None,
@@ -159,7 +179,7 @@ async fn stream_title(
     let mut stream = client_session
         .stream(
             &prompt,
-            &turn_context.model_info,
+            &model_info,
             &turn_context.otel_manager,
             turn_context.reasoning_effort,
             turn_context.reasoning_summary,
