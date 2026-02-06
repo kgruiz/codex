@@ -2977,7 +2977,7 @@ impl ChatWidget {
             } if modifiers == (KeyModifiers::CONTROL | KeyModifiers::SHIFT)
                 && self.bottom_pane.no_modal_or_popup_active() =>
             {
-                self.cycle_reasoning_effort_shortcut(1);
+                self.cycle_reasoning_effort_shortcut(-1);
             }
             KeyEvent {
                 code: KeyCode::Up,
@@ -2987,7 +2987,7 @@ impl ChatWidget {
             } if modifiers == (KeyModifiers::CONTROL | KeyModifiers::SHIFT)
                 && self.bottom_pane.no_modal_or_popup_active() =>
             {
-                self.cycle_reasoning_effort_shortcut(-1);
+                self.cycle_reasoning_effort_shortcut(1);
             }
             KeyEvent {
                 code: KeyCode::BackTab,
@@ -5323,18 +5323,10 @@ impl ChatWidget {
     }
 
     fn status_line_model_display_name(&self) -> &str {
-        if self.agent_turn_running
-            && let Some(model) = self.running_turn_model.as_deref()
-        {
-            return model;
-        }
         self.model_display_name()
     }
 
     fn status_line_reasoning_effort(&self) -> Option<ReasoningEffortConfig> {
-        if self.agent_turn_running {
-            return self.running_turn_reasoning_effort;
-        }
         self.effective_reasoning_effort()
     }
 

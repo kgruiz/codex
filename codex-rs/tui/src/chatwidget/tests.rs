@@ -5017,7 +5017,7 @@ async fn status_line_branch_refreshes_after_interrupt() {
 }
 
 #[tokio::test]
-async fn status_line_model_tracks_running_turn_model() {
+async fn status_line_model_tracks_selected_model_during_running_turn() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.set_model("selected-model");
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::Low));
@@ -5027,11 +5027,11 @@ async fn status_line_model_tracks_running_turn_model() {
 
     assert_eq!(
         chat.status_line_value_for_item(&crate::bottom_pane::StatusLineItem::ModelName),
-        Some("running-model".to_string())
+        Some("selected-model".to_string())
     );
     assert_eq!(
         chat.status_line_value_for_item(&crate::bottom_pane::StatusLineItem::ModelWithReasoning),
-        Some("running-model high".to_string())
+        Some("selected-model low".to_string())
     );
 
     chat.handle_codex_event(Event {
