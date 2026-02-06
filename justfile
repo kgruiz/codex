@@ -44,7 +44,7 @@ clean:
 # clean the Rust workspace afterwards to keep `target/` from growing.
 install-dev:
     cargo install --path cli --bin codex --locked --force
-    cargo clean
+    just clean
 
 alias id := install-dev
 
