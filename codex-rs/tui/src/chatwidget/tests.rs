@@ -813,6 +813,7 @@ async fn make_chatwidget_manual(
         running_turn_reasoning_effort: None,
         thread_id: None,
         thread_name: None,
+        has_completed_assistant_message: false,
         forked_from: None,
         frame_requester: FrameRequester::test_dummy(),
         show_welcome_banner: true,
@@ -3735,6 +3736,34 @@ async fn model_slash_command_is_available_while_task_running() {
     assert!(
         cells.is_empty(),
         "did not expect an error message history cell"
+    );
+}
+
+#[tokio::test]
+async fn submitting_during_active_turn_keeps_running_model_and_effort() {
+    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(None).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.agent_turn_running = true;
+    chat.running_turn_model = Some("running-model".to_string());
+    chat.running_turn_reasoning_effort = Some(ReasoningEffortConfig::High);
+
+    chat.set_model("newly-selected-model");
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::Low));
+    chat.submit_user_message("follow-up while running".into());
+
+    let op = next_submit_op(&mut op_rx);
+    match op {
+        Op::UserTurn { model, effort, .. } => {
+            assert_eq!(model, "running-model".to_string());
+            assert_eq!(effort, Some(ReasoningEffortConfig::High));
+        }
+        _ => panic!("expected Op::UserTurn"),
+    }
+
+    assert_eq!(chat.running_turn_model.as_deref(), Some("running-model"));
+    assert_eq!(
+        chat.running_turn_reasoning_effort,
+        Some(ReasoningEffortConfig::High)
     );
 }
 

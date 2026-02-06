@@ -3464,7 +3464,12 @@ impl ChatComposer {
                         SummaryLeft::Custom(line) => {
                             render_footer_line(hint_rect, buf, line);
                         }
-                        SummaryLeft::None => {}
+                        SummaryLeft::None => {
+                            if status_line_active && let Some(line) = truncated_status_line.clone()
+                            {
+                                render_footer_line(hint_rect, buf, line);
+                            }
+                        }
                     }
                 } else if self.footer_flash_visible() {
                     if let Some(flash) = self.footer_flash.as_ref() {
@@ -3832,6 +3837,41 @@ mod tests {
         snapshot_composer_state("footer_mode_hidden_while_typing", true, |composer| {
             type_chars_humanlike(composer, &['h']);
         });
+    }
+
+    #[test]
+    fn status_line_remains_visible_while_typing() {
+        let (tx, _rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            true,
+            sender,
+            false,
+            "Ask Codex to do anything".to_string(),
+            false,
+        );
+        composer.set_status_line_enabled(true);
+        composer.set_status_line(Some(Line::from("model · 98% left · repo · main")));
+        type_chars_humanlike(&mut composer, &['h']);
+
+        let area = Rect::new(0, 0, 100, 8);
+        let mut buf = Buffer::empty(area);
+        composer.render(area, &mut buf);
+
+        let mut footer_row = String::new();
+        for x in 0..area.width {
+            footer_row.push(
+                buf[(x, area.height - 1)]
+                    .symbol()
+                    .chars()
+                    .next()
+                    .unwrap_or(' '),
+            );
+        }
+        assert!(
+            footer_row.contains("model · 98% left · repo · main"),
+            "expected status line to remain visible while typing, saw: {footer_row:?}",
+        );
     }
 
     #[test]

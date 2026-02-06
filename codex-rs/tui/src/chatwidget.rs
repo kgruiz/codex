@@ -3951,8 +3951,20 @@ impl ChatWidget {
         }
 
         let effective_mode = self.effective_collaboration_mode();
-        let running_model = model_override.unwrap_or_else(|| effective_mode.model().to_string());
-        let running_effort = effort_override.unwrap_or(effective_mode.reasoning_effort());
+        let running_model = model_override
+            .or_else(|| {
+                self.agent_turn_running
+                    .then(|| self.running_turn_model.clone())
+                    .flatten()
+            })
+            .unwrap_or_else(|| effective_mode.model().to_string());
+        let running_effort = effort_override.unwrap_or_else(|| {
+            if self.agent_turn_running {
+                self.running_turn_reasoning_effort
+            } else {
+                effective_mode.reasoning_effort()
+            }
+        });
         let collaboration_mode = if self.collaboration_modes_enabled() {
             self.active_collaboration_mask
                 .as_ref()
@@ -3978,8 +3990,10 @@ impl ChatWidget {
             personality,
         };
 
-        self.running_turn_model = Some(running_model);
-        self.running_turn_reasoning_effort = running_effort;
+        if !self.agent_turn_running {
+            self.running_turn_model = Some(running_model.clone());
+            self.running_turn_reasoning_effort = running_effort;
+        }
 
         self.codex_op_tx.send(op).unwrap_or_else(|e| {
             tracing::error!("failed to send message: {e}");
