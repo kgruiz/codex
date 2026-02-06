@@ -391,7 +391,7 @@ impl HistoryCell for StatusHistoryCell {
             push_label(&mut labels, &mut seen, "Account");
         }
         if thread_name.is_some() {
-            push_label(&mut labels, &mut seen, "Thread name");
+            push_label(&mut labels, &mut seen, "Chat title");
         }
         if self.session_id.is_some() {
             push_label(&mut labels, &mut seen, "Session");
@@ -452,7 +452,7 @@ impl HistoryCell for StatusHistoryCell {
         }
 
         if let Some(thread_name) = thread_name {
-            lines.push(formatter.line("Thread name", vec![Span::from(thread_name.to_string())]));
+            lines.push(formatter.line("Chat title", vec![Span::from(thread_name.to_string())]));
         }
         if let Some(collab_mode) = self.collaboration_mode.as_ref() {
             lines.push(formatter.line("Collaboration mode", vec![Span::from(collab_mode.clone())]));

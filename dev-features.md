@@ -57,7 +57,7 @@
   - codex-rs/core/src/config/mod.rs:196
 
 ## 8. /status includes global agents.md and chat title
-- [ ]
+- [x]
 - Details: include global agents.md, include current chat title
 
 ## 9. Allow model changes during running; status line vs footer model display
