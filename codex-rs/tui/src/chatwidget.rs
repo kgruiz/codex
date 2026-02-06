@@ -556,6 +556,7 @@ pub(crate) struct ChatWidget {
     running_turn_reasoning_effort: Option<ReasoningEffortConfig>,
     thread_id: Option<ThreadId>,
     thread_name: Option<String>,
+    has_completed_assistant_message: bool,
     forked_from: Option<ThreadId>,
     frame_requester: FrameRequester,
     // Whether to include the initial welcome banner on session configured
@@ -1091,6 +1092,10 @@ impl ChatWidget {
     }
 
     fn on_agent_message(&mut self, message: String) {
+        if !message.trim().is_empty() {
+            self.has_completed_assistant_message = true;
+        }
+
         // If we have a stream_controller, then the final agent message is redundant and will be a
         // duplicate of what has already been streamed.
         if self.stream_controller.is_none() && !message.is_empty() {
@@ -2457,6 +2462,7 @@ impl ChatWidget {
             running_turn_reasoning_effort: None,
             thread_id: None,
             thread_name: None,
+            has_completed_assistant_message: false,
             forked_from: None,
             queued_user_messages: VecDeque::new(),
             next_queued_user_message_id: 1,
@@ -2626,6 +2632,7 @@ impl ChatWidget {
             running_turn_reasoning_effort: None,
             thread_id: None,
             thread_name: None,
+            has_completed_assistant_message: false,
             forked_from: None,
             saw_plan_update_this_turn: false,
             saw_plan_item_this_turn: false,
@@ -2783,6 +2790,7 @@ impl ChatWidget {
             running_turn_reasoning_effort: None,
             thread_id: None,
             thread_name: None,
+            has_completed_assistant_message: false,
             forked_from: None,
             queued_user_messages: VecDeque::new(),
             next_queued_user_message_id: 1,
@@ -3168,7 +3176,7 @@ impl ChatWidget {
             }
             SlashCommand::Rename => {
                 self.otel_manager.counter("codex.thread.rename", 1, &[]);
-                self.show_rename_prompt();
+                self.open_rename_thread_view();
             }
             SlashCommand::Export => {
                 self.open_export_picker();
@@ -3489,7 +3497,40 @@ impl ChatWidget {
         }
     }
 
-    fn show_rename_prompt(&mut self) {
+    fn open_rename_thread_view(&mut self) {
+        let mut items = Vec::new();
+        items.push(SelectionItem {
+            name: "Rename manually".to_string(),
+            description: Some("Set a custom name.".to_string()),
+            actions: vec![Box::new(|tx| {
+                tx.send(AppEvent::OpenRenameThreadPrompt);
+            })],
+            dismiss_on_select: true,
+            ..Default::default()
+        });
+
+        if self.has_completed_assistant_message {
+            items.push(SelectionItem {
+                name: "Generate title from chat".to_string(),
+                description: Some("Generate a name automatically.".to_string()),
+                actions: vec![Box::new(|tx| {
+                    tx.send(AppEvent::CodexOp(Op::AutoRenameThread));
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            });
+        }
+
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some("Rename thread".to_string()),
+            footer_hint: Some(standard_popup_hint_line()),
+            items,
+            ..Default::default()
+        });
+        self.request_redraw();
+    }
+
+    pub(crate) fn show_rename_prompt(&mut self) {
         let tx = self.app_event_tx.clone();
         let has_name = self
             .thread_name

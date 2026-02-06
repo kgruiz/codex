@@ -400,6 +400,9 @@ pub(crate) enum AppEvent {
     /// Launch the external editor after a normal draw has completed.
     LaunchExternalEditor,
 
+    /// Open the text prompt for manually renaming the current thread.
+    OpenRenameThreadPrompt,
+
     /// Async update of the current git branch for status line rendering.
     StatusLineBranchUpdated {
         cwd: PathBuf,

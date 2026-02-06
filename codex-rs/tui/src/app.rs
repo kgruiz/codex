@@ -1648,6 +1648,9 @@ impl App {
             AppEvent::CodexOp(op) => {
                 self.chat_widget.submit_op(op);
             }
+            AppEvent::OpenRenameThreadPrompt => {
+                self.chat_widget.show_rename_prompt();
+            }
             AppEvent::DiffResult(text) => {
                 // Clear the in-progress state in the bottom pane
                 self.chat_widget.on_diff_complete();

@@ -2715,6 +2715,9 @@ async fn submission_loop(sess: Arc<Session>, config: Arc<Config>, rx_sub: Receiv
             Op::SetThreadName { name } => {
                 handlers::set_thread_name(&sess, sub.id.clone(), name).await;
             }
+            Op::AutoRenameThread => {
+                handlers::auto_rename_thread(&sess, sub.id.clone()).await;
+            }
             Op::RunUserShellCommand { command } => {
                 handlers::run_user_shell_command(
                     &sess,
@@ -3323,6 +3326,62 @@ mod handlers {
             msg: EventMsg::ThreadNameUpdated(ThreadNameUpdatedEvent {
                 thread_id: sess.conversation_id,
                 thread_name: Some(name),
+            }),
+        })
+        .await;
+    }
+
+    pub async fn auto_rename_thread(sess: &Arc<Session>, sub_id: String) {
+        let turn_context = sess.new_default_turn_with_sub_id(sub_id.clone()).await;
+        let title = match crate::chat_title::generate_chat_title(
+            sess.as_ref(),
+            turn_context.as_ref(),
+        )
+        .await
+        {
+            Ok(title) => title,
+            Err(err) => {
+                sess.send_event_raw(Event {
+                    id: sub_id,
+                    msg: EventMsg::Error(ErrorEvent {
+                        message: format!("Auto-rename failed: {err}"),
+                        codex_error_info: Some(CodexErrorInfo::Other),
+                    }),
+                })
+                .await;
+                return;
+            }
+        };
+
+        let Some(title) = title else {
+            sess.send_event_raw(Event {
+                id: sub_id,
+                msg: EventMsg::Error(ErrorEvent {
+                    message: "Auto-rename failed: empty title.".to_string(),
+                    codex_error_info: Some(CodexErrorInfo::Other),
+                }),
+            })
+            .await;
+            return;
+        };
+
+        if let Err(err) = sess.set_thread_name(title.clone()).await {
+            sess.send_event_raw(Event {
+                id: sub_id,
+                msg: EventMsg::Error(ErrorEvent {
+                    message: format!("Auto-rename failed: {err}"),
+                    codex_error_info: Some(CodexErrorInfo::Other),
+                }),
+            })
+            .await;
+            return;
+        }
+
+        sess.send_event_raw(Event {
+            id: turn_context.sub_id.clone(),
+            msg: EventMsg::ThreadNameUpdated(ThreadNameUpdatedEvent {
+                thread_id: sess.conversation_id,
+                thread_name: Some(title),
             }),
         })
         .await;
