@@ -83,12 +83,15 @@ pub(crate) use status_line_setup::StatusLineItem;
 pub(crate) use status_line_setup::StatusLineSetupView;
 mod paste_burst;
 pub mod popup_consts;
+mod queue_popup;
 mod queued_user_messages;
 mod scroll_state;
 mod selection_popup_common;
 mod textarea;
 mod unified_exec_footer;
 pub(crate) use feedback_view::FeedbackNoteView;
+pub(crate) use queue_popup::QueuePopup;
+pub(crate) use queue_popup::QueuePopupItem;
 
 /// How long the "press again to quit" hint stays visible.
 ///
@@ -272,6 +275,25 @@ impl BottomPane {
         self.request_redraw();
     }
 
+    fn refresh_queued_user_message_hints(&mut self) -> bool {
+        let queue_edit_active = self
+            .queued_user_messages
+            .messages
+            .iter()
+            .any(|message| message.starts_with("✎ "));
+        let show_send_next_hint = !self.is_task_running
+            && !self.composer.popup_active()
+            && !queue_edit_active
+            && !self.queued_user_messages.messages.is_empty();
+
+        if self.queued_user_messages.show_send_next_hint != show_send_next_hint {
+            self.queued_user_messages.show_send_next_hint = show_send_next_hint;
+            return true;
+        }
+
+        false
+    }
+
     pub fn status_widget(&self) -> Option<&StatusIndicatorWidget> {
         self.status.as_ref()
     }
@@ -354,7 +376,8 @@ impl BottomPane {
                 return InputResult::None;
             }
             let (input_result, needs_redraw) = self.composer.handle_key_event(key_event);
-            if needs_redraw {
+            let hints_changed = self.refresh_queued_user_message_hints();
+            if needs_redraw || hints_changed {
                 self.request_redraw();
             }
             if self.composer.is_in_paste_burst() {
@@ -483,6 +506,10 @@ impl BottomPane {
         self.composer.local_images()
     }
 
+    pub(crate) fn composer_mention_paths(&self) -> HashMap<String, String> {
+        self.composer.mention_paths()
+    }
+
     #[cfg(test)]
     pub(crate) fn composer_local_image_paths(&self) -> Vec<PathBuf> {
         self.composer.local_image_paths()
@@ -579,6 +606,7 @@ impl BottomPane {
         let was_running = self.is_task_running;
         self.is_task_running = running;
         self.composer.set_task_running(running);
+        let hints_changed = self.refresh_queued_user_message_hints();
 
         if running {
             if !was_running {
@@ -593,10 +621,15 @@ impl BottomPane {
                     status.set_interrupt_hint_visible(true);
                 }
                 self.request_redraw();
+            } else if hints_changed {
+                self.request_redraw();
             }
         } else {
             // Hide the status indicator when a task completes, but keep other modal views.
             self.hide_status_indicator();
+            if hints_changed {
+                self.request_redraw();
+            }
         }
     }
 
@@ -664,6 +697,7 @@ impl BottomPane {
     /// Update the queued messages preview shown above the composer.
     pub(crate) fn set_queued_user_messages(&mut self, queued: Vec<String>) {
         self.queued_user_messages.messages = queued;
+        self.refresh_queued_user_message_hints();
         self.request_redraw();
     }
 

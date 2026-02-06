@@ -1724,6 +1724,35 @@ impl App {
                 self.chat_widget.set_model(&model);
                 self.refresh_status_line();
             }
+            AppEvent::QueueStartEdit { id } => {
+                self.chat_widget.start_queue_edit(id);
+            }
+            AppEvent::QueueDelete { id } => {
+                self.chat_widget.delete_queued_user_message(id);
+            }
+            AppEvent::QueueMoveUp { id } => {
+                self.chat_widget.move_queued_user_message_up(id);
+            }
+            AppEvent::QueueMoveDown { id } => {
+                self.chat_widget.move_queued_user_message_down(id);
+            }
+            AppEvent::QueueMoveToFront { id } => {
+                self.chat_widget.move_queued_user_message_to_front(id);
+            }
+            AppEvent::QueueOpenModelPicker { id } => {
+                self.chat_widget.open_queue_model_picker(id);
+            }
+            AppEvent::QueueOpenThinkingPicker { id } => {
+                self.chat_widget.open_queue_thinking_picker(id);
+            }
+            AppEvent::QueueSetModelOverride { id, model } => {
+                self.chat_widget
+                    .set_queued_user_message_model_override(id, model);
+            }
+            AppEvent::QueueSetThinkingOverride { id, effort } => {
+                self.chat_widget
+                    .set_queued_user_message_thinking_override(id, effort);
+            }
             AppEvent::UpdateCollaborationMode(mask) => {
                 self.chat_widget.set_collaboration_mask(mask);
                 self.refresh_status_line();

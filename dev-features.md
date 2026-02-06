@@ -69,7 +69,7 @@
 - Details: add sync (and full version), install-dev, id, install-dev-no-clean
 
 ## 11. Queue editing and queued message UI
-- [ ]
+- [x]
 - Commits: 2bf5c4733, 120e36e45, 9d6d308e8, 761caf450, 02b0163e1, e6b69d90c, 5fa379366, 632a3ce2b, 1bd2e7af4
 - Code anchors:
   - codex-rs/tui/src/bottom_pane/queued_user_messages.rs:14

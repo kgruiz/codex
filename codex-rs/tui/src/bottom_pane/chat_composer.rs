@@ -440,6 +440,10 @@ impl ChatComposer {
         std::mem::take(&mut self.mention_paths)
     }
 
+    pub(crate) fn mention_paths(&self) -> HashMap<String, String> {
+        self.mention_paths.clone()
+    }
+
     /// Enables or disables "Steer" behavior for submission keys.
     ///
     /// When steer is enabled, `Enter` produces [`InputResult::Submitted`] (send immediately) and

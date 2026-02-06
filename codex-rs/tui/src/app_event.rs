@@ -190,6 +190,57 @@ pub(crate) enum AppEvent {
         effort: Option<ReasoningEffort>,
     },
 
+    /// Start editing the selected queued message in the composer.
+    QueueStartEdit {
+        id: u64,
+    },
+
+    /// Delete one queued message by id.
+    QueueDelete {
+        id: u64,
+    },
+
+    /// Move one queued message one position earlier.
+    QueueMoveUp {
+        id: u64,
+    },
+
+    /// Move one queued message one position later.
+    QueueMoveDown {
+        id: u64,
+    },
+
+    /// Move one queued message to the front so it is sent next.
+    QueueMoveToFront {
+        id: u64,
+    },
+
+    /// Open model picker for a queued message override.
+    QueueOpenModelPicker {
+        id: u64,
+    },
+
+    /// Open thinking picker for a queued message override.
+    QueueOpenThinkingPicker {
+        id: u64,
+    },
+
+    /// Set or clear queued-message model override.
+    QueueSetModelOverride {
+        id: u64,
+        model: Option<String>,
+    },
+
+    /// Set or clear queued-message thinking override.
+    ///
+    /// - `None`: inherit session thinking.
+    /// - `Some(None)`: explicit model default.
+    /// - `Some(Some(..))`: explicit effort.
+    QueueSetThinkingOverride {
+        id: u64,
+        effort: Option<Option<ReasoningEffort>>,
+    },
+
     /// Persist the selected personality to the appropriate config.
     PersistPersonalitySelection {
         personality: Personality,

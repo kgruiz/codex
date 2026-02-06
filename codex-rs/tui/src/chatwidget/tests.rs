@@ -433,7 +433,7 @@ async fn blocked_image_restore_preserves_mention_paths() {
 }
 
 #[tokio::test]
-async fn interrupted_turn_restores_queued_messages_with_images_and_elements() {
+async fn interrupted_turn_keeps_queued_messages_with_images_and_elements() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
 
     let first_placeholder = "[Image #1]";
@@ -460,31 +460,39 @@ async fn interrupted_turn_restores_queued_messages_with_images_and_elements() {
     )];
     let existing_images = vec![PathBuf::from("/tmp/existing.png")];
 
-    chat.queued_user_messages.push_back(UserMessage {
-        text: first_text,
+    chat.queued_user_messages.push_back(QueuedUserMessage {
+        id: 1,
+        text: first_text.clone(),
         local_images: vec![LocalImageAttachment {
             placeholder: first_placeholder.to_string(),
             path: first_images[0].clone(),
         }],
-        text_elements: first_elements,
+        text_elements: first_elements.clone(),
         mention_paths: HashMap::new(),
+        model_override: None,
+        effort_override: None,
     });
-    chat.queued_user_messages.push_back(UserMessage {
-        text: second_text,
+    chat.queued_user_messages.push_back(QueuedUserMessage {
+        id: 2,
+        text: second_text.clone(),
         local_images: vec![LocalImageAttachment {
             placeholder: second_placeholder.to_string(),
             path: second_images[0].clone(),
         }],
-        text_elements: second_elements,
+        text_elements: second_elements.clone(),
         mention_paths: HashMap::new(),
+        model_override: None,
+        effort_override: None,
     });
     chat.refresh_queued_user_messages();
 
-    chat.bottom_pane
-        .set_composer_text(existing_text, existing_elements, existing_images.clone());
+    chat.bottom_pane.set_composer_text(
+        existing_text.clone(),
+        existing_elements.clone(),
+        existing_images.clone(),
+    );
 
-    // When interrupted, queued messages are merged into the composer; image placeholders
-    // must be renumbered to match the combined local image list.
+    // Interrupted turns now preserve queued messages for later and keep the draft unchanged.
     chat.handle_codex_event(Event {
         id: "interrupt".into(),
         msg: EventMsg::TurnAborted(codex_core::protocol::TurnAbortedEvent {
@@ -492,162 +500,24 @@ async fn interrupted_turn_restores_queued_messages_with_images_and_elements() {
         }),
     });
 
-    let first = "[Image #1] first".to_string();
-    let second = "[Image #2] second".to_string();
-    let third = "[Image #3] existing".to_string();
-    let expected_text = format!("{first}\n{second}\n{third}");
-    assert_eq!(chat.bottom_pane.composer_text(), expected_text);
-
-    let first_start = 0;
-    let second_start = first.len() + 1;
-    let third_start = second_start + second.len() + 1;
-    let expected_elements = vec![
-        TextElement::new(
-            (first_start..first_start + "[Image #1]".len()).into(),
-            Some("[Image #1]".to_string()),
-        ),
-        TextElement::new(
-            (second_start..second_start + "[Image #2]".len()).into(),
-            Some("[Image #2]".to_string()),
-        ),
-        TextElement::new(
-            (third_start..third_start + "[Image #3]".len()).into(),
-            Some("[Image #3]".to_string()),
-        ),
-    ];
-    assert_eq!(chat.bottom_pane.composer_text_elements(), expected_elements);
+    assert_eq!(chat.bottom_pane.composer_text(), existing_text);
+    assert_eq!(chat.bottom_pane.composer_text_elements(), existing_elements);
     assert_eq!(
         chat.bottom_pane.composer_local_image_paths(),
-        vec![
-            first_images[0].clone(),
-            second_images[0].clone(),
-            existing_images[0].clone(),
-        ]
+        existing_images
     );
-}
-
-#[tokio::test]
-async fn remap_placeholders_uses_attachment_labels() {
-    let placeholder_one = "[Image #1]";
-    let placeholder_two = "[Image #2]";
-    let text = format!("{placeholder_two} before {placeholder_one}");
-    let elements = vec![
-        TextElement::new(
-            (0..placeholder_two.len()).into(),
-            Some(placeholder_two.to_string()),
-        ),
-        TextElement::new(
-            ("[Image #2] before ".len().."[Image #2] before [Image #1]".len()).into(),
-            Some(placeholder_one.to_string()),
-        ),
-    ];
-
-    let attachments = vec![
-        LocalImageAttachment {
-            placeholder: placeholder_one.to_string(),
-            path: PathBuf::from("/tmp/one.png"),
-        },
-        LocalImageAttachment {
-            placeholder: placeholder_two.to_string(),
-            path: PathBuf::from("/tmp/two.png"),
-        },
-    ];
-    let message = UserMessage {
-        text,
-        text_elements: elements,
-        local_images: attachments,
-        mention_paths: HashMap::new(),
-    };
-    let mut next_label = 3usize;
-    let remapped = remap_placeholders_for_message(message, &mut next_label);
-
-    assert_eq!(remapped.text, "[Image #4] before [Image #3]");
+    assert_eq!(chat.queued_user_messages.len(), 2);
+    assert_eq!(chat.queued_user_messages[0].text, first_text);
+    assert_eq!(chat.queued_user_messages[0].text_elements, first_elements);
     assert_eq!(
-        remapped.text_elements,
-        vec![
-            TextElement::new(
-                (0.."[Image #4]".len()).into(),
-                Some("[Image #4]".to_string()),
-            ),
-            TextElement::new(
-                ("[Image #4] before ".len().."[Image #4] before [Image #3]".len()).into(),
-                Some("[Image #3]".to_string()),
-            ),
-        ]
+        chat.queued_user_messages[0].local_images[0].path,
+        first_images[0]
     );
+    assert_eq!(chat.queued_user_messages[1].text, second_text);
+    assert_eq!(chat.queued_user_messages[1].text_elements, second_elements);
     assert_eq!(
-        remapped.local_images,
-        vec![
-            LocalImageAttachment {
-                placeholder: "[Image #3]".to_string(),
-                path: PathBuf::from("/tmp/one.png"),
-            },
-            LocalImageAttachment {
-                placeholder: "[Image #4]".to_string(),
-                path: PathBuf::from("/tmp/two.png"),
-            },
-        ]
-    );
-}
-
-#[tokio::test]
-async fn remap_placeholders_uses_byte_ranges_when_placeholder_missing() {
-    let placeholder_one = "[Image #1]";
-    let placeholder_two = "[Image #2]";
-    let text = format!("{placeholder_two} before {placeholder_one}");
-    let elements = vec![
-        TextElement::new((0..placeholder_two.len()).into(), None),
-        TextElement::new(
-            ("[Image #2] before ".len().."[Image #2] before [Image #1]".len()).into(),
-            None,
-        ),
-    ];
-
-    let attachments = vec![
-        LocalImageAttachment {
-            placeholder: placeholder_one.to_string(),
-            path: PathBuf::from("/tmp/one.png"),
-        },
-        LocalImageAttachment {
-            placeholder: placeholder_two.to_string(),
-            path: PathBuf::from("/tmp/two.png"),
-        },
-    ];
-    let message = UserMessage {
-        text,
-        text_elements: elements,
-        local_images: attachments,
-        mention_paths: HashMap::new(),
-    };
-    let mut next_label = 3usize;
-    let remapped = remap_placeholders_for_message(message, &mut next_label);
-
-    assert_eq!(remapped.text, "[Image #4] before [Image #3]");
-    assert_eq!(
-        remapped.text_elements,
-        vec![
-            TextElement::new(
-                (0.."[Image #4]".len()).into(),
-                Some("[Image #4]".to_string()),
-            ),
-            TextElement::new(
-                ("[Image #4] before ".len().."[Image #4] before [Image #3]".len()).into(),
-                Some("[Image #3]".to_string()),
-            ),
-        ]
-    );
-    assert_eq!(
-        remapped.local_images,
-        vec![
-            LocalImageAttachment {
-                placeholder: "[Image #3]".to_string(),
-                path: PathBuf::from("/tmp/one.png"),
-            },
-            LocalImageAttachment {
-                placeholder: "[Image #4]".to_string(),
-                path: PathBuf::from("/tmp/two.png"),
-            },
-        ]
+        chat.queued_user_messages[1].local_images[0].path,
+        second_images[0]
     );
 }
 
@@ -947,6 +817,8 @@ async fn make_chatwidget_manual(
         frame_requester: FrameRequester::test_dummy(),
         show_welcome_banner: true,
         queued_user_messages: VecDeque::new(),
+        next_queued_user_message_id: 1,
+        queued_edit_state: None,
         suppress_session_configured_redraw: false,
         pending_notification: None,
         quit_shortcut_expires_at: None,
@@ -1801,6 +1673,18 @@ fn get_available_model(chat: &ChatWidget, model: &str) -> ModelPreset {
         .unwrap_or_else(|| panic!("{model} preset not found"))
 }
 
+fn queued_message(id: u64, text: impl Into<String>) -> QueuedUserMessage {
+    QueuedUserMessage {
+        id,
+        text: text.into(),
+        local_images: Vec::new(),
+        text_elements: Vec::new(),
+        mention_paths: HashMap::new(),
+        model_override: None,
+        effort_override: None,
+    }
+}
+
 #[tokio::test]
 async fn empty_enter_during_task_does_not_queue() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
@@ -1824,9 +1708,9 @@ async fn alt_up_edits_most_recent_queued_message() {
 
     // Seed two queued messages.
     chat.queued_user_messages
-        .push_back(UserMessage::from("first queued".to_string()));
+        .push_back(queued_message(1, "first queued"));
     chat.queued_user_messages
-        .push_back(UserMessage::from("second queued".to_string()));
+        .push_back(queued_message(2, "second queued"));
     chat.refresh_queued_user_messages();
 
     // Press Alt+Up to edit the most recent (last) queued message.
@@ -1837,12 +1721,17 @@ async fn alt_up_edits_most_recent_queued_message() {
         chat.bottom_pane.composer_text(),
         "second queued".to_string()
     );
-    // And the queue should now contain only the remaining (older) item.
-    assert_eq!(chat.queued_user_messages.len(), 1);
+    // And the queue should still contain both items (editing is in-place).
+    assert_eq!(chat.queued_user_messages.len(), 2);
     assert_eq!(
         chat.queued_user_messages.front().unwrap().text,
         "first queued"
     );
+    assert_eq!(
+        chat.queued_user_messages.back().unwrap().text,
+        "second queued"
+    );
+    assert_eq!(chat.queued_edit_state.as_ref().unwrap().selected_id, 2);
 }
 
 /// Pressing Up to recall the most recent history entry and immediately queuing
@@ -4061,7 +3950,7 @@ async fn approval_modal_patch_snapshot() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn interrupt_restores_queued_messages_into_composer() {
+async fn interrupt_keeps_queued_messages_in_queue() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(None).await;
 
     // Simulate a running task to enable queuing of user inputs.
@@ -4069,9 +3958,9 @@ async fn interrupt_restores_queued_messages_into_composer() {
 
     // Queue two user messages while the task is running.
     chat.queued_user_messages
-        .push_back(UserMessage::from("first queued".to_string()));
+        .push_back(queued_message(1, "first queued"));
     chat.queued_user_messages
-        .push_back(UserMessage::from("second queued".to_string()));
+        .push_back(queued_message(2, "second queued"));
     chat.refresh_queued_user_messages();
 
     // Deliver a TurnAborted event with Interrupted reason (as if Esc was pressed).
@@ -4082,14 +3971,9 @@ async fn interrupt_restores_queued_messages_into_composer() {
         }),
     });
 
-    // Composer should now contain the queued messages joined by newlines, in order.
-    assert_eq!(
-        chat.bottom_pane.composer_text(),
-        "first queued\nsecond queued"
-    );
-
-    // Queue should be cleared and no new user input should have been auto-submitted.
-    assert!(chat.queued_user_messages.is_empty());
+    // Composer should be unchanged; queued messages remain queued for later.
+    assert!(chat.bottom_pane.composer_text().is_empty());
+    assert_eq!(chat.queued_user_messages.len(), 2);
     assert!(
         op_rx.try_recv().is_err(),
         "unexpected outbound op after interrupt"
@@ -4100,7 +3984,7 @@ async fn interrupt_restores_queued_messages_into_composer() {
 }
 
 #[tokio::test]
-async fn interrupt_prepends_queued_messages_before_existing_composer_text() {
+async fn interrupt_does_not_modify_existing_composer_text() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(None).await;
 
     chat.bottom_pane.set_task_running(true);
@@ -4108,9 +3992,9 @@ async fn interrupt_prepends_queued_messages_before_existing_composer_text() {
         .set_composer_text("current draft".to_string(), Vec::new(), Vec::new());
 
     chat.queued_user_messages
-        .push_back(UserMessage::from("first queued".to_string()));
+        .push_back(queued_message(1, "first queued"));
     chat.queued_user_messages
-        .push_back(UserMessage::from("second queued".to_string()));
+        .push_back(queued_message(2, "second queued"));
     chat.refresh_queued_user_messages();
 
     chat.handle_codex_event(Event {
@@ -4120,11 +4004,8 @@ async fn interrupt_prepends_queued_messages_before_existing_composer_text() {
         }),
     });
 
-    assert_eq!(
-        chat.bottom_pane.composer_text(),
-        "first queued\nsecond queued\ncurrent draft"
-    );
-    assert!(chat.queued_user_messages.is_empty());
+    assert_eq!(chat.bottom_pane.composer_text(), "current draft");
+    assert_eq!(chat.queued_user_messages.len(), 2);
     assert!(
         op_rx.try_recv().is_err(),
         "unexpected outbound op after interrupt"
