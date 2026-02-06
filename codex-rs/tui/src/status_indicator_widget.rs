@@ -5,6 +5,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use codex_core::protocol::Op;
+use codex_protocol::openai_models::ReasoningEffort;
 use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -35,6 +36,8 @@ pub(crate) struct StatusIndicatorWidget {
     header: String,
     details: Option<String>,
     show_interrupt_hint: bool,
+    active_model: Option<String>,
+    active_reasoning_effort: Option<ReasoningEffort>,
 
     elapsed_running: Duration,
     last_resume_at: Instant,
@@ -71,6 +74,8 @@ impl StatusIndicatorWidget {
             header: String::from("Working"),
             details: None,
             show_interrupt_hint: true,
+            active_model: None,
+            active_reasoning_effort: None,
             elapsed_running: Duration::ZERO,
             last_resume_at: Instant::now(),
             is_paused: false,
@@ -109,6 +114,14 @@ impl StatusIndicatorWidget {
 
     pub(crate) fn set_interrupt_hint_visible(&mut self, visible: bool) {
         self.show_interrupt_hint = visible;
+    }
+
+    pub(crate) fn set_active_model(&mut self, model: Option<String>) {
+        self.active_model = model;
+    }
+
+    pub(crate) fn set_active_reasoning_effort(&mut self, effort: Option<ReasoningEffort>) {
+        self.active_reasoning_effort = effort;
     }
 
     #[cfg(test)]
@@ -207,7 +220,7 @@ impl Renderable for StatusIndicatorWidget {
         let elapsed_duration = self.elapsed_duration_at(now);
         let pretty_elapsed = fmt_elapsed_compact(elapsed_duration.as_secs());
 
-        let mut spans = Vec::with_capacity(5);
+        let mut spans = Vec::with_capacity(9);
         spans.push(spinner(Some(self.last_resume_at), self.animations_enabled));
         spans.push(" ".into());
         if self.animations_enabled {
@@ -215,7 +228,25 @@ impl Renderable for StatusIndicatorWidget {
         } else if !self.header.is_empty() {
             spans.push(self.header.clone().into());
         }
-        spans.push(" ".into());
+
+        if let Some(model) = self.active_model.as_deref()
+            && !model.trim().is_empty()
+        {
+            spans.push(" · ".dim());
+            spans.push(model.to_string().into());
+            if let Some(label) =
+                thinking_label_for(model, self.active_reasoning_effort).or_else(|| {
+                    (!model.starts_with("codex-auto-") && self.active_reasoning_effort.is_none())
+                        .then_some("default")
+                })
+            {
+                spans.push(format!(" (reasoning {label})").dim());
+            }
+            spans.push(" · ".dim());
+        } else {
+            spans.push(" ".into());
+        }
+
         if self.show_interrupt_hint {
             spans.extend(vec![
                 format!("({pretty_elapsed} • ").dim(),
@@ -236,6 +267,25 @@ impl Renderable for StatusIndicatorWidget {
         }
 
         Paragraph::new(Text::from(lines)).render_ref(area, buf);
+    }
+}
+
+fn thinking_label_for(model: &str, effort: Option<ReasoningEffort>) -> Option<&'static str> {
+    if model.starts_with("codex-auto-") {
+        return None;
+    }
+
+    effort.map(thinking_label)
+}
+
+fn thinking_label(effort: ReasoningEffort) -> &'static str {
+    match effort {
+        ReasoningEffort::Minimal => "minimal",
+        ReasoningEffort::Low => "low",
+        ReasoningEffort::Medium => "medium",
+        ReasoningEffort::High => "high",
+        ReasoningEffort::XHigh => "xhigh",
+        ReasoningEffort::None => "none",
     }
 }
 
@@ -335,6 +385,23 @@ mod tests {
         widget.resume_timer_at(baseline + Duration::from_secs(10));
         let after_resume = widget.elapsed_seconds_at(baseline + Duration::from_secs(13));
         assert_eq!(after_resume, before_pause + 3);
+    }
+
+    #[test]
+    fn thinking_label_hidden_for_auto_models() {
+        assert_eq!(
+            thinking_label_for("codex-auto-fast", Some(ReasoningEffort::High)),
+            None
+        );
+    }
+
+    #[test]
+    fn thinking_label_used_for_non_auto_models() {
+        assert_eq!(
+            thinking_label_for("gpt-5.2-codex", Some(ReasoningEffort::Medium)),
+            Some("medium")
+        );
+        assert_eq!(thinking_label_for("gpt-5.2-codex", None), None);
     }
 
     #[test]

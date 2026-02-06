@@ -540,6 +540,20 @@ impl BottomPane {
         }
     }
 
+    pub(crate) fn set_active_model(&mut self, model: Option<String>) {
+        if let Some(status) = self.status.as_mut() {
+            status.set_active_model(model);
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn set_active_reasoning_effort(&mut self, effort: Option<ReasoningEffort>) {
+        if let Some(status) = self.status.as_mut() {
+            status.set_active_reasoning_effort(effort);
+            self.request_redraw();
+        }
+    }
+
     /// Show the transient "press again to quit" hint for `key`.
     ///
     /// `ChatWidget` owns the quit shortcut state machine (it decides when quit is

@@ -751,6 +751,15 @@ impl ChatWidget {
     fn update_task_running_state(&mut self) {
         self.bottom_pane
             .set_task_running(self.agent_turn_running || self.mcp_startup_status.is_some());
+        if self.agent_turn_running {
+            self.bottom_pane
+                .set_active_model(self.running_turn_model.clone());
+            self.bottom_pane
+                .set_active_reasoning_effort(self.running_turn_reasoning_effort);
+        } else {
+            self.bottom_pane.set_active_model(None);
+            self.bottom_pane.set_active_reasoning_effort(None);
+        }
     }
 
     fn restore_reasoning_status_header(&mut self) {
