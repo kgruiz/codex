@@ -37,6 +37,9 @@ install:
     rustup show active-toolchain
     cargo fetch
 
+clean:
+    cargo clean
+
 # Install dev `codex` into ~/.cargo/bin (overwrites prior dev install) and
 # clean the Rust workspace afterwards to keep `target/` from growing.
 install-dev:
