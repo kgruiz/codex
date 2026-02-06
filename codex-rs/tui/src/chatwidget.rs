@@ -5797,7 +5797,7 @@ impl ChatWidget {
             .collect()
     }
 
-    fn model_shortcut_choices(presets: Vec<ModelPreset>) -> Vec<ModelPreset> {
+    fn model_shortcut_choices(current_model: &str, presets: Vec<ModelPreset>) -> Vec<ModelPreset> {
         let (mut auto_presets, other_presets): (Vec<ModelPreset>, Vec<ModelPreset>) =
             Self::picker_visible_model_presets(presets)
                 .into_iter()
@@ -5808,9 +5808,22 @@ impl ChatWidget {
             return other_presets;
         }
 
-        let mut choices = auto_presets;
-        choices.extend(other_presets);
-        choices
+        if auto_presets
+            .iter()
+            .any(|preset| preset.model.as_str() == current_model)
+        {
+            return auto_presets;
+        }
+
+        let current_preset = other_presets
+            .iter()
+            .find(|preset| preset.model.as_str() == current_model)
+            .cloned();
+        if let Some(current_preset) = current_preset {
+            auto_presets.insert(0, current_preset);
+        }
+
+        auto_presets
     }
 
     fn auto_model_order(model: &str) -> usize {
@@ -7177,7 +7190,7 @@ impl ChatWidget {
             }
         };
 
-        let choices = Self::model_shortcut_choices(presets);
+        let choices = Self::model_shortcut_choices(&current_model, presets);
 
         if choices.len() <= 1 {
             return;
