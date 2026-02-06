@@ -65,7 +65,7 @@
 - Details: status line shows currently running model; footer shows selected model; allow changing selected model during active runs without affecting the ongoing run
 
 ## 10. Update justfile with missing dev recipes
-- [ ]
+- [x]
 - Details: add sync (and full version), install-dev, id, install-dev-no-clean
 
 ## 11. Queue editing and queued message UI

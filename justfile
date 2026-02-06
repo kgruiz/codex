@@ -37,6 +37,18 @@ install:
     rustup show active-toolchain
     cargo fetch
 
+# Install dev `codex` into ~/.cargo/bin (overwrites prior dev install) and
+# clean the Rust workspace afterwards to keep `target/` from growing.
+install-dev:
+    cargo install --path cli --bin codex --locked --force
+    cargo clean
+
+alias id := install-dev
+
+# Install dev `codex` into ~/.cargo/bin without cleaning.
+install-dev-no-clean:
+    cargo install --path cli --bin codex --locked --force
+
 # Run `cargo nextest` since it's faster than `cargo test`, though including
 # --no-fail-fast is important to ensure all tests are run.
 #
@@ -71,6 +83,16 @@ write-config-schema:
 # Regenerate vendored app-server protocol schema artifacts.
 write-app-server-schema *args:
     cargo run -p codex-app-server-protocol --bin write_schema_fixtures -- "$@"
+
+# Sync local and origin main to upstream/main.
+sync-upstream-main:
+    git fetch upstream
+    git switch main
+    git branch --set-upstream-to=upstream/main
+    git reset --hard upstream/main
+    git push --force-with-lease origin main
+
+alias sync := sync-upstream-main
 
 # Tail logs from the state SQLite database
 log *args:
