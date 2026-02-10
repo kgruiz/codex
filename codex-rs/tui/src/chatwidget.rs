@@ -1029,7 +1029,12 @@ impl ChatWidget {
 
     fn on_thread_name_updated(&mut self, event: codex_core::protocol::ThreadNameUpdatedEvent) {
         if self.thread_id == Some(event.thread_id) {
-            self.thread_name = event.thread_name;
+            self.thread_name = event.thread_name.clone();
+            let message = match event.thread_name.as_deref() {
+                Some(title) => format!("Renamed chat to \"{title}\"."),
+                None => "Cleared chat title.".to_string(),
+            };
+            self.add_info_message(message, None);
             self.request_redraw();
         }
     }
@@ -3423,9 +3428,6 @@ impl ChatWidget {
                     self.add_error_message("Thread name cannot be empty.".to_string());
                     return;
                 };
-                let cell = Self::rename_confirmation_cell(&name, self.thread_id);
-                self.add_boxed_history(Box::new(cell));
-                self.request_redraw();
                 self.app_event_tx
                     .send(AppEvent::CodexOp(Op::SetThreadName { name }));
                 self.bottom_pane.drain_pending_submission_state();
@@ -3541,7 +3543,6 @@ impl ChatWidget {
         } else {
             "Name thread"
         };
-        let thread_id = self.thread_id;
         let view = CustomPromptView::new(
             title.to_string(),
             "Type a name and press Enter".to_string(),
@@ -3553,8 +3554,6 @@ impl ChatWidget {
                     )));
                     return;
                 };
-                let cell = Self::rename_confirmation_cell(&name, thread_id);
-                tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
                 tx.send(AppEvent::CodexOp(Op::SetThreadName { name }));
             }),
         );
@@ -7409,20 +7408,6 @@ impl ChatWidget {
     pub(crate) fn add_error_message(&mut self, message: String) {
         self.add_to_history(history_cell::new_error_event(message));
         self.request_redraw();
-    }
-
-    fn rename_confirmation_cell(name: &str, thread_id: Option<ThreadId>) -> PlainHistoryCell {
-        let resume_cmd = codex_core::util::resume_command(Some(name), thread_id)
-            .unwrap_or_else(|| format!("codex resume {name}"));
-        let name = name.to_string();
-        let line = vec![
-            "• ".into(),
-            "Thread renamed to ".into(),
-            name.cyan(),
-            ", to resume this thread run ".into(),
-            resume_cmd.cyan(),
-        ];
-        PlainHistoryCell::new(vec![line.into()])
     }
 
     pub(crate) fn add_mcp_output(&mut self) {
