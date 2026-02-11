@@ -1927,6 +1927,76 @@ async fn copy_last_output_shortcuts_show_notice_when_no_output_exists() {
 }
 
 #[tokio::test]
+async fn copy_code_block_shortcuts_show_notice_when_no_output_exists() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+
+    chat.handle_key_event(KeyEvent::new(
+        KeyCode::Char('b'),
+        KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
+    ));
+    chat.handle_key_event(KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE));
+
+    let cells = drain_insert_history(&mut rx);
+    let rendered = cells
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rendered.contains("No output to scan for code blocks."),
+        "expected no-output notice, got {rendered:?}"
+    );
+}
+
+#[tokio::test]
+async fn copy_code_block_shortcuts_show_notice_when_no_fenced_blocks_exist() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.last_assistant_output_markdown = Some("Plain paragraph only.".to_string());
+
+    chat.handle_key_event(KeyEvent::new(
+        KeyCode::Char('b'),
+        KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
+    ));
+
+    let cells = drain_insert_history(&mut rx);
+    let rendered = cells
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rendered.contains("No code blocks to copy."),
+        "expected no-code-block notice, got {rendered:?}"
+    );
+}
+
+#[test]
+fn extract_fenced_code_blocks_extracts_multiple_languages() {
+    let markdown = "before\n```rust\nfn main() {}\n```\nmid\n~~~python\nprint('hi')\n~~~\nafter";
+    let blocks = extract_fenced_code_blocks(markdown);
+    assert_eq!(
+        blocks,
+        vec![
+            FencedCodeBlock {
+                language: Some("rust".to_string()),
+                content: "fn main() {}".to_string(),
+            },
+            FencedCodeBlock {
+                language: Some("python".to_string()),
+                content: "print('hi')".to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn extract_fenced_code_blocks_ignores_unclosed_fence() {
+    let markdown = "```js\nconsole.log('hi')";
+    let blocks = extract_fenced_code_blocks(markdown);
+    assert!(blocks.is_empty());
+}
+
+#[tokio::test]
 async fn ctrl_c_cleared_prompt_is_recoverable_via_history() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(None).await;
 

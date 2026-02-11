@@ -10,6 +10,7 @@ pub(crate) struct Keybindings {
     pub(crate) paste: Vec<KeyBinding>,
     pub(crate) copy_prompt: Vec<KeyBinding>,
     pub(crate) copy_last_output: Vec<KeyBinding>,
+    pub(crate) copy_code_block: Vec<KeyBinding>,
     pub(crate) editor: EditorKeybindings,
 }
 
@@ -46,6 +47,11 @@ impl Keybindings {
                 keybindings,
                 "copy_last_output",
                 defaults.copy_last_output,
+            ),
+            copy_code_block: bindings_or_default(
+                keybindings,
+                "copy_code_block",
+                defaults.copy_code_block,
             ),
             editor: EditorKeybindings {
                 move_left: bindings_or_default(keybindings, "editor_move_left", Vec::new()),
@@ -121,6 +127,13 @@ impl Keybindings {
             KeyBinding::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
             KeyBinding::new(KeyCode::F(8), KeyModifiers::NONE),
         ];
+        let copy_code_block = vec![
+            KeyBinding::new(
+                KeyCode::Char('b'),
+                KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
+            ),
+            KeyBinding::new(KeyCode::F(6), KeyModifiers::NONE),
+        ];
 
         Self {
             submit,
@@ -128,6 +141,7 @@ impl Keybindings {
             paste,
             copy_prompt,
             copy_last_output,
+            copy_code_block,
             editor: EditorKeybindings {
                 move_left: Vec::new(),
                 move_right: Vec::new(),
@@ -267,6 +281,21 @@ mod tests {
             vec![
                 KeyBinding::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
                 KeyBinding::new(KeyCode::F(8), KeyModifiers::NONE),
+            ],
+        );
+    }
+
+    #[test]
+    fn defaults_include_copy_code_block_shortcuts() {
+        let bindings = Keybindings::from_config(&HashMap::new(), true, false);
+        assert_eq!(
+            bindings.copy_code_block,
+            vec![
+                KeyBinding::new(
+                    KeyCode::Char('b'),
+                    KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
+                ),
+                KeyBinding::new(KeyCode::F(6), KeyModifiers::NONE),
             ],
         );
     }

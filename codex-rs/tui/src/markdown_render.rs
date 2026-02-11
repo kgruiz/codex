@@ -29,6 +29,7 @@ struct MarkdownStyles {
     unordered_list_marker: Style,
     link: Style,
     blockquote: Style,
+    code_block_frame: Style,
 }
 
 impl Default for MarkdownStyles {
@@ -50,6 +51,7 @@ impl Default for MarkdownStyles {
             unordered_list_marker: Style::new(),
             link: Style::new().cyan().underlined(),
             blockquote: Style::new().green(),
+            code_block_frame: Style::new().dim(),
         }
     }
 }
@@ -99,6 +101,7 @@ where
     pending_marker_line: bool,
     in_paragraph: bool,
     in_code_block: bool,
+    in_fenced_code_block: bool,
     wrap_width: Option<usize>,
     current_line_content: Option<Line<'static>>,
     current_initial_indent: Vec<Span<'static>>,
@@ -124,6 +127,7 @@ where
             pending_marker_line: false,
             in_paragraph: false,
             in_code_block: false,
+            in_fenced_code_block: false,
             wrap_width,
             current_line_content: None,
             current_initial_indent: Vec::new(),
@@ -173,11 +177,12 @@ where
                     CodeBlockKind::Fenced(_) => None,
                     CodeBlockKind::Indented => Some(Span::from(" ".repeat(4))),
                 };
-                let lang = match kind {
-                    CodeBlockKind::Fenced(lang) => Some(lang.to_string()),
-                    CodeBlockKind::Indented => None,
-                };
-                self.start_codeblock(lang, indent)
+                match kind {
+                    CodeBlockKind::Fenced(lang) => {
+                        self.start_codeblock(Some(lang.to_string()), indent, true)
+                    }
+                    CodeBlockKind::Indented => self.start_codeblock(None, indent, false),
+                }
             }
             Tag::List(start) => self.start_list(start),
             Tag::Item => self.start_item(),
@@ -394,23 +399,46 @@ where
         self.needs_newline = false;
     }
 
-    fn start_codeblock(&mut self, _lang: Option<String>, indent: Option<Span<'static>>) {
+    fn start_codeblock(
+        &mut self,
+        lang: Option<String>,
+        indent: Option<Span<'static>>,
+        is_fenced: bool,
+    ) {
         self.flush_current_line();
         if !self.text.lines.is_empty() {
             self.push_blank_line();
         }
+
+        if is_fenced {
+            let heading = match lang.map(|s| s.trim().to_string()) {
+                Some(language) if !language.is_empty() => format!("╭ code: {language}"),
+                _ => "╭ code".to_string(),
+            };
+            let mut spans = self.prefix_spans(false);
+            spans.push(Span::styled(heading, self.styles.code_block_frame));
+            self.text.lines.push(Line::from(spans));
+        }
+
         self.in_code_block = true;
-        self.indent_stack.push(IndentContext::new(
-            vec![indent.unwrap_or_default()],
-            None,
-            false,
-        ));
+        self.in_fenced_code_block = is_fenced;
+        let mut prefix = Vec::new();
+        if let Some(indent) = indent {
+            prefix.push(indent);
+        }
+        if is_fenced {
+            prefix.push(Span::styled("│ ".to_string(), self.styles.code_block_frame));
+        }
+        self.indent_stack
+            .push(IndentContext::new(prefix, None, false));
         self.needs_newline = true;
     }
 
     fn end_codeblock(&mut self) {
+        self.flush_current_line();
         self.needs_newline = true;
         self.in_code_block = false;
+        self.in_fenced_code_block = false;
         self.indent_stack.pop();
     }
 
@@ -672,7 +700,10 @@ mod tests {
         let lines = lines_to_strings(&rendered);
         assert_eq!(
             lines,
-            vec!["fn main() { println!(\"hi from a long line\"); }".to_string(),]
+            vec![
+                "╭ code".to_string(),
+                "│ fn main() { println!(\"hi from a long line\"); }".to_string(),
+            ]
         );
     }
 }

@@ -2925,6 +2925,17 @@ impl ChatWidget {
                 self.copy_last_output_to_clipboard();
                 return;
             }
+            key_event
+                if key_event.kind == KeyEventKind::Press
+                    && self
+                        .keybindings
+                        .copy_code_block
+                        .iter()
+                        .any(|binding| binding.matches(&key_event)) =>
+            {
+                self.open_copy_code_block_picker();
+                return;
+            }
             other if other.kind == KeyEventKind::Press => {
                 self.bottom_pane.clear_quit_shortcut_hint();
                 self.quit_shortcut_expires_at = None;
@@ -4490,6 +4501,89 @@ impl ChatWidget {
             "Copied last output to clipboard.".to_string(),
             None,
         ));
+        self.request_redraw();
+    }
+
+    fn open_copy_code_block_picker(&mut self) {
+        if !self.bottom_pane.no_modal_or_popup_active() {
+            return;
+        }
+
+        let Some(markdown) = self
+            .last_assistant_output_markdown
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        else {
+            self.add_to_history(history_cell::new_info_event(
+                "No output to scan for code blocks.".to_string(),
+                None,
+            ));
+            self.request_redraw();
+            return;
+        };
+
+        let candidates = extract_fenced_code_blocks(markdown);
+        if candidates.is_empty() {
+            self.add_to_history(history_cell::new_info_event(
+                "No code blocks to copy.".to_string(),
+                None,
+            ));
+            self.request_redraw();
+            return;
+        }
+
+        let items = candidates
+            .into_iter()
+            .enumerate()
+            .map(|(idx, candidate)| {
+                let label = match candidate.language {
+                    Some(language) => format!("#{} · {}", idx + 1, language),
+                    None => format!("#{} · plain text", idx + 1),
+                };
+                let snippet = candidate
+                    .content
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or("")
+                    .trim();
+                let preview = if snippet.is_empty() {
+                    "(empty code block)".to_string()
+                } else {
+                    truncate_text(snippet, 80)
+                };
+                let content = candidate.content;
+                SelectionItem {
+                    name: label,
+                    description: Some(preview),
+                    actions: vec![Box::new(move |tx| {
+                        match copy_text_to_clipboard(&content) {
+                            Ok(()) => tx.send(AppEvent::InsertHistoryCell(Box::new(
+                                history_cell::new_info_event(
+                                    "Copied code block to clipboard.".to_string(),
+                                    None,
+                                ),
+                            ))),
+                            Err(err) => tx.send(AppEvent::InsertHistoryCell(Box::new(
+                                history_cell::new_error_event(format!(
+                                    "Failed to copy code block to clipboard: {err}",
+                                )),
+                            ))),
+                        };
+                    })],
+                    dismiss_on_select: true,
+                    ..Default::default()
+                }
+            })
+            .collect();
+
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some("Copy code block".to_string()),
+            subtitle: Some("Choose a block to copy.".to_string()),
+            footer_hint: Some(standard_popup_hint_line()),
+            items,
+            ..Default::default()
+        });
         self.request_redraw();
     }
 
@@ -8151,6 +8245,73 @@ const PLACEHOLDERS: [&str; 8] = [
     "Run /review on my current changes",
     "Use /skills to list available skills",
 ];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FencedCodeBlock {
+    language: Option<String>,
+    content: String,
+}
+
+fn extract_fenced_code_blocks(markdown: &str) -> Vec<FencedCodeBlock> {
+    #[derive(Debug)]
+    struct OpenFence {
+        fence_char: char,
+        fence_len: usize,
+        language: Option<String>,
+        content_lines: Vec<String>,
+    }
+
+    fn parse_fence(line: &str) -> Option<(char, usize, &str)> {
+        let trimmed = line.trim_start();
+        let fence_char = match trimmed.chars().next() {
+            Some('`') => '`',
+            Some('~') => '~',
+            _ => return None,
+        };
+        let fence_len = trimmed.chars().take_while(|ch| *ch == fence_char).count();
+        if fence_len < 3 {
+            return None;
+        }
+        Some((fence_char, fence_len, trimmed[fence_len..].trim()))
+    }
+
+    let mut blocks = Vec::new();
+    let mut open: Option<OpenFence> = None;
+
+    for line in markdown.lines() {
+        if let Some(state) = open.as_mut() {
+            let trimmed = line.trim_start();
+            let close_len = trimmed
+                .chars()
+                .take_while(|ch| *ch == state.fence_char)
+                .count();
+            if close_len >= state.fence_len && trimmed[close_len..].trim().is_empty() {
+                if let Some(state) = open.take() {
+                    blocks.push(FencedCodeBlock {
+                        language: state.language,
+                        content: state.content_lines.join("\n"),
+                    });
+                }
+                continue;
+            }
+            state.content_lines.push(line.to_string());
+            continue;
+        }
+
+        let Some((fence_char, fence_len, rest)) = parse_fence(line) else {
+            continue;
+        };
+        let language = rest.split_whitespace().next().map(ToString::to_string);
+        open = Some(OpenFence {
+            fence_char,
+            fence_len,
+            language,
+            content_lines: Vec::new(),
+        });
+    }
+
+    blocks
+}
 
 // Extract the first bold (Markdown) element in the form **...** from `s`.
 // Returns the inner text if found; otherwise `None`.
