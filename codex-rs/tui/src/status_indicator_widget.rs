@@ -6,6 +6,8 @@ use std::time::Instant;
 
 use codex_core::protocol::Op;
 use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::protocol::ProgressTraceCategory;
+use codex_protocol::protocol::ProgressTraceState;
 use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -38,6 +40,7 @@ pub(crate) struct StatusIndicatorWidget {
     show_interrupt_hint: bool,
     active_model: Option<String>,
     active_reasoning_effort: Option<ReasoningEffort>,
+    progress_trace: Vec<ProgressTraceCategory>,
 
     elapsed_running: Duration,
     last_resume_at: Instant,
@@ -76,6 +79,7 @@ impl StatusIndicatorWidget {
             show_interrupt_hint: true,
             active_model: None,
             active_reasoning_effort: None,
+            progress_trace: Vec::new(),
             elapsed_running: Duration::ZERO,
             last_resume_at: Instant::now(),
             is_paused: false,
@@ -122,6 +126,29 @@ impl StatusIndicatorWidget {
 
     pub(crate) fn set_active_reasoning_effort(&mut self, effort: Option<ReasoningEffort>) {
         self.active_reasoning_effort = effort;
+    }
+
+    pub(crate) fn record_progress_trace(
+        &mut self,
+        category: ProgressTraceCategory,
+        state: ProgressTraceState,
+        label: Option<String>,
+    ) {
+        if let ProgressTraceState::Started = state {
+            self.progress_trace.push(category);
+            const MAX_TRACE_SEGMENTS: usize = 96;
+            if self.progress_trace.len() > MAX_TRACE_SEGMENTS {
+                let remove_count = self.progress_trace.len() - MAX_TRACE_SEGMENTS;
+                self.progress_trace.drain(0..remove_count);
+            }
+        }
+        if label.is_some() {
+            self.update_details(label);
+        }
+    }
+
+    pub(crate) fn clear_progress_trace(&mut self) {
+        self.progress_trace.clear();
     }
 
     #[cfg(test)]
@@ -223,10 +250,19 @@ impl Renderable for StatusIndicatorWidget {
         let mut spans = Vec::with_capacity(9);
         spans.push(spinner(Some(self.last_resume_at), self.animations_enabled));
         spans.push(" ".into());
-        if self.animations_enabled {
-            spans.extend(shimmer_spans(&self.header));
-        } else if !self.header.is_empty() {
-            spans.push(self.header.clone().into());
+        if self.progress_trace.is_empty() {
+            if self.animations_enabled {
+                spans.extend(shimmer_spans(&self.header));
+            } else if !self.header.is_empty() {
+                spans.push(self.header.clone().into());
+            }
+        } else {
+            spans.push("[".dim());
+            let start = self.progress_trace.len().saturating_sub(20);
+            for category in &self.progress_trace[start..] {
+                spans.push(progress_trace_span(*category));
+            }
+            spans.push("]".dim());
         }
 
         if let Some(model) = self.active_model.as_deref()
@@ -286,6 +322,18 @@ fn thinking_label(effort: ReasoningEffort) -> &'static str {
         ReasoningEffort::High => "high",
         ReasoningEffort::XHigh => "xhigh",
         ReasoningEffort::None => "none",
+    }
+}
+
+fn progress_trace_span(category: ProgressTraceCategory) -> Span<'static> {
+    match category {
+        ProgressTraceCategory::Tool => "▮".cyan(),
+        ProgressTraceCategory::Edit => "▮".green(),
+        ProgressTraceCategory::Waiting => "▮".dim(),
+        ProgressTraceCategory::Network => "▮".magenta(),
+        ProgressTraceCategory::Prefill => "▮".cyan().dim(),
+        ProgressTraceCategory::Reasoning => "▮".magenta().dim(),
+        ProgressTraceCategory::Gen => "▮".green().bold(),
     }
 }
 

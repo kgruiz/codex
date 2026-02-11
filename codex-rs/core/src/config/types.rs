@@ -449,17 +449,13 @@ impl fmt::Display for NotificationMethod {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
+#[derive(Default)]
 pub enum DiffView {
+    #[default]
     Pretty,
     Line,
     Inline,
     SideBySide,
-}
-
-impl Default for DiffView {
-    fn default() -> Self {
-        Self::Pretty
-    }
 }
 
 /// Collection of settings that are specific to the TUI.

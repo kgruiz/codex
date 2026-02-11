@@ -867,6 +867,7 @@ pub enum EventMsg {
     PlanDelta(PlanDeltaEvent),
     ReasoningContentDelta(ReasoningContentDeltaEvent),
     ReasoningRawContentDelta(ReasoningRawContentDeltaEvent),
+    ProgressTrace(ProgressTraceEvent),
 
     /// Collab interaction: agent spawn begin.
     CollabAgentSpawnBegin(CollabAgentSpawnBeginEvent),
@@ -991,6 +992,44 @@ pub enum CodexErrorInfo {
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]
 pub struct RawResponseItemEvent {
     pub item: ResponseItem,
+}
+
+#[derive(
+    Debug, Clone, Copy, Deserialize, Serialize, Display, PartialEq, Eq, TS, JsonSchema, Hash,
+)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum ProgressTraceCategory {
+    Tool,
+    Edit,
+    Waiting,
+    Network,
+    Prefill,
+    Reasoning,
+    Gen,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, TS, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum ProgressTraceState {
+    Started,
+    Completed,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]
+pub struct ProgressTraceEvent {
+    pub thread_id: ThreadId,
+    pub turn_id: String,
+    pub category: ProgressTraceCategory,
+    pub state: ProgressTraceState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]

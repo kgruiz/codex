@@ -83,6 +83,7 @@ use codex_core::protocol::McpToolCallBeginEvent;
 use codex_core::protocol::McpToolCallEndEvent;
 use codex_core::protocol::Op;
 use codex_core::protocol::PatchApplyBeginEvent;
+use codex_core::protocol::ProgressTraceEvent;
 use codex_core::protocol::RateLimitSnapshot;
 use codex_core::protocol::ReviewRequest;
 use codex_core::protocol::ReviewTarget;
@@ -1230,6 +1231,7 @@ impl ChatWidget {
         self.update_task_running_state();
         self.retry_status_header = None;
         self.bottom_pane.set_interrupt_hint_visible(true);
+        self.bottom_pane.clear_progress_trace();
         self.set_status_header(String::from("Working"));
         self.full_reasoning_buffer.clear();
         self.reasoning_buffer.clear();
@@ -1273,6 +1275,7 @@ impl ChatWidget {
         self.running_turn_model = None;
         self.running_turn_reasoning_effort = None;
         self.update_task_running_state();
+        self.bottom_pane.clear_progress_trace();
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
         self.last_unified_wait = None;
@@ -1497,6 +1500,7 @@ impl ChatWidget {
         self.running_turn_model = None;
         self.running_turn_reasoning_effort = None;
         self.update_task_running_state();
+        self.bottom_pane.clear_progress_trace();
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
         self.last_unified_wait = None;
@@ -1662,6 +1666,11 @@ impl ChatWidget {
             |q| q.push_user_input(ev),
             |s| s.handle_request_user_input_now(ev2),
         );
+    }
+
+    fn on_progress_trace(&mut self, ev: ProgressTraceEvent) {
+        self.bottom_pane
+            .record_progress_trace(ev.category, ev.state, ev.label);
     }
 
     fn on_exec_command_begin(&mut self, ev: ExecCommandBeginEvent) {
@@ -4209,6 +4218,7 @@ impl ChatWidget {
             EventMsg::RequestUserInput(ev) => {
                 self.on_request_user_input(ev);
             }
+            EventMsg::ProgressTrace(ev) => self.on_progress_trace(ev),
             EventMsg::ExecCommandBegin(ev) => self.on_exec_command_begin(ev),
             EventMsg::TerminalInteraction(delta) => self.on_terminal_interaction(delta),
             EventMsg::ExecCommandOutputDelta(delta) => self.on_exec_command_output_delta(delta),

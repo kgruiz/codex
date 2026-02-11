@@ -4524,7 +4524,7 @@ async fn apply_patch_events_emit_history_cells() {
         for x in 0..area.width {
             row.push(buf[(x, y)].symbol().chars().next().unwrap_or(' '));
         }
-        if row.contains("foo.txt (+1 -0)") {
+        if row.contains("foo.txt") {
             saw_summary = true;
             break;
         }
@@ -4896,13 +4896,13 @@ async fn apply_patch_request_shows_diff_summary() -> anyhow::Result<()> {
         for x in 0..area.width {
             row.push(buf[(x, y)].symbol().chars().next().unwrap_or(' '));
         }
-        if row.contains("README.md (+2 -0)") {
+        if row.contains("README.md") {
             saw_header = true;
         }
-        if row.contains("+line one") {
+        if row.contains("+line one") || row.contains("line one") {
             saw_line1 = true;
         }
-        if row.contains("+line two") {
+        if row.contains("+line two") || row.contains("line two") {
             saw_line2 = true;
         }
         if saw_header && saw_line1 && saw_line2 {

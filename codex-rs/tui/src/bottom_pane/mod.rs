@@ -32,6 +32,8 @@ use codex_core::features::Features;
 use codex_core::skills::model::SkillMetadata;
 use codex_file_search::FileMatch;
 use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::protocol::ProgressTraceCategory;
+use codex_protocol::protocol::ProgressTraceState;
 use codex_protocol::request_user_input::RequestUserInputEvent;
 use codex_protocol::user_input::TextElement;
 use crossterm::event::KeyCode;
@@ -156,6 +158,7 @@ pub(crate) struct BottomPane {
 
     /// Inline status indicator shown above the composer while a task is running.
     status: Option<StatusIndicatorWidget>,
+    progress_trace_backlog: Vec<(ProgressTraceCategory, ProgressTraceState, Option<String>)>,
     /// Unified exec session summary shown above the composer.
     unified_exec_footer: UnifiedExecFooter,
     /// Queued user messages to show above the composer while a turn is running.
@@ -206,6 +209,7 @@ impl BottomPane {
             disable_paste_burst,
             is_task_running: false,
             status: None,
+            progress_trace_backlog: Vec::new(),
             unified_exec_footer: UnifiedExecFooter::new(),
             queued_user_messages: QueuedUserMessages::new(),
             esc_backtrack_hint: false,
@@ -554,6 +558,32 @@ impl BottomPane {
         }
     }
 
+    pub(crate) fn record_progress_trace(
+        &mut self,
+        category: ProgressTraceCategory,
+        state: ProgressTraceState,
+        label: Option<String>,
+    ) {
+        if let Some(status) = self.status.as_mut() {
+            status.record_progress_trace(category, state, label.clone());
+            self.request_redraw();
+        }
+        self.progress_trace_backlog.push((category, state, label));
+        const MAX_PROGRESS_TRACE_BACKLOG: usize = 128;
+        if self.progress_trace_backlog.len() > MAX_PROGRESS_TRACE_BACKLOG {
+            let remove_count = self.progress_trace_backlog.len() - MAX_PROGRESS_TRACE_BACKLOG;
+            self.progress_trace_backlog.drain(0..remove_count);
+        }
+    }
+
+    pub(crate) fn clear_progress_trace(&mut self) {
+        self.progress_trace_backlog.clear();
+        if let Some(status) = self.status.as_mut() {
+            status.clear_progress_trace();
+            self.request_redraw();
+        }
+    }
+
     /// Show the transient "press again to quit" hint for `key`.
     ///
     /// `ChatWidget` owns the quit shortcut state machine (it decides when quit is
@@ -630,6 +660,11 @@ impl BottomPane {
                         self.frame_requester.clone(),
                         self.animations_enabled,
                     ));
+                    if let Some(status) = self.status.as_mut() {
+                        for (category, state, label) in &self.progress_trace_backlog {
+                            status.record_progress_trace(*category, *state, label.clone());
+                        }
+                    }
                 }
                 if let Some(status) = self.status.as_mut() {
                     status.set_interrupt_hint_visible(true);
@@ -678,6 +713,11 @@ impl BottomPane {
                 self.frame_requester.clone(),
                 self.animations_enabled,
             ));
+            if let Some(status) = self.status.as_mut() {
+                for (category, state, label) in &self.progress_trace_backlog {
+                    status.record_progress_trace(*category, *state, label.clone());
+                }
+            }
             self.request_redraw();
         }
     }

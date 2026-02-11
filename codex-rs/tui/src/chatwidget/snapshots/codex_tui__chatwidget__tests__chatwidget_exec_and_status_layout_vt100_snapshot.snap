@@ -2,33 +2,6 @@
 source: tui/src/chatwidget/tests.rs
 expression: term.backend().vt100().screen().contents()
 ---
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 • I’m going to search the repo for where “Change Approved” is rendered to update
   that view.
 
@@ -36,9 +9,9 @@ expression: term.backend().vt100().screen().contents()
   └ Search Change Approved
     Read diff_render.rs
 
-• Investigating rendering code (0s • esc to interrupt)
+• Investigating rendering code · gpt-5.2-codex (reasoning default) · (0s • esc t
 
 
 › Summarize recent commits
 
-  tab to queue message                                       100% context left
+  gpt-5.2-codex default · 100% left · ~/Developer/Projects/codex/codex-rs/tui

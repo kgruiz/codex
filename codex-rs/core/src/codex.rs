@@ -59,6 +59,9 @@ use codex_protocol::protocol::FileChange;
 use codex_protocol::protocol::HasLegacyEvent;
 use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ItemStartedEvent;
+use codex_protocol::protocol::ProgressTraceCategory;
+use codex_protocol::protocol::ProgressTraceEvent;
+use codex_protocol::protocol::ProgressTraceState;
 use codex_protocol::protocol::RawResponseItemEvent;
 use codex_protocol::protocol::ReviewRequest;
 use codex_protocol::protocol::RolloutItem;
@@ -1685,6 +1688,28 @@ impl Session {
         .await;
     }
 
+    pub(crate) async fn emit_progress_trace(
+        &self,
+        turn_context: &TurnContext,
+        category: ProgressTraceCategory,
+        state: ProgressTraceState,
+        label: Option<String>,
+        source: Option<&str>,
+    ) {
+        self.send_event(
+            turn_context,
+            EventMsg::ProgressTrace(ProgressTraceEvent {
+                thread_id: self.conversation_id,
+                turn_id: turn_context.sub_id.clone(),
+                category,
+                state,
+                label,
+                source: source.map(str::to_string),
+            }),
+        )
+        .await;
+    }
+
     /// Adds an execpolicy amendment to both the in-memory and on-disk policies so future
     /// commands can use the newly approved prefix.
     pub(crate) async fn persist_execpolicy_amendment(
@@ -1874,8 +1899,25 @@ impl Session {
             turn_id: turn_context.sub_id.clone(),
             questions: args.questions,
         });
+        self.emit_progress_trace(
+            turn_context,
+            ProgressTraceCategory::Waiting,
+            ProgressTraceState::Started,
+            Some("Waiting for user input".to_string()),
+            Some("request_user_input"),
+        )
+        .await;
         self.send_event(turn_context, event).await;
-        rx_response.await.ok()
+        let response = rx_response.await.ok();
+        self.emit_progress_trace(
+            turn_context,
+            ProgressTraceCategory::Waiting,
+            ProgressTraceState::Completed,
+            None,
+            Some("request_user_input"),
+        )
+        .await;
+        response
     }
 
     pub async fn notify_user_input_response(
@@ -4219,6 +4261,136 @@ impl PlanModeStreamState {
     }
 }
 
+#[derive(Default)]
+struct ProgressTraceStreamState {
+    saw_work_category: bool,
+    pending_prefill: bool,
+    prefill_open: bool,
+    reasoning_open: bool,
+    gen_open: bool,
+}
+
+impl ProgressTraceStreamState {
+    async fn mark_work_seen(&mut self, sess: &Session, turn_context: &TurnContext) {
+        if self.saw_work_category {
+            return;
+        }
+        self.saw_work_category = true;
+        if self.pending_prefill && !self.prefill_open {
+            sess.emit_progress_trace(
+                turn_context,
+                ProgressTraceCategory::Prefill,
+                ProgressTraceState::Started,
+                None,
+                Some("stream"),
+            )
+            .await;
+            self.prefill_open = true;
+        }
+    }
+
+    async fn on_text_delta(&mut self, sess: &Session, turn_context: &TurnContext) {
+        if self.saw_work_category {
+            if !self.gen_open {
+                sess.emit_progress_trace(
+                    turn_context,
+                    ProgressTraceCategory::Gen,
+                    ProgressTraceState::Started,
+                    None,
+                    Some("stream"),
+                )
+                .await;
+                self.gen_open = true;
+            }
+            return;
+        }
+        self.pending_prefill = true;
+    }
+
+    async fn on_reasoning_delta(&mut self, sess: &Session, turn_context: &TurnContext) {
+        if !self.reasoning_open {
+            sess.emit_progress_trace(
+                turn_context,
+                ProgressTraceCategory::Reasoning,
+                ProgressTraceState::Started,
+                None,
+                Some("stream"),
+            )
+            .await;
+            self.reasoning_open = true;
+        }
+    }
+
+    async fn on_reasoning_section_break(&mut self, sess: &Session, turn_context: &TurnContext) {
+        if self.reasoning_open {
+            sess.emit_progress_trace(
+                turn_context,
+                ProgressTraceCategory::Reasoning,
+                ProgressTraceState::Completed,
+                None,
+                Some("stream"),
+            )
+            .await;
+            self.reasoning_open = false;
+        }
+    }
+
+    async fn finalize(&mut self, sess: &Session, turn_context: &TurnContext) {
+        if self.reasoning_open {
+            sess.emit_progress_trace(
+                turn_context,
+                ProgressTraceCategory::Reasoning,
+                ProgressTraceState::Completed,
+                None,
+                Some("stream"),
+            )
+            .await;
+            self.reasoning_open = false;
+        }
+        if self.prefill_open {
+            sess.emit_progress_trace(
+                turn_context,
+                ProgressTraceCategory::Prefill,
+                ProgressTraceState::Completed,
+                None,
+                Some("stream"),
+            )
+            .await;
+            self.prefill_open = false;
+        }
+        if self.gen_open {
+            sess.emit_progress_trace(
+                turn_context,
+                ProgressTraceCategory::Gen,
+                ProgressTraceState::Completed,
+                None,
+                Some("stream"),
+            )
+            .await;
+            self.gen_open = false;
+        } else if self.pending_prefill && !self.saw_work_category {
+            // Conversational turns with no work are categorized as generation.
+            sess.emit_progress_trace(
+                turn_context,
+                ProgressTraceCategory::Gen,
+                ProgressTraceState::Started,
+                None,
+                Some("stream"),
+            )
+            .await;
+            sess.emit_progress_trace(
+                turn_context,
+                ProgressTraceCategory::Gen,
+                ProgressTraceState::Completed,
+                None,
+                Some("stream"),
+            )
+            .await;
+        }
+        self.pending_prefill = false;
+    }
+}
+
 impl ProposedPlanItemState {
     fn new(turn_id: &str) -> Self {
         Self {
@@ -4618,6 +4790,7 @@ async fn try_run_sampling_request(
     let mut should_emit_turn_diff = false;
     let plan_mode = turn_context.collaboration_mode.mode == ModeKind::Plan;
     let mut plan_mode_state = plan_mode.then(|| PlanModeStreamState::new(&turn_context.sub_id));
+    let mut progress_trace_state = ProgressTraceStreamState::default();
     let receiving_span = trace_span!("receiving_stream");
     let outcome: CodexResult<SamplingRequestResult> = loop {
         let handle_responses = trace_span!(
@@ -4656,6 +4829,19 @@ async fn try_run_sampling_request(
             ResponseEvent::Created => {}
             ResponseEvent::OutputItemDone(item) => {
                 let previously_active_item = active_item.take();
+                if matches!(previously_active_item, Some(TurnItem::WebSearch(_))) {
+                    progress_trace_state
+                        .mark_work_seen(&sess, &turn_context)
+                        .await;
+                    sess.emit_progress_trace(
+                        &turn_context,
+                        ProgressTraceCategory::Network,
+                        ProgressTraceState::Completed,
+                        None,
+                        Some("web_search"),
+                    )
+                    .await;
+                }
                 if let Some(state) = plan_mode_state.as_mut() {
                     if let Some(previous) = previously_active_item.as_ref() {
                         let item_id = previous.id();
@@ -4694,6 +4880,9 @@ async fn try_run_sampling_request(
                     .instrument(handle_responses)
                     .await?;
                 if let Some(tool_future) = output_result.tool_future {
+                    progress_trace_state
+                        .mark_work_seen(&sess, &turn_context)
+                        .await;
                     in_flight.push_back(tool_future);
                 }
                 if let Some(agent_message) = output_result.last_agent_message {
@@ -4703,6 +4892,19 @@ async fn try_run_sampling_request(
             }
             ResponseEvent::OutputItemAdded(item) => {
                 if let Some(turn_item) = handle_non_tool_response_item(&item, plan_mode).await {
+                    if matches!(turn_item, TurnItem::WebSearch(_)) {
+                        progress_trace_state
+                            .mark_work_seen(&sess, &turn_context)
+                            .await;
+                        sess.emit_progress_trace(
+                            &turn_context,
+                            ProgressTraceCategory::Network,
+                            ProgressTraceState::Started,
+                            None,
+                            Some("web_search"),
+                        )
+                        .await;
+                    }
                     if let Some(state) = plan_mode_state.as_mut()
                         && matches!(turn_item, TurnItem::AgentMessage(_))
                     {
@@ -4736,6 +4938,7 @@ async fn try_run_sampling_request(
                 response_id: _,
                 token_usage,
             } => {
+                progress_trace_state.finalize(&sess, &turn_context).await;
                 if let Some(state) = plan_mode_state.as_mut() {
                     flush_proposed_plan_segments_all(&sess, &turn_context, state).await;
                 }
@@ -4751,6 +4954,9 @@ async fn try_run_sampling_request(
                 });
             }
             ResponseEvent::OutputTextDelta(delta) => {
+                progress_trace_state
+                    .on_text_delta(&sess, &turn_context)
+                    .await;
                 // In review child threads, suppress assistant text deltas; the
                 // UI will show a selection popup from the final ReviewOutput.
                 if let Some(active) = active_item.as_ref() {
@@ -4781,6 +4987,9 @@ async fn try_run_sampling_request(
                 delta,
                 summary_index,
             } => {
+                progress_trace_state
+                    .on_reasoning_delta(&sess, &turn_context)
+                    .await;
                 if let Some(active) = active_item.as_ref() {
                     let event = ReasoningContentDeltaEvent {
                         thread_id: sess.conversation_id.to_string(),
@@ -4796,6 +5005,9 @@ async fn try_run_sampling_request(
                 }
             }
             ResponseEvent::ReasoningSummaryPartAdded { summary_index } => {
+                progress_trace_state
+                    .on_reasoning_section_break(&sess, &turn_context)
+                    .await;
                 if let Some(active) = active_item.as_ref() {
                     let event =
                         EventMsg::AgentReasoningSectionBreak(AgentReasoningSectionBreakEvent {
@@ -4811,6 +5023,9 @@ async fn try_run_sampling_request(
                 delta,
                 content_index,
             } => {
+                progress_trace_state
+                    .on_reasoning_delta(&sess, &turn_context)
+                    .await;
                 if let Some(active) = active_item.as_ref() {
                     let event = ReasoningRawContentDeltaEvent {
                         thread_id: sess.conversation_id.to_string(),
@@ -4828,6 +5043,7 @@ async fn try_run_sampling_request(
         }
     };
 
+    progress_trace_state.finalize(&sess, &turn_context).await;
     drain_in_flight(&mut in_flight, sess.clone(), turn_context.clone()).await?;
 
     if should_emit_turn_diff {
