@@ -14,6 +14,8 @@ use crate::config::types::OneOrManyStrings;
 use crate::config::types::OtelConfig;
 use crate::config::types::OtelConfigToml;
 use crate::config::types::OtelExporterKind;
+use crate::config::types::ProgressLegendMode;
+use crate::config::types::ProgressTraceStyleConfig;
 use crate::config::types::SandboxWorkspaceWrite;
 use crate::config::types::ShellEnvironmentPolicy;
 use crate::config::types::ShellEnvironmentPolicyToml;
@@ -231,6 +233,12 @@ pub struct Config {
 
     /// Ordered list of status line item identifiers for the TUI.
     pub tui_status_line: Option<Vec<String>>,
+
+    /// Controls when the progress timeline legend is shown in the status indicator.
+    pub tui_progress_legend_mode: ProgressLegendMode,
+
+    /// Optional category-level style overrides for progress timeline bars.
+    pub tui_progress_trace_style: Option<ProgressTraceStyleConfig>,
 
     /// Default diff format shown in the TUI.
     pub diff_view: DiffView,
@@ -1733,6 +1741,15 @@ impl Config {
                 .map(|t| t.alternate_screen)
                 .unwrap_or_default(),
             tui_status_line: cfg.tui.as_ref().and_then(|t| t.status_line.clone()),
+            tui_progress_legend_mode: cfg
+                .tui
+                .as_ref()
+                .map(|t| t.progress_legend_mode)
+                .unwrap_or_default(),
+            tui_progress_trace_style: cfg
+                .tui
+                .as_ref()
+                .and_then(|t| t.progress_trace_style.clone()),
             diff_view: cfg.tui.as_ref().map(|t| t.diff_view).unwrap_or_default(),
             otel: {
                 let t: OtelConfigToml = cfg.otel.unwrap_or_default();
@@ -1970,6 +1987,9 @@ persistence = "none"
                 experimental_mode: None,
                 alternate_screen: AltScreenMode::Auto,
                 status_line: None,
+                progress_legend_mode: ProgressLegendMode::Off,
+                progress_trace_style: None,
+                diff_view: DiffView::Pretty,
             }
         );
     }
@@ -3916,11 +3936,14 @@ model_verbosity = "high"
                 tui_notification_method: Default::default(),
                 animations: true,
                 show_tooltips: true,
+                keybindings: HashMap::new(),
                 experimental_mode: None,
                 analytics_enabled: Some(true),
                 feedback_enabled: true,
                 tui_alternate_screen: AltScreenMode::Auto,
                 tui_status_line: None,
+                tui_progress_legend_mode: ProgressLegendMode::Off,
+                tui_progress_trace_style: None,
                 diff_view: DiffView::Pretty,
                 otel: OtelConfig::default(),
             },
@@ -4004,11 +4027,14 @@ model_verbosity = "high"
             tui_notification_method: Default::default(),
             animations: true,
             show_tooltips: true,
+            keybindings: HashMap::new(),
             experimental_mode: None,
             analytics_enabled: Some(true),
             feedback_enabled: true,
             tui_alternate_screen: AltScreenMode::Auto,
             tui_status_line: None,
+            tui_progress_legend_mode: ProgressLegendMode::Off,
+            tui_progress_trace_style: None,
             diff_view: DiffView::Pretty,
             otel: OtelConfig::default(),
         };
@@ -4107,11 +4133,14 @@ model_verbosity = "high"
             tui_notification_method: Default::default(),
             animations: true,
             show_tooltips: true,
+            keybindings: HashMap::new(),
             experimental_mode: None,
             analytics_enabled: Some(false),
             feedback_enabled: true,
             tui_alternate_screen: AltScreenMode::Auto,
             tui_status_line: None,
+            tui_progress_legend_mode: ProgressLegendMode::Off,
+            tui_progress_trace_style: None,
             diff_view: DiffView::Pretty,
             otel: OtelConfig::default(),
         };
@@ -4196,11 +4225,14 @@ model_verbosity = "high"
             tui_notification_method: Default::default(),
             animations: true,
             show_tooltips: true,
+            keybindings: HashMap::new(),
             experimental_mode: None,
             analytics_enabled: Some(true),
             feedback_enabled: true,
             tui_alternate_screen: AltScreenMode::Auto,
             tui_status_line: None,
+            tui_progress_legend_mode: ProgressLegendMode::Off,
+            tui_progress_trace_style: None,
             diff_view: DiffView::Pretty,
             otel: OtelConfig::default(),
         };

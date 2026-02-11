@@ -751,6 +751,8 @@ async fn make_chatwidget_manual(
         placeholder_text: "Ask Codex to do anything".to_string(),
         disable_paste_burst: false,
         animations_enabled: cfg.animations,
+        progress_legend_mode: codex_core::config::types::ProgressLegendMode::Off,
+        progress_trace_styles: crate::progress_trace_style::ProgressTraceStyles::default(),
         skills: None,
     });
     bottom.set_keybindings(keybindings.clone());
@@ -829,6 +831,10 @@ async fn make_chatwidget_manual(
         pre_review_token_info: None,
         needs_final_message_separator: false,
         had_work_activity: false,
+        turn_progress_trace: Vec::new(),
+        pending_separator_progress_trace: None,
+        progress_legend_mode: codex_core::config::types::ProgressLegendMode::Off,
+        progress_trace_styles: crate::progress_trace_style::ProgressTraceStyles::default(),
         saw_plan_update_this_turn: false,
         saw_plan_item_this_turn: false,
         plan_delta_buffer: String::new(),

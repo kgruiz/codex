@@ -2423,6 +2423,28 @@ impl App {
             AppEvent::StatusLineSetupCancelled => {
                 self.chat_widget.cancel_status_line_setup();
             }
+            AppEvent::SetProgressLegendMode { mode } => {
+                let edit = codex_core::config::edit::progress_legend_mode_edit(mode);
+                let apply_result = ConfigEditsBuilder::new(&self.config.codex_home)
+                    .with_edits([edit])
+                    .apply()
+                    .await;
+                match apply_result {
+                    Ok(()) => {
+                        self.config.tui_progress_legend_mode = mode;
+                        self.chat_widget.set_progress_legend_mode(mode);
+                    }
+                    Err(err) => {
+                        tracing::error!(
+                            error = %err,
+                            "failed to persist progress legend mode; keeping previous selection"
+                        );
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to save progress legend mode: {err}"
+                        ));
+                    }
+                }
+            }
         }
         Ok(AppRunControl::Continue)
     }

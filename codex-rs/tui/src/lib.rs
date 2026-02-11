@@ -89,6 +89,7 @@ mod notifications;
 pub mod onboarding;
 mod oss_selection;
 mod pager_overlay;
+mod progress_trace_style;
 pub mod public_widgets;
 mod render;
 mod resume_picker;

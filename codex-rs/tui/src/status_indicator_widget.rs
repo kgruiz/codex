@@ -4,6 +4,7 @@
 use std::time::Duration;
 use std::time::Instant;
 
+use codex_core::config::types::ProgressLegendMode;
 use codex_core::protocol::Op;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::ProgressTraceCategory;
@@ -23,6 +24,9 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::exec_cell::spinner;
 use crate::key_hint;
+use crate::progress_trace_style::ProgressTraceStyles;
+use crate::progress_trace_style::progress_trace_category_label;
+use crate::progress_trace_style::progress_trace_span;
 use crate::render::renderable::Renderable;
 use crate::shimmer::shimmer_spans;
 use crate::text_formatting::capitalize_first;
@@ -41,6 +45,9 @@ pub(crate) struct StatusIndicatorWidget {
     active_model: Option<String>,
     active_reasoning_effort: Option<ReasoningEffort>,
     progress_trace: Vec<ProgressTraceCategory>,
+    legend_mode: ProgressLegendMode,
+    progress_trace_styles: ProgressTraceStyles,
+    task_running: bool,
 
     elapsed_running: Duration,
     last_resume_at: Instant,
@@ -72,6 +79,8 @@ impl StatusIndicatorWidget {
         app_event_tx: AppEventSender,
         frame_requester: FrameRequester,
         animations_enabled: bool,
+        legend_mode: ProgressLegendMode,
+        progress_trace_styles: ProgressTraceStyles,
     ) -> Self {
         Self {
             header: String::from("Working"),
@@ -80,6 +89,9 @@ impl StatusIndicatorWidget {
             active_model: None,
             active_reasoning_effort: None,
             progress_trace: Vec::new(),
+            legend_mode,
+            progress_trace_styles,
+            task_running: false,
             elapsed_running: Duration::ZERO,
             last_resume_at: Instant::now(),
             is_paused: false,
@@ -126,6 +138,14 @@ impl StatusIndicatorWidget {
 
     pub(crate) fn set_active_reasoning_effort(&mut self, effort: Option<ReasoningEffort>) {
         self.active_reasoning_effort = effort;
+    }
+
+    pub(crate) fn set_legend_mode(&mut self, mode: ProgressLegendMode) {
+        self.legend_mode = mode;
+    }
+
+    pub(crate) fn set_task_running(&mut self, running: bool) {
+        self.task_running = running;
     }
 
     pub(crate) fn record_progress_trace(
@@ -260,9 +280,28 @@ impl Renderable for StatusIndicatorWidget {
             spans.push("[".dim());
             let start = self.progress_trace.len().saturating_sub(20);
             for category in &self.progress_trace[start..] {
-                spans.push(progress_trace_span(*category));
+                spans.push(progress_trace_span(*category, &self.progress_trace_styles));
             }
             spans.push("]".dim());
+
+            if self.should_show_legend() {
+                spans.push(" ".into());
+                spans.push("(".dim());
+                for category in [
+                    ProgressTraceCategory::Tool,
+                    ProgressTraceCategory::Edit,
+                    ProgressTraceCategory::Waiting,
+                    ProgressTraceCategory::Network,
+                    ProgressTraceCategory::Prefill,
+                    ProgressTraceCategory::Reasoning,
+                    ProgressTraceCategory::Gen,
+                ] {
+                    spans.push(progress_trace_span(category, &self.progress_trace_styles));
+                    spans.push(format!(" {}", progress_trace_category_label(category)).dim());
+                    spans.push(" ".dim());
+                }
+                spans.push(")".dim());
+            }
         }
 
         if let Some(model) = self.active_model.as_deref()
@@ -306,6 +345,16 @@ impl Renderable for StatusIndicatorWidget {
     }
 }
 
+impl StatusIndicatorWidget {
+    fn should_show_legend(&self) -> bool {
+        match self.legend_mode {
+            ProgressLegendMode::Off => false,
+            ProgressLegendMode::Auto => self.task_running,
+            ProgressLegendMode::Always => true,
+        }
+    }
+}
+
 fn thinking_label_for(model: &str, effort: Option<ReasoningEffort>) -> Option<&'static str> {
     if model.starts_with("codex-auto-") {
         return None;
@@ -322,18 +371,6 @@ fn thinking_label(effort: ReasoningEffort) -> &'static str {
         ReasoningEffort::High => "high",
         ReasoningEffort::XHigh => "xhigh",
         ReasoningEffort::None => "none",
-    }
-}
-
-fn progress_trace_span(category: ProgressTraceCategory) -> Span<'static> {
-    match category {
-        ProgressTraceCategory::Tool => "▮".cyan(),
-        ProgressTraceCategory::Edit => "▮".green(),
-        ProgressTraceCategory::Waiting => "▮".dim(),
-        ProgressTraceCategory::Network => "▮".magenta(),
-        ProgressTraceCategory::Prefill => "▮".cyan().dim(),
-        ProgressTraceCategory::Reasoning => "▮".magenta().dim(),
-        ProgressTraceCategory::Gen => "▮".green().bold(),
     }
 }
 
@@ -368,7 +405,13 @@ mod tests {
     fn renders_with_working_header() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
-        let w = StatusIndicatorWidget::new(tx, crate::tui::FrameRequester::test_dummy(), true);
+        let w = StatusIndicatorWidget::new(
+            tx,
+            crate::tui::FrameRequester::test_dummy(),
+            true,
+            ProgressLegendMode::Off,
+            ProgressTraceStyles::default(),
+        );
 
         // Render into a fixed-size test terminal and snapshot the backend.
         let mut terminal = Terminal::new(TestBackend::new(80, 2)).expect("terminal");
@@ -382,7 +425,13 @@ mod tests {
     fn renders_truncated() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
-        let w = StatusIndicatorWidget::new(tx, crate::tui::FrameRequester::test_dummy(), true);
+        let w = StatusIndicatorWidget::new(
+            tx,
+            crate::tui::FrameRequester::test_dummy(),
+            true,
+            ProgressLegendMode::Off,
+            ProgressTraceStyles::default(),
+        );
 
         // Render into a fixed-size test terminal and snapshot the backend.
         let mut terminal = Terminal::new(TestBackend::new(20, 2)).expect("terminal");
@@ -396,7 +445,13 @@ mod tests {
     fn renders_wrapped_details_panama_two_lines() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
-        let mut w = StatusIndicatorWidget::new(tx, crate::tui::FrameRequester::test_dummy(), false);
+        let mut w = StatusIndicatorWidget::new(
+            tx,
+            crate::tui::FrameRequester::test_dummy(),
+            false,
+            ProgressLegendMode::Off,
+            ProgressTraceStyles::default(),
+        );
         w.update_details(Some("A man a plan a canal panama".to_string()));
         w.set_interrupt_hint_visible(false);
 
@@ -417,8 +472,13 @@ mod tests {
     fn timer_pauses_when_requested() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
-        let mut widget =
-            StatusIndicatorWidget::new(tx, crate::tui::FrameRequester::test_dummy(), true);
+        let mut widget = StatusIndicatorWidget::new(
+            tx,
+            crate::tui::FrameRequester::test_dummy(),
+            true,
+            ProgressLegendMode::Off,
+            ProgressTraceStyles::default(),
+        );
 
         let baseline = Instant::now();
         widget.last_resume_at = baseline;
@@ -456,7 +516,13 @@ mod tests {
     fn details_overflow_adds_ellipsis() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
-        let mut w = StatusIndicatorWidget::new(tx, crate::tui::FrameRequester::test_dummy(), true);
+        let mut w = StatusIndicatorWidget::new(
+            tx,
+            crate::tui::FrameRequester::test_dummy(),
+            true,
+            ProgressLegendMode::Off,
+            ProgressTraceStyles::default(),
+        );
         w.update_details(Some("abcd abcd abcd abcd".to_string()));
 
         let lines = w.wrapped_details_lines(6);

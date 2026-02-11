@@ -24,6 +24,7 @@ use crate::get_git_diff::GitDiffResult;
 use crate::history_cell::HistoryCell;
 use crate::sessions_picker::SessionView;
 
+use codex_core::config::types::ProgressLegendMode;
 use codex_core::features::Feature;
 use codex_core::protocol::AskForApproval;
 use codex_core::protocol::SandboxPolicy;
@@ -414,6 +415,10 @@ pub(crate) enum AppEvent {
     },
     /// Dismiss the status-line setup UI without changing config.
     StatusLineSetupCancelled,
+    /// Persist and apply the progress legend visibility mode.
+    SetProgressLegendMode {
+        mode: ProgressLegendMode,
+    },
 }
 
 /// The exit strategy requested by the UI layer.

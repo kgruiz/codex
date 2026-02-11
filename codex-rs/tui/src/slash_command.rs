@@ -39,6 +39,8 @@ pub enum SlashCommand {
     Status,
     DebugConfig,
     Statusline,
+    Legend,
+    LegendMode,
     Mcp,
     Apps,
     Queue,
@@ -75,6 +77,8 @@ impl SlashCommand {
             SlashCommand::Status => "show current session configuration and token usage",
             SlashCommand::DebugConfig => "show config layers and requirement sources for debugging",
             SlashCommand::Statusline => "configure which items appear in the status line",
+            SlashCommand::Legend => "show progress timeline legend",
+            SlashCommand::LegendMode => "set progress timeline legend mode",
             SlashCommand::Ps => "list background terminals",
             SlashCommand::Model => "choose what model and reasoning effort to use",
             SlashCommand::Personality => "choose a communication style for Codex",
@@ -109,6 +113,7 @@ impl SlashCommand {
                 | SlashCommand::Plan
                 | SlashCommand::Export
                 | SlashCommand::Diff
+                | SlashCommand::LegendMode
         )
     }
 
@@ -138,6 +143,8 @@ impl SlashCommand {
             | SlashCommand::Skills
             | SlashCommand::Status
             | SlashCommand::DebugConfig
+            | SlashCommand::Legend
+            | SlashCommand::LegendMode
             | SlashCommand::Ps
             | SlashCommand::Mcp
             | SlashCommand::Apps

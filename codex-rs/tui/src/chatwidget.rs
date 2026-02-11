@@ -83,6 +83,7 @@ use codex_core::protocol::McpToolCallBeginEvent;
 use codex_core::protocol::McpToolCallEndEvent;
 use codex_core::protocol::Op;
 use codex_core::protocol::PatchApplyBeginEvent;
+use codex_core::protocol::ProgressTraceCategory;
 use codex_core::protocol::ProgressTraceEvent;
 use codex_core::protocol::RateLimitSnapshot;
 use codex_core::protocol::ReviewRequest;
@@ -220,6 +221,10 @@ mod skills;
 use self::skills::collect_tool_mentions;
 use self::skills::find_app_mentions;
 use self::skills::find_skill_mentions_with_tool_mentions;
+use crate::progress_trace_style::ProgressTraceStyles;
+use crate::progress_trace_style::progress_trace_category_label;
+use crate::progress_trace_style::progress_trace_style_description;
+use crate::progress_trace_style::resolve_progress_trace_styles;
 use crate::streaming::chunking::AdaptiveChunkingPolicy;
 use crate::streaming::commit_tick::CommitTickScope;
 use crate::streaming::commit_tick::run_commit_tick;
@@ -233,6 +238,7 @@ use codex_core::AuthManager;
 use codex_core::CodexAuth;
 use codex_core::ThreadManager;
 use codex_core::config::types::DiffView;
+use codex_core::config::types::ProgressLegendMode;
 use codex_core::protocol::AskForApproval;
 use codex_core::protocol::SandboxPolicy;
 use codex_file_search::FileMatch;
@@ -595,6 +601,14 @@ pub(crate) struct ChatWidget {
     // This gates rendering of the "Worked for …" separator so purely conversational turns don't
     // show an empty divider. It is reset when the separator is emitted.
     had_work_activity: bool,
+    // Progress trace categories collected during the active turn.
+    turn_progress_trace: Vec<ProgressTraceCategory>,
+    // Completed turn trace held until the next separator emission.
+    pending_separator_progress_trace: Option<Vec<ProgressTraceCategory>>,
+    // Configured legend visibility mode for the status indicator.
+    progress_legend_mode: ProgressLegendMode,
+    // Resolved per-category timeline styles.
+    progress_trace_styles: ProgressTraceStyles,
     // Whether the current turn emitted a plan update.
     saw_plan_update_this_turn: bool,
     // Whether the current turn emitted a proposed plan item.
@@ -894,6 +908,12 @@ impl ChatWidget {
         let ids = items.iter().map(ToString::to_string).collect::<Vec<_>>();
         self.config.tui_status_line = Some(ids);
         self.refresh_status_line();
+    }
+
+    pub(crate) fn set_progress_legend_mode(&mut self, mode: ProgressLegendMode) {
+        self.progress_legend_mode = mode;
+        self.config.tui_progress_legend_mode = mode;
+        self.bottom_pane.set_progress_legend_mode(mode);
     }
 
     /// Stores async git-branch lookup results for the current status-line cwd.
@@ -1232,6 +1252,8 @@ impl ChatWidget {
         self.retry_status_header = None;
         self.bottom_pane.set_interrupt_hint_visible(true);
         self.bottom_pane.clear_progress_trace();
+        self.turn_progress_trace.clear();
+        self.pending_separator_progress_trace = None;
         self.set_status_header(String::from("Working"));
         self.full_reasoning_buffer.clear();
         self.reasoning_buffer.clear();
@@ -1256,6 +1278,11 @@ impl ChatWidget {
         self.flush_unified_exec_wait_streak();
         if !from_replay {
             let runtime_metrics = self.otel_manager.runtime_metrics_summary();
+            let separator_trace = if self.turn_progress_trace.is_empty() {
+                self.pending_separator_progress_trace.take()
+            } else {
+                Some(std::mem::take(&mut self.turn_progress_trace))
+            };
             if runtime_metrics.is_some() {
                 let elapsed_seconds = self
                     .bottom_pane
@@ -1264,6 +1291,8 @@ impl ChatWidget {
                 self.add_to_history(history_cell::FinalMessageSeparator::new(
                     elapsed_seconds,
                     runtime_metrics,
+                    separator_trace,
+                    self.progress_trace_styles,
                 ));
             }
             self.needs_final_message_separator = false;
@@ -1276,6 +1305,8 @@ impl ChatWidget {
         self.running_turn_reasoning_effort = None;
         self.update_task_running_state();
         self.bottom_pane.clear_progress_trace();
+        self.turn_progress_trace.clear();
+        self.pending_separator_progress_trace = None;
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
         self.last_unified_wait = None;
@@ -1669,6 +1700,14 @@ impl ChatWidget {
     }
 
     fn on_progress_trace(&mut self, ev: ProgressTraceEvent) {
+        if matches!(ev.state, codex_core::protocol::ProgressTraceState::Started) {
+            self.turn_progress_trace.push(ev.category);
+            const MAX_TURN_TRACE_SEGMENTS: usize = 128;
+            if self.turn_progress_trace.len() > MAX_TURN_TRACE_SEGMENTS {
+                let remove_count = self.turn_progress_trace.len() - MAX_TURN_TRACE_SEGMENTS;
+                self.turn_progress_trace.drain(0..remove_count);
+            }
+        }
         self.bottom_pane
             .record_progress_trace(ev.category, ev.state, ev.label);
     }
@@ -2092,9 +2131,16 @@ impl ChatWidget {
                     .status_widget()
                     .map(super::status_indicator_widget::StatusIndicatorWidget::elapsed_seconds)
                     .map(|current| self.worked_elapsed_from(current));
+                let separator_trace = if self.turn_progress_trace.is_empty() {
+                    self.pending_separator_progress_trace.take()
+                } else {
+                    Some(std::mem::take(&mut self.turn_progress_trace))
+                };
                 self.add_to_history(history_cell::FinalMessageSeparator::new(
                     elapsed_seconds,
                     None,
+                    separator_trace,
+                    self.progress_trace_styles,
                 ));
                 self.needs_final_message_separator = false;
                 self.had_work_activity = false;
@@ -2402,6 +2448,9 @@ impl ChatWidget {
         let mut config = config;
         config.model = model.clone();
         let keybindings = Self::resolve_keybindings(&config, enhanced_keys_supported);
+        let progress_legend_mode = config.tui_progress_legend_mode;
+        let (progress_trace_styles, progress_trace_style_warnings) =
+            resolve_progress_trace_styles(config.tui_progress_trace_style.as_ref());
         let mut rng = rand::rng();
         let placeholder = PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string();
         let codex_op_tx = spawn_agent(config.clone(), app_event_tx.clone(), thread_manager);
@@ -2442,6 +2491,8 @@ impl ChatWidget {
                 placeholder_text: placeholder,
                 disable_paste_burst: config.disable_paste_burst,
                 animations_enabled: config.animations,
+                progress_legend_mode,
+                progress_trace_styles,
                 skills: None,
             }),
             active_cell,
@@ -2499,6 +2550,10 @@ impl ChatWidget {
             pre_review_token_info: None,
             needs_final_message_separator: false,
             had_work_activity: false,
+            turn_progress_trace: Vec::new(),
+            pending_separator_progress_trace: None,
+            progress_legend_mode,
+            progress_trace_styles,
             saw_plan_update_this_turn: false,
             saw_plan_item_this_turn: false,
             plan_delta_buffer: String::new(),
@@ -2516,6 +2571,10 @@ impl ChatWidget {
             status_line_branch_lookup_complete: false,
             external_editor_state: ExternalEditorState::Closed,
         };
+
+        for warning in progress_trace_style_warnings {
+            widget.add_to_history(history_cell::new_warning_event(warning));
+        }
 
         widget
             .bottom_pane
@@ -2574,6 +2633,9 @@ impl ChatWidget {
         let mut config = config;
         config.model = model.clone();
         let keybindings = Self::resolve_keybindings(&config, enhanced_keys_supported);
+        let progress_legend_mode = config.tui_progress_legend_mode;
+        let (progress_trace_styles, progress_trace_style_warnings) =
+            resolve_progress_trace_styles(config.tui_progress_trace_style.as_ref());
         let mut rng = rand::rng();
         let placeholder = PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string();
 
@@ -2613,6 +2675,8 @@ impl ChatWidget {
                 placeholder_text: placeholder,
                 disable_paste_burst: config.disable_paste_burst,
                 animations_enabled: config.animations,
+                progress_legend_mode,
+                progress_trace_styles,
                 skills: None,
             }),
             active_cell,
@@ -2674,6 +2738,10 @@ impl ChatWidget {
             pre_review_token_info: None,
             needs_final_message_separator: false,
             had_work_activity: false,
+            turn_progress_trace: Vec::new(),
+            pending_separator_progress_trace: None,
+            progress_legend_mode,
+            progress_trace_styles,
             last_separator_elapsed_secs: None,
             last_rendered_width: std::cell::Cell::new(None),
             feedback,
@@ -2687,6 +2755,10 @@ impl ChatWidget {
             status_line_branch_lookup_complete: false,
             external_editor_state: ExternalEditorState::Closed,
         };
+
+        for warning in progress_trace_style_warnings {
+            widget.add_to_history(history_cell::new_warning_event(warning));
+        }
 
         widget
             .bottom_pane
@@ -2731,6 +2803,9 @@ impl ChatWidget {
         } = common;
         let model = model.filter(|m| !m.trim().is_empty());
         let keybindings = Self::resolve_keybindings(&config, enhanced_keys_supported);
+        let progress_legend_mode = config.tui_progress_legend_mode;
+        let (progress_trace_styles, progress_trace_style_warnings) =
+            resolve_progress_trace_styles(config.tui_progress_trace_style.as_ref());
         let mut rng = rand::rng();
         let placeholder = PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string();
 
@@ -2772,6 +2847,8 @@ impl ChatWidget {
                 placeholder_text: placeholder,
                 disable_paste_burst: config.disable_paste_burst,
                 animations_enabled: config.animations,
+                progress_legend_mode,
+                progress_trace_styles,
                 skills: None,
             }),
             active_cell: None,
@@ -2829,6 +2906,10 @@ impl ChatWidget {
             pre_review_token_info: None,
             needs_final_message_separator: false,
             had_work_activity: false,
+            turn_progress_trace: Vec::new(),
+            pending_separator_progress_trace: None,
+            progress_legend_mode,
+            progress_trace_styles,
             saw_plan_update_this_turn: false,
             saw_plan_item_this_turn: false,
             plan_delta_buffer: String::new(),
@@ -2846,6 +2927,10 @@ impl ChatWidget {
             status_line_branch_lookup_complete: false,
             external_editor_state: ExternalEditorState::Closed,
         };
+
+        for warning in progress_trace_style_warnings {
+            widget.add_to_history(history_cell::new_warning_event(warning));
+        }
 
         widget
             .bottom_pane
@@ -3359,6 +3444,15 @@ impl ChatWidget {
             SlashCommand::Statusline => {
                 self.open_status_line_setup();
             }
+            SlashCommand::Legend => {
+                self.open_progress_legend_popup();
+            }
+            SlashCommand::LegendMode => {
+                self.add_info_message(
+                    format!("Progress legend mode is '{}'.", self.progress_legend_mode),
+                    Some("Use /legend-mode off|auto|always to change it.".to_string()),
+                );
+            }
             SlashCommand::Ps => {
                 self.add_ps_output();
             }
@@ -3537,6 +3631,16 @@ impl ChatWidget {
                     tx.send(AppEvent::DiffResult(result));
                 });
             }
+            SlashCommand::LegendMode => match parse_progress_legend_mode(trimmed) {
+                Ok(mode) => {
+                    self.app_event_tx
+                        .send(AppEvent::SetProgressLegendMode { mode });
+                    self.bottom_pane.drain_pending_submission_state();
+                }
+                Err(err) => {
+                    self.add_error_message(err);
+                }
+            },
             _ => self.dispatch_command(cmd),
         }
     }
@@ -5376,6 +5480,36 @@ impl ChatWidget {
         let view =
             StatusLineSetupView::new(Some(selected_items.as_slice()), self.app_event_tx.clone());
         self.bottom_pane.show_view(Box::new(view));
+    }
+
+    fn open_progress_legend_popup(&mut self) {
+        let mut items = Vec::new();
+        for category in [
+            ProgressTraceCategory::Tool,
+            ProgressTraceCategory::Edit,
+            ProgressTraceCategory::Waiting,
+            ProgressTraceCategory::Network,
+            ProgressTraceCategory::Prefill,
+            ProgressTraceCategory::Reasoning,
+            ProgressTraceCategory::Gen,
+        ] {
+            items.push(SelectionItem {
+                name: progress_trace_category_label(category).to_string(),
+                description: Some(progress_trace_style_description(
+                    category,
+                    &self.progress_trace_styles,
+                )),
+                is_disabled: true,
+                ..Default::default()
+            });
+        }
+        self.show_selection_view(SelectionViewParams {
+            title: Some("Progress Legend".to_string()),
+            subtitle: Some(format!("Mode: {}", self.progress_legend_mode)),
+            footer_hint: Some(standard_popup_hint_line()),
+            items,
+            ..Default::default()
+        });
     }
 
     fn default_status_line_items() -> Vec<StatusLineItem> {
@@ -8647,6 +8781,15 @@ fn parse_diff_view_value(value: &str) -> Result<DiffView, String> {
         _ => Err(format!(
             "Invalid /diff view '{value}'. Use 'pretty', 'line', 'inline', or 'side-by-side'."
         )),
+    }
+}
+
+fn parse_progress_legend_mode(value: &str) -> Result<ProgressLegendMode, String> {
+    match value.trim() {
+        "off" => Ok(ProgressLegendMode::Off),
+        "auto" => Ok(ProgressLegendMode::Auto),
+        "always" => Ok(ProgressLegendMode::Always),
+        _ => Err("Invalid /legend-mode value. Use 'off', 'auto', or 'always'.".to_string()),
     }
 }
 

@@ -1,6 +1,7 @@
 use crate::config::CONFIG_TOML_FILE;
 use crate::config::types::McpServerConfig;
 use crate::config::types::Notice;
+use crate::config::types::ProgressLegendMode;
 use crate::path_utils::resolve_symlink_write_paths;
 use crate::path_utils::write_atomically;
 use anyhow::Context;
@@ -64,6 +65,13 @@ pub fn status_line_items_edit(items: &[String]) -> ConfigEdit {
     ConfigEdit::SetPath {
         segments: vec!["tui".to_string(), "status_line".to_string()],
         value: TomlItem::Value(array.into()),
+    }
+}
+
+pub fn progress_legend_mode_edit(mode: ProgressLegendMode) -> ConfigEdit {
+    ConfigEdit::SetPath {
+        segments: vec!["tui".to_string(), "progress_legend_mode".to_string()],
+        value: value(mode.to_string()),
     }
 }
 

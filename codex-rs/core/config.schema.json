@@ -739,6 +739,97 @@
       ],
       "type": "string"
     },
+    "ProgressLegendMode": {
+      "enum": [
+        "off",
+        "auto",
+        "always"
+      ],
+      "type": "string"
+    },
+    "ProgressTraceCategoryStyleConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "bold": {
+          "default": null,
+          "description": "Optional bold override.",
+          "type": "boolean"
+        },
+        "color": {
+          "default": null,
+          "description": "Optional color override for this category.\n\nAccepted values: - ANSI names (for example `cyan`, `dark-gray`, `light-blue`, `default`) - Hex values (for example `#3fa7ff`) that will be approximated to ANSI.",
+          "type": "string"
+        },
+        "dim": {
+          "default": null,
+          "description": "Optional dim override.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "ProgressTraceStyleConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "edit": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProgressTraceCategoryStyleConfig"
+            }
+          ],
+          "default": null
+        },
+        "gen": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProgressTraceCategoryStyleConfig"
+            }
+          ],
+          "default": null
+        },
+        "network": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProgressTraceCategoryStyleConfig"
+            }
+          ],
+          "default": null
+        },
+        "prefill": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProgressTraceCategoryStyleConfig"
+            }
+          ],
+          "default": null
+        },
+        "reasoning": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProgressTraceCategoryStyleConfig"
+            }
+          ],
+          "default": null
+        },
+        "tool": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProgressTraceCategoryStyleConfig"
+            }
+          ],
+          "default": null
+        },
+        "waiting": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProgressTraceCategoryStyleConfig"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
     "ProjectConfig": {
       "additionalProperties": false,
       "properties": {
@@ -1075,6 +1166,24 @@
           ],
           "default": true,
           "description": "Enable desktop notifications from the TUI when the terminal is unfocused. Defaults to `true`."
+        },
+        "progress_legend_mode": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProgressLegendMode"
+            }
+          ],
+          "default": "off",
+          "description": "Controls when the progress timeline legend is shown in the status indicator.\n\nDefaults to `off`."
+        },
+        "progress_trace_style": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProgressTraceStyleConfig"
+            }
+          ],
+          "default": null,
+          "description": "Optional category-level style overrides for progress timeline bars."
         },
         "show_tooltips": {
           "default": true,

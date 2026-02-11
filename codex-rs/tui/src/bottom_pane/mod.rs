@@ -23,11 +23,13 @@ use crate::bottom_pane::unified_exec_footer::UnifiedExecFooter;
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
 use crate::keybindings::Keybindings;
+use crate::progress_trace_style::ProgressTraceStyles;
 use crate::render::renderable::FlexRenderable;
 use crate::render::renderable::Renderable;
 use crate::render::renderable::RenderableItem;
 use crate::tui::FrameRequester;
 use bottom_pane_view::BottomPaneView;
+use codex_core::config::types::ProgressLegendMode;
 use codex_core::features::Features;
 use codex_core::skills::model::SkillMetadata;
 use codex_file_search::FileMatch;
@@ -155,6 +157,8 @@ pub(crate) struct BottomPane {
     is_task_running: bool,
     esc_backtrack_hint: bool,
     animations_enabled: bool,
+    progress_legend_mode: ProgressLegendMode,
+    progress_trace_styles: ProgressTraceStyles,
 
     /// Inline status indicator shown above the composer while a task is running.
     status: Option<StatusIndicatorWidget>,
@@ -175,6 +179,8 @@ pub(crate) struct BottomPaneParams {
     pub(crate) placeholder_text: String,
     pub(crate) disable_paste_burst: bool,
     pub(crate) animations_enabled: bool,
+    pub(crate) progress_legend_mode: ProgressLegendMode,
+    pub(crate) progress_trace_styles: ProgressTraceStyles,
     pub(crate) skills: Option<Vec<SkillMetadata>>,
 }
 
@@ -188,6 +194,8 @@ impl BottomPane {
             placeholder_text,
             disable_paste_burst,
             animations_enabled,
+            progress_legend_mode,
+            progress_trace_styles,
             skills,
         } = params;
         let mut composer = ChatComposer::new(
@@ -214,6 +222,8 @@ impl BottomPane {
             queued_user_messages: QueuedUserMessages::new(),
             esc_backtrack_hint: false,
             animations_enabled,
+            progress_legend_mode,
+            progress_trace_styles,
             context_window_percent: None,
             context_window_used_tokens: None,
         }
@@ -558,6 +568,14 @@ impl BottomPane {
         }
     }
 
+    pub(crate) fn set_progress_legend_mode(&mut self, mode: ProgressLegendMode) {
+        self.progress_legend_mode = mode;
+        if let Some(status) = self.status.as_mut() {
+            status.set_legend_mode(mode);
+            self.request_redraw();
+        }
+    }
+
     pub(crate) fn record_progress_trace(
         &mut self,
         category: ProgressTraceCategory,
@@ -659,8 +677,11 @@ impl BottomPane {
                         self.app_event_tx.clone(),
                         self.frame_requester.clone(),
                         self.animations_enabled,
+                        self.progress_legend_mode,
+                        self.progress_trace_styles,
                     ));
                     if let Some(status) = self.status.as_mut() {
+                        status.set_task_running(running);
                         for (category, state, label) in &self.progress_trace_backlog {
                             status.record_progress_trace(*category, *state, label.clone());
                         }
@@ -668,9 +689,13 @@ impl BottomPane {
                 }
                 if let Some(status) = self.status.as_mut() {
                     status.set_interrupt_hint_visible(true);
+                    status.set_task_running(running);
                 }
                 self.request_redraw();
             } else if hints_changed {
+                if let Some(status) = self.status.as_mut() {
+                    status.set_task_running(running);
+                }
                 self.request_redraw();
             }
         } else {
@@ -712,8 +737,11 @@ impl BottomPane {
                 self.app_event_tx.clone(),
                 self.frame_requester.clone(),
                 self.animations_enabled,
+                self.progress_legend_mode,
+                self.progress_trace_styles,
             ));
             if let Some(status) = self.status.as_mut() {
+                status.set_task_running(self.is_task_running);
                 for (category, state, label) in &self.progress_trace_backlog {
                     status.record_progress_trace(*category, *state, label.clone());
                 }
@@ -1053,6 +1081,8 @@ mod tests {
             placeholder_text: "Ask Codex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
+            progress_legend_mode: ProgressLegendMode::Off,
+            progress_trace_styles: ProgressTraceStyles::default(),
             skills: Some(Vec::new()),
         });
         pane.push_approval_request(exec_request(), &features);
@@ -1076,6 +1106,8 @@ mod tests {
             placeholder_text: "Ask Codex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
+            progress_legend_mode: ProgressLegendMode::Off,
+            progress_trace_styles: ProgressTraceStyles::default(),
             skills: Some(Vec::new()),
         });
 
@@ -1110,6 +1142,8 @@ mod tests {
             placeholder_text: "Ask Codex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
+            progress_legend_mode: ProgressLegendMode::Off,
+            progress_trace_styles: ProgressTraceStyles::default(),
             skills: Some(Vec::new()),
         });
 
@@ -1177,6 +1211,8 @@ mod tests {
             placeholder_text: "Ask Codex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
+            progress_legend_mode: ProgressLegendMode::Off,
+            progress_trace_styles: ProgressTraceStyles::default(),
             skills: Some(Vec::new()),
         });
 
@@ -1204,6 +1240,8 @@ mod tests {
             placeholder_text: "Ask Codex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
+            progress_legend_mode: ProgressLegendMode::Off,
+            progress_trace_styles: ProgressTraceStyles::default(),
             skills: Some(Vec::new()),
         });
 
@@ -1235,6 +1273,8 @@ mod tests {
             placeholder_text: "Ask Codex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
+            progress_legend_mode: ProgressLegendMode::Off,
+            progress_trace_styles: ProgressTraceStyles::default(),
             skills: Some(Vec::new()),
         });
 
@@ -1258,6 +1298,8 @@ mod tests {
             placeholder_text: "Ask Codex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
+            progress_legend_mode: ProgressLegendMode::Off,
+            progress_trace_styles: ProgressTraceStyles::default(),
             skills: Some(Vec::new()),
         });
 
@@ -1289,6 +1331,8 @@ mod tests {
             placeholder_text: "Ask Codex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
+            progress_legend_mode: ProgressLegendMode::Off,
+            progress_trace_styles: ProgressTraceStyles::default(),
             skills: Some(Vec::new()),
         });
 
@@ -1317,6 +1361,8 @@ mod tests {
             placeholder_text: "Ask Codex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
+            progress_legend_mode: ProgressLegendMode::Off,
+            progress_trace_styles: ProgressTraceStyles::default(),
             skills: Some(Vec::new()),
         });
 
@@ -1344,6 +1390,8 @@ mod tests {
             placeholder_text: "Ask Codex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
+            progress_legend_mode: ProgressLegendMode::Off,
+            progress_trace_styles: ProgressTraceStyles::default(),
             skills: Some(vec![SkillMetadata {
                 name: "test-skill".to_string(),
                 description: "test skill".to_string(),
@@ -1390,6 +1438,8 @@ mod tests {
             placeholder_text: "Ask Codex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
+            progress_legend_mode: ProgressLegendMode::Off,
+            progress_trace_styles: ProgressTraceStyles::default(),
             skills: Some(Vec::new()),
         });
 
@@ -1425,6 +1475,8 @@ mod tests {
             placeholder_text: "Ask Codex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
+            progress_legend_mode: ProgressLegendMode::Off,
+            progress_trace_styles: ProgressTraceStyles::default(),
             skills: Some(Vec::new()),
         });
 
@@ -1481,6 +1533,8 @@ mod tests {
             placeholder_text: "Ask Codex to do anything".to_string(),
             disable_paste_burst: false,
             animations_enabled: true,
+            progress_legend_mode: ProgressLegendMode::Off,
+            progress_trace_styles: ProgressTraceStyles::default(),
             skills: Some(Vec::new()),
         });
 
