@@ -557,6 +557,7 @@ pub(crate) struct ChatWidget {
     thread_id: Option<ThreadId>,
     thread_name: Option<String>,
     has_completed_assistant_message: bool,
+    last_assistant_output_markdown: Option<String>,
     forked_from: Option<ThreadId>,
     frame_requester: FrameRequester,
     // Whether to include the initial welcome banner on session configured
@@ -1099,6 +1100,7 @@ impl ChatWidget {
     fn on_agent_message(&mut self, message: String) {
         if !message.trim().is_empty() {
             self.has_completed_assistant_message = true;
+            self.last_assistant_output_markdown = Some(message.clone());
         }
 
         // If we have a stream_controller, then the final agent message is redundant and will be a
@@ -1236,6 +1238,12 @@ impl ChatWidget {
     }
 
     fn on_task_complete(&mut self, last_agent_message: Option<String>, from_replay: bool) {
+        if let Some(last_message) = last_agent_message.as_ref()
+            && !last_message.trim().is_empty()
+        {
+            self.last_assistant_output_markdown = Some(last_message.clone());
+        }
+
         // If a stream is currently active, finalize it.
         self.flush_answer_stream_with_separator();
         if let Some(mut controller) = self.plan_stream_controller.take()
@@ -2468,6 +2476,7 @@ impl ChatWidget {
             thread_id: None,
             thread_name: None,
             has_completed_assistant_message: false,
+            last_assistant_output_markdown: None,
             forked_from: None,
             queued_user_messages: VecDeque::new(),
             next_queued_user_message_id: 1,
@@ -2638,6 +2647,7 @@ impl ChatWidget {
             thread_id: None,
             thread_name: None,
             has_completed_assistant_message: false,
+            last_assistant_output_markdown: None,
             forked_from: None,
             saw_plan_update_this_turn: false,
             saw_plan_item_this_turn: false,
@@ -2796,6 +2806,7 @@ impl ChatWidget {
             thread_id: None,
             thread_name: None,
             has_completed_assistant_message: false,
+            last_assistant_output_markdown: None,
             forked_from: None,
             queued_user_messages: VecDeque::new(),
             next_queued_user_message_id: 1,
@@ -2901,6 +2912,17 @@ impl ChatWidget {
                         .any(|binding| binding.matches(&key_event)) =>
             {
                 self.copy_prompt_to_clipboard();
+                return;
+            }
+            key_event
+                if key_event.kind == KeyEventKind::Press
+                    && self
+                        .keybindings
+                        .copy_last_output
+                        .iter()
+                        .any(|binding| binding.matches(&key_event)) =>
+            {
+                self.copy_last_output_to_clipboard();
                 return;
             }
             other if other.kind == KeyEventKind::Press => {
@@ -3990,7 +4012,7 @@ impl ChatWidget {
         };
 
         if !self.agent_turn_running {
-            self.running_turn_model = Some(running_model.clone());
+            self.running_turn_model = Some(running_model);
             self.running_turn_reasoning_effort = running_effort;
         }
 
@@ -4435,6 +4457,40 @@ impl ChatWidget {
             )));
             self.request_redraw();
         }
+    }
+
+    fn copy_last_output_to_clipboard(&mut self) {
+        if !self.bottom_pane.no_modal_or_popup_active() {
+            return;
+        }
+
+        let Some(markdown) = self
+            .last_assistant_output_markdown
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        else {
+            self.add_to_history(history_cell::new_info_event(
+                "No output to copy.".to_string(),
+                None,
+            ));
+            self.request_redraw();
+            return;
+        };
+
+        if let Err(err) = copy_text_to_clipboard(markdown) {
+            self.add_to_history(history_cell::new_error_event(format!(
+                "Failed to copy last output to clipboard: {err}",
+            )));
+            self.request_redraw();
+            return;
+        }
+
+        self.add_to_history(history_cell::new_info_event(
+            "Copied last output to clipboard.".to_string(),
+            None,
+        ));
+        self.request_redraw();
     }
 
     fn send_next_queued_user_message(&mut self) {

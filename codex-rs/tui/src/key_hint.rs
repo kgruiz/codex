@@ -122,6 +122,7 @@ impl From<&KeyBinding> for Span<'static> {
             KeyCode::End => "end (fn + →)".to_string(),
             #[cfg(not(target_os = "macos"))]
             KeyCode::End => "end".to_string(),
+            KeyCode::F(n) => format!("f{n}"),
             _ => format!("{key}").to_ascii_lowercase(),
         };
         Span::styled(format!("{modifiers}{key}"), key_hint_style())

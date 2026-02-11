@@ -9,6 +9,7 @@ pub(crate) struct Keybindings {
     pub(crate) newline: Vec<KeyBinding>,
     pub(crate) paste: Vec<KeyBinding>,
     pub(crate) copy_prompt: Vec<KeyBinding>,
+    pub(crate) copy_last_output: Vec<KeyBinding>,
     pub(crate) editor: EditorKeybindings,
 }
 
@@ -41,6 +42,11 @@ impl Keybindings {
             newline: bindings_or_default(keybindings, "newline", defaults.newline),
             paste: bindings_or_default(keybindings, "paste", defaults.paste),
             copy_prompt: bindings_or_default(keybindings, "copy_prompt", defaults.copy_prompt),
+            copy_last_output: bindings_or_default(
+                keybindings,
+                "copy_last_output",
+                defaults.copy_last_output,
+            ),
             editor: EditorKeybindings {
                 move_left: bindings_or_default(keybindings, "editor_move_left", Vec::new()),
                 move_right: bindings_or_default(keybindings, "editor_move_right", Vec::new()),
@@ -111,12 +117,17 @@ impl Keybindings {
         };
 
         let copy_prompt = vec![KeyBinding::new(KeyCode::Char('c'), KeyModifiers::ALT)];
+        let copy_last_output = vec![
+            KeyBinding::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
+            KeyBinding::new(KeyCode::F(8), KeyModifiers::NONE),
+        ];
 
         Self {
             submit,
             newline,
             paste,
             copy_prompt,
+            copy_last_output,
             editor: EditorKeybindings {
                 move_left: Vec::new(),
                 move_right: Vec::new(),
@@ -225,6 +236,12 @@ fn parse_keycode(raw: &str, fn_modifier: bool) -> Result<KeyCode, String> {
         "home" => Ok(KeyCode::Home),
         "end" => Ok(KeyCode::End),
         _ => {
+            if lower.starts_with('f')
+                && let Ok(n) = lower[1..].parse::<u8>()
+                && (1..=24).contains(&n)
+            {
+                return Ok(KeyCode::F(n));
+            }
             let mut chars = key.chars();
             let Some(ch) = chars.next() else {
                 return Err("missing key".to_string());
@@ -234,5 +251,29 @@ fn parse_keycode(raw: &str, fn_modifier: bool) -> Result<KeyCode, String> {
             }
             Ok(KeyCode::Char(ch))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn defaults_include_copy_last_output_shortcuts() {
+        let bindings = Keybindings::from_config(&HashMap::new(), true, false);
+        assert_eq!(
+            bindings.copy_last_output,
+            vec![
+                KeyBinding::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
+                KeyBinding::new(KeyCode::F(8), KeyModifiers::NONE),
+            ],
+        );
+    }
+
+    #[test]
+    fn parses_function_key_binding() {
+        let binding = parse_keybinding("f8").expect("f8 should parse");
+        assert_eq!(binding, KeyBinding::new(KeyCode::F(8), KeyModifiers::NONE));
     }
 }

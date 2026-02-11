@@ -814,6 +814,7 @@ async fn make_chatwidget_manual(
         thread_id: None,
         thread_name: None,
         has_completed_assistant_message: false,
+        last_assistant_output_markdown: None,
         forked_from: None,
         frame_requester: FrameRequester::test_dummy(),
         show_welcome_banner: true,
@@ -1904,6 +1905,25 @@ async fn ctrl_d_with_modal_open_does_not_quit() {
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
 
     assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+}
+
+#[tokio::test]
+async fn copy_last_output_shortcuts_show_notice_when_no_output_exists() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    chat.handle_key_event(KeyEvent::new(KeyCode::F(8), KeyModifiers::NONE));
+
+    let cells = drain_insert_history(&mut rx);
+    let rendered = cells
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rendered.contains("No output to copy."),
+        "expected no-output notice, got {rendered:?}"
+    );
 }
 
 #[tokio::test]
