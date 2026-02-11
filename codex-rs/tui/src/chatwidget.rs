@@ -134,6 +134,7 @@ use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
+use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Wrap;
 use tokio::sync::mpsc::UnboundedSender;
@@ -224,6 +225,7 @@ use self::skills::find_skill_mentions_with_tool_mentions;
 use crate::progress_trace_style::ProgressTraceStyles;
 use crate::progress_trace_style::progress_trace_category_label;
 use crate::progress_trace_style::progress_trace_style_description;
+use crate::progress_trace_style::progress_trace_style_for_category;
 use crate::progress_trace_style::resolve_progress_trace_styles;
 use crate::streaming::chunking::AdaptiveChunkingPolicy;
 use crate::streaming::commit_tick::CommitTickScope;
@@ -5493,13 +5495,15 @@ impl ChatWidget {
             ProgressTraceCategory::Reasoning,
             ProgressTraceCategory::Gen,
         ] {
+            let swatch_style =
+                progress_trace_style_for_category(&self.progress_trace_styles, category).to_style();
             items.push(SelectionItem {
                 name: progress_trace_category_label(category).to_string(),
+                name_prefix: Some(Span::styled("▮ ", swatch_style)),
                 description: Some(progress_trace_style_description(
                     category,
                     &self.progress_trace_styles,
                 )),
-                is_disabled: true,
                 ..Default::default()
             });
         }

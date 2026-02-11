@@ -184,6 +184,7 @@ impl QueuePopup {
                 let preview = truncate_to_width(item.preview.as_str(), available_preview_width);
                 let name = format!("{prefix_text}{preview}");
                 GenericDisplayRow {
+                    name_prefix: None,
                     name,
                     display_shortcut: None,
                     match_indices: None,
