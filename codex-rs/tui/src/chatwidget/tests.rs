@@ -21,6 +21,7 @@ use codex_core::config::Config;
 use codex_core::config::ConfigBuilder;
 use codex_core::config::Constrained;
 use codex_core::config::ConstraintError;
+use codex_core::config::types::ProgressLegendMode;
 use codex_core::config_loader::RequirementSource;
 use codex_core::features::Feature;
 use codex_core::models_manager::manager::ModelsManager;
@@ -817,6 +818,7 @@ async fn make_chatwidget_manual(
         thread_name: None,
         has_completed_assistant_message: false,
         last_assistant_output_markdown: None,
+        copyable_messages: Vec::new(),
         forked_from: None,
         frame_requester: FrameRequester::test_dummy(),
         show_welcome_banner: true,
@@ -1973,6 +1975,166 @@ async fn copy_code_block_shortcuts_show_notice_when_no_fenced_blocks_exist() {
     assert!(
         rendered.contains("No code blocks to copy."),
         "expected no-code-block notice, got {rendered:?}"
+    );
+}
+
+#[tokio::test]
+async fn copy_slash_commands_show_expected_notice_messages() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+
+    chat.bottom_pane
+        .set_composer_text("/copy-last-output".to_string(), Vec::new(), Vec::new());
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+
+    chat.bottom_pane
+        .set_composer_text("/copy-output".to_string(), Vec::new(), Vec::new());
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+
+    chat.bottom_pane
+        .set_composer_text("/copy-code-block".to_string(), Vec::new(), Vec::new());
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+
+    chat.bottom_pane
+        .set_composer_text("/copy-code".to_string(), Vec::new(), Vec::new());
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+
+    let cells = drain_insert_history(&mut rx);
+    let rendered = cells
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rendered.contains("No output to copy."),
+        "expected copy-output notice, got {rendered:?}"
+    );
+    assert!(
+        rendered.contains("No output to scan for code blocks."),
+        "expected copy-code-block notice, got {rendered:?}"
+    );
+}
+
+#[tokio::test]
+async fn copy_code_block_picker_scope_toggle_reopens_with_all_responses() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.copyable_messages = vec![
+        CopyableMessage {
+            role: CopyableRole::Response,
+            text: "```rs\nold()\n```".to_string(),
+        },
+        CopyableMessage {
+            role: CopyableRole::Response,
+            text: "```rs\nlatest()\n```".to_string(),
+        },
+    ];
+    chat.last_assistant_output_markdown = Some("```rs\nlatest()\n```".to_string());
+
+    chat.open_copy_code_block_picker();
+    let popup = render_bottom_popup(&chat, 90);
+    assert!(
+        popup.contains("Scope: Last response"),
+        "expected last-response scope in popup, got {popup:?}"
+    );
+    assert!(
+        !popup.contains("R2 #1"),
+        "last-response scope should not show older response labels, got {popup:?}"
+    );
+
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    let scope = match rx.try_recv() {
+        Ok(AppEvent::OpenCopyCodeBlockPicker { scope }) => scope,
+        other => panic!("expected OpenCopyCodeBlockPicker event, got {other:?}"),
+    };
+    chat.open_copy_code_block_picker_with_scope(scope);
+
+    let popup = render_bottom_popup(&chat, 90);
+    assert!(
+        popup.contains("Scope: All responses"),
+        "expected all-responses scope in popup, got {popup:?}"
+    );
+    assert!(
+        popup.contains("R2 #1"),
+        "all-responses scope should include older response labels, got {popup:?}"
+    );
+}
+
+#[tokio::test]
+async fn copy_message_picker_defaults_to_responses_and_filter_toggles() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.copyable_messages = vec![
+        CopyableMessage {
+            role: CopyableRole::User,
+            text: "first user message".to_string(),
+        },
+        CopyableMessage {
+            role: CopyableRole::Response,
+            text: "assistant reply".to_string(),
+        },
+    ];
+
+    chat.bottom_pane
+        .set_composer_text("/copy-message".to_string(), Vec::new(), Vec::new());
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+
+    let popup = render_bottom_popup(&chat, 90);
+    assert!(
+        popup.contains("Filter: Responses"),
+        "expected responses filter by default, got {popup:?}"
+    );
+    assert!(
+        popup.contains("Response"),
+        "responses filter should include response rows, got {popup:?}"
+    );
+    assert!(
+        !popup.contains("User messages"),
+        "responses filter should not include user rows yet, got {popup:?}"
+    );
+
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    let filter = match rx.try_recv() {
+        Ok(AppEvent::OpenCopyMessagePicker { filter }) => filter,
+        other => panic!("expected OpenCopyMessagePicker event, got {other:?}"),
+    };
+    chat.open_copy_message_picker(filter);
+
+    let popup = render_bottom_popup(&chat, 90);
+    assert!(
+        popup.contains("Filter: User messages"),
+        "expected user filter after toggle, got {popup:?}"
+    );
+    assert!(
+        popup.contains("User"),
+        "user filter should include user rows, got {popup:?}"
+    );
+}
+
+#[tokio::test]
+async fn legend_popup_mode_row_opens_mode_picker() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+
+    chat.open_progress_legend_popup();
+    let popup = render_bottom_popup(&chat, 90);
+    assert!(
+        popup.contains("Mode: off"),
+        "legend popup should show selectable mode row, got {popup:?}"
+    );
+
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    assert_matches!(rx.try_recv(), Ok(AppEvent::OpenProgressLegendModePicker));
+
+    chat.open_progress_legend_mode_picker();
+    let popup = render_bottom_popup(&chat, 90);
+    assert!(
+        popup.contains("auto"),
+        "mode picker should include auto option, got {popup:?}"
+    );
+    chat.handle_key_event(KeyEvent::from(KeyCode::Down));
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    assert_matches!(
+        rx.try_recv(),
+        Ok(AppEvent::SetProgressLegendMode {
+            mode: ProgressLegendMode::Auto
+        })
     );
 }
 

@@ -150,6 +150,8 @@ const PLAN_IMPLEMENTATION_CODING_MESSAGE: &str = "Implement the plan.";
 use crate::app_event::AppEvent;
 use crate::app_event::ChatExportFormat;
 use crate::app_event::ConnectorsSnapshot;
+use crate::app_event::CopyCodeBlockScope;
+use crate::app_event::CopyMessageFilter;
 use crate::app_event::ExitMode;
 use crate::app_event::ExportOverrides;
 #[cfg(target_os = "windows")]
@@ -567,6 +569,7 @@ pub(crate) struct ChatWidget {
     thread_name: Option<String>,
     has_completed_assistant_message: bool,
     last_assistant_output_markdown: Option<String>,
+    copyable_messages: Vec<CopyableMessage>,
     forked_from: Option<ThreadId>,
     frame_requester: FrameRequester,
     // Whether to include the initial welcome banner on session configured
@@ -960,6 +963,7 @@ impl ChatWidget {
         self.forked_from = event.forked_from_id;
         self.current_rollout_path = event.rollout_path.clone();
         self.current_cwd = Some(event.cwd.clone());
+        self.copyable_messages.clear();
         self.running_turn_model = None;
         self.running_turn_reasoning_effort = None;
         let initial_messages = event.initial_messages.clone();
@@ -1120,10 +1124,13 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    fn on_agent_message(&mut self, message: String) {
+    fn on_agent_message(&mut self, message: String, from_replay: bool) {
         if !message.trim().is_empty() {
             self.has_completed_assistant_message = true;
             self.last_assistant_output_markdown = Some(message.clone());
+            if from_replay {
+                self.push_copyable_message(CopyableRole::Response, &message);
+            }
         }
 
         // If we have a stream_controller, then the final agent message is redundant and will be a
@@ -1268,6 +1275,9 @@ impl ChatWidget {
             && !last_message.trim().is_empty()
         {
             self.last_assistant_output_markdown = Some(last_message.clone());
+            if !from_replay || !self.last_copyable_response_is(last_message) {
+                self.push_copyable_message(CopyableRole::Response, last_message);
+            }
         }
 
         // If a stream is currently active, finalize it.
@@ -2539,6 +2549,7 @@ impl ChatWidget {
             thread_name: None,
             has_completed_assistant_message: false,
             last_assistant_output_markdown: None,
+            copyable_messages: Vec::new(),
             forked_from: None,
             queued_user_messages: VecDeque::new(),
             next_queued_user_message_id: 1,
@@ -2723,6 +2734,7 @@ impl ChatWidget {
             thread_name: None,
             has_completed_assistant_message: false,
             last_assistant_output_markdown: None,
+            copyable_messages: Vec::new(),
             forked_from: None,
             saw_plan_update_this_turn: false,
             saw_plan_item_this_turn: false,
@@ -2895,6 +2907,7 @@ impl ChatWidget {
             thread_name: None,
             has_completed_assistant_message: false,
             last_assistant_output_markdown: None,
+            copyable_messages: Vec::new(),
             forked_from: None,
             queued_user_messages: VecDeque::new(),
             next_queued_user_message_id: 1,
@@ -3433,6 +3446,15 @@ impl ChatWidget {
             }
             SlashCommand::Mention => {
                 self.insert_str("@");
+            }
+            SlashCommand::CopyLastOutput => {
+                self.copy_last_output_to_clipboard();
+            }
+            SlashCommand::CopyCodeBlock => {
+                self.open_copy_code_block_picker();
+            }
+            SlashCommand::CopyMessage => {
+                self.open_copy_message_picker(CopyMessageFilter::Responses);
             }
             SlashCommand::Skills => {
                 self.open_skills_menu();
@@ -4159,10 +4181,11 @@ impl ChatWidget {
         if !text.is_empty() {
             let local_image_paths = local_images.into_iter().map(|img| img.path).collect();
             self.add_to_history(history_cell::new_user_prompt(
-                text,
+                text.clone(),
                 text_elements,
                 local_image_paths,
             ));
+            self.push_copyable_message(CopyableRole::User, &text);
         }
 
         self.needs_final_message_separator = false;
@@ -4253,7 +4276,9 @@ impl ChatWidget {
         match msg {
             EventMsg::SessionConfigured(e) => self.on_session_configured(e),
             EventMsg::ThreadNameUpdated(e) => self.on_thread_name_updated(e),
-            EventMsg::AgentMessage(AgentMessageEvent { message }) => self.on_agent_message(message),
+            EventMsg::AgentMessage(AgentMessageEvent { message }) => {
+                self.on_agent_message(message, from_replay)
+            }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 self.on_agent_message_delta(delta)
             }
@@ -4369,7 +4394,9 @@ impl ChatWidget {
                 self.on_entered_review_mode(review_request, from_replay)
             }
             EventMsg::ExitedReviewMode(review) => self.on_exited_review_mode(review),
-            EventMsg::ContextCompacted(_) => self.on_agent_message("Context compacted".to_owned()),
+            EventMsg::ContextCompacted(_) => {
+                self.on_agent_message("Context compacted".to_owned(), from_replay)
+            }
             EventMsg::CollabAgentSpawnBegin(_) => {}
             EventMsg::CollabAgentSpawnEnd(ev) => self.on_collab_event(collab::spawn_end(ev)),
             EventMsg::CollabAgentInteractionBegin(_) => {}
@@ -4450,6 +4477,7 @@ impl ChatWidget {
 
     fn on_user_message_event(&mut self, event: UserMessageEvent) {
         if !event.message.trim().is_empty() {
+            self.push_copyable_message(CopyableRole::User, &event.message);
             self.add_to_history(history_cell::new_user_prompt(
                 event.message,
                 event.text_elements,
@@ -4624,83 +4652,258 @@ impl ChatWidget {
         if !self.bottom_pane.no_modal_or_popup_active() {
             return;
         }
+        self.open_copy_code_block_picker_with_scope(CopyCodeBlockScope::LastResponse);
+    }
 
-        let Some(markdown) = self
-            .last_assistant_output_markdown
-            .as_deref()
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-        else {
-            self.add_to_history(history_cell::new_info_event(
-                "No output to scan for code blocks.".to_string(),
-                None,
-            ));
+    pub(crate) fn open_copy_code_block_picker_with_scope(&mut self, scope: CopyCodeBlockScope) {
+        self.open_copy_code_block_picker_with_scope_internal(scope.into());
+    }
+
+    fn open_copy_code_block_picker_with_scope_internal(&mut self, scope: CodeBlockScope) {
+        let has_any_response = self
+            .copyable_messages
+            .iter()
+            .any(|message| message.role == CopyableRole::Response);
+        let candidates = self.code_block_candidates_for_scope(scope);
+        if candidates.is_empty() && !has_any_response {
+            let message = match scope {
+                CodeBlockScope::LastResponse => {
+                    if self.last_response_markdown().is_some() {
+                        "No code blocks to copy."
+                    } else {
+                        "No output to scan for code blocks."
+                    }
+                }
+                CodeBlockScope::AllResponses => "No response output to scan for code blocks.",
+            };
+            self.add_to_history(history_cell::new_info_event(message.to_string(), None));
             self.request_redraw();
             return;
-        };
+        }
 
-        let candidates = extract_fenced_code_blocks(markdown);
+        let mut items = vec![SelectionItem {
+            name: format!("Scope: {}", scope.label()),
+            description: Some(scope.description().to_string()),
+            actions: vec![Box::new(move |tx| {
+                tx.send(AppEvent::OpenCopyCodeBlockPicker {
+                    scope: scope.toggle().into(),
+                });
+            })],
+            dismiss_on_select: false,
+            ..Default::default()
+        }];
+
         if candidates.is_empty() {
+            items.push(SelectionItem {
+                name: "No code blocks in this scope".to_string(),
+                is_disabled: true,
+                ..Default::default()
+            });
+        }
+
+        items.extend(candidates.into_iter().map(|candidate| {
+            let content = candidate.content;
+            SelectionItem {
+                name: candidate.label,
+                description: Some(candidate.preview),
+                search_value: Some(candidate.search_value),
+                actions: vec![Box::new(move |tx| {
+                    match copy_text_to_clipboard(&content) {
+                        Ok(()) => tx.send(AppEvent::InsertHistoryCell(Box::new(
+                            history_cell::new_info_event(
+                                "Copied code block to clipboard.".to_string(),
+                                None,
+                            ),
+                        ))),
+                        Err(err) => tx.send(AppEvent::InsertHistoryCell(Box::new(
+                            history_cell::new_error_event(format!(
+                                "Failed to copy code block to clipboard: {err}",
+                            )),
+                        ))),
+                    };
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            }
+        }));
+
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some("Copy code block".to_string()),
+            subtitle: Some(format!("Choose a block to copy · {}", scope.label())),
+            footer_hint: Some(standard_popup_hint_line()),
+            is_searchable: true,
+            search_placeholder: Some("Type to search code blocks".to_string()),
+            items,
+            ..Default::default()
+        });
+        self.request_redraw();
+    }
+
+    pub(crate) fn open_copy_message_picker(&mut self, filter: CopyMessageFilter) {
+        if self.copyable_messages.is_empty() {
             self.add_to_history(history_cell::new_info_event(
-                "No code blocks to copy.".to_string(),
+                "No messages to copy.".to_string(),
                 None,
             ));
             self.request_redraw();
             return;
         }
 
-        let items = candidates
-            .into_iter()
+        let filter = MessageFilter::from(filter);
+        let mut items = vec![SelectionItem {
+            name: format!("Filter: {}", filter.label()),
+            description: Some(filter.description().to_string()),
+            actions: vec![Box::new(move |tx| {
+                tx.send(AppEvent::OpenCopyMessagePicker {
+                    filter: filter.next().into(),
+                });
+            })],
+            dismiss_on_select: false,
+            ..Default::default()
+        }];
+
+        let mut matched = 0usize;
+        for (idx, message) in self
+            .copyable_messages
+            .iter()
+            .rev()
+            .filter(|message| filter.includes(message.role))
             .enumerate()
-            .map(|(idx, candidate)| {
-                let label = match candidate.language {
-                    Some(language) => format!("#{} · {}", idx + 1, language),
-                    None => format!("#{} · plain text", idx + 1),
-                };
-                let snippet = candidate
-                    .content
-                    .lines()
-                    .find(|line| !line.trim().is_empty())
-                    .unwrap_or("")
-                    .trim();
-                let preview = if snippet.is_empty() {
-                    "(empty code block)".to_string()
-                } else {
-                    truncate_text(snippet, 80)
-                };
-                let content = candidate.content;
-                SelectionItem {
-                    name: label,
-                    description: Some(preview),
-                    actions: vec![Box::new(move |tx| {
-                        match copy_text_to_clipboard(&content) {
-                            Ok(()) => tx.send(AppEvent::InsertHistoryCell(Box::new(
-                                history_cell::new_info_event(
-                                    "Copied code block to clipboard.".to_string(),
-                                    None,
-                                ),
-                            ))),
-                            Err(err) => tx.send(AppEvent::InsertHistoryCell(Box::new(
-                                history_cell::new_error_event(format!(
-                                    "Failed to copy code block to clipboard: {err}",
-                                )),
-                            ))),
-                        };
-                    })],
-                    dismiss_on_select: true,
-                    ..Default::default()
-                }
-            })
-            .collect();
+        {
+            matched += 1;
+            let snippet = message
+                .text
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or("")
+                .trim();
+            let preview = if snippet.is_empty() {
+                "(empty message)".to_string()
+            } else {
+                truncate_text(snippet, 80)
+            };
+            let role_label = message.role.label();
+            let content = message.text.clone();
+            items.push(SelectionItem {
+                name: format!("#{} · {}", idx + 1, role_label),
+                description: Some(preview),
+                search_value: Some(format!("{role_label} {content}")),
+                actions: vec![Box::new(move |tx| match copy_text_to_clipboard(&content) {
+                    Ok(()) => tx.send(AppEvent::InsertHistoryCell(Box::new(
+                        history_cell::new_info_event(
+                            "Copied message to clipboard.".to_string(),
+                            None,
+                        ),
+                    ))),
+                    Err(err) => tx.send(AppEvent::InsertHistoryCell(Box::new(
+                        history_cell::new_error_event(format!(
+                            "Failed to copy message to clipboard: {err}",
+                        )),
+                    ))),
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            });
+        }
+
+        if matched == 0 {
+            items.push(SelectionItem {
+                name: "No messages in this filter".to_string(),
+                is_disabled: true,
+                ..Default::default()
+            });
+        }
 
         self.bottom_pane.show_selection_view(SelectionViewParams {
-            title: Some("Copy code block".to_string()),
-            subtitle: Some("Choose a block to copy.".to_string()),
+            title: Some("Copy message".to_string()),
+            subtitle: Some(format!("Choose a message to copy · {}", filter.label())),
             footer_hint: Some(standard_popup_hint_line()),
             items,
+            is_searchable: true,
+            search_placeholder: Some("Type to search messages".to_string()),
             ..Default::default()
         });
         self.request_redraw();
+    }
+
+    fn code_block_candidates_for_scope(
+        &self,
+        scope: CodeBlockScope,
+    ) -> Vec<CopyCodeBlockCandidate> {
+        let mut candidates = Vec::new();
+        match scope {
+            CodeBlockScope::LastResponse => {
+                let Some(markdown) = self.last_response_markdown() else {
+                    return candidates;
+                };
+                let extracted = extract_fenced_code_blocks(markdown);
+                for (idx, candidate) in extracted.into_iter().enumerate() {
+                    let label = match candidate.language {
+                        Some(language) => format!("#{} · {}", idx + 1, language),
+                        None => format!("#{} · plain text", idx + 1),
+                    };
+                    let preview = first_non_empty_preview(&candidate.content);
+                    let search_value = format!("{label} {preview}");
+                    candidates.push(CopyCodeBlockCandidate {
+                        label,
+                        preview,
+                        search_value,
+                        content: candidate.content,
+                    });
+                }
+            }
+            CodeBlockScope::AllResponses => {
+                for (response_idx, message) in self
+                    .copyable_messages
+                    .iter()
+                    .rev()
+                    .filter(|message| message.role == CopyableRole::Response)
+                    .enumerate()
+                {
+                    let extracted = extract_fenced_code_blocks(&message.text);
+                    for (block_idx, candidate) in extracted.into_iter().enumerate() {
+                        let lang = candidate
+                            .language
+                            .unwrap_or_else(|| "plain text".to_string());
+                        let label = format!("R{} #{} · {lang}", response_idx + 1, block_idx + 1);
+                        let preview = first_non_empty_preview(&candidate.content);
+                        let search_value = format!("{label} {preview}");
+                        candidates.push(CopyCodeBlockCandidate {
+                            label,
+                            preview,
+                            search_value,
+                            content: candidate.content,
+                        });
+                    }
+                }
+            }
+        }
+        candidates
+    }
+
+    fn last_response_markdown(&self) -> Option<&str> {
+        self.last_assistant_output_markdown
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+    }
+
+    fn push_copyable_message(&mut self, role: CopyableRole, text: &str) {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        self.copyable_messages.push(CopyableMessage {
+            role,
+            text: trimmed.to_string(),
+        });
+    }
+
+    fn last_copyable_response_is(&self, text: &str) -> bool {
+        let text = text.trim();
+        self.copyable_messages
+            .last()
+            .is_some_and(|message| message.role == CopyableRole::Response && message.text == text)
     }
 
     fn send_next_queued_user_message(&mut self) {
@@ -5485,7 +5688,15 @@ impl ChatWidget {
     }
 
     fn open_progress_legend_popup(&mut self) {
-        let mut items = Vec::new();
+        let mut items = vec![SelectionItem {
+            name: format!("Mode: {}", self.progress_legend_mode),
+            description: Some("Choose when the progress legend is shown.".to_string()),
+            actions: vec![Box::new(|tx| {
+                tx.send(AppEvent::OpenProgressLegendModePicker);
+            })],
+            dismiss_on_select: false,
+            ..Default::default()
+        }];
         for category in [
             ProgressTraceCategory::Tool,
             ProgressTraceCategory::Edit,
@@ -5509,7 +5720,33 @@ impl ChatWidget {
         }
         self.show_selection_view(SelectionViewParams {
             title: Some("Progress Legend".to_string()),
-            subtitle: Some(format!("Mode: {}", self.progress_legend_mode)),
+            footer_hint: Some(standard_popup_hint_line()),
+            items,
+            ..Default::default()
+        });
+    }
+
+    pub(crate) fn open_progress_legend_mode_picker(&mut self) {
+        let mut items = Vec::new();
+        for mode in [
+            ProgressLegendMode::Off,
+            ProgressLegendMode::Auto,
+            ProgressLegendMode::Always,
+        ] {
+            items.push(SelectionItem {
+                name: mode.to_string(),
+                description: Some(format!("Set progress legend mode to '{mode}'.")),
+                is_current: self.progress_legend_mode == mode,
+                actions: vec![Box::new(move |tx| {
+                    tx.send(AppEvent::SetProgressLegendMode { mode });
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            });
+        }
+
+        self.show_selection_view(SelectionViewParams {
+            title: Some("Progress legend mode".to_string()),
             footer_hint: Some(standard_popup_hint_line()),
             items,
             ..Default::default()
@@ -8394,10 +8631,160 @@ const PLACEHOLDERS: [&str; 8] = [
     "Use /skills to list available skills",
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CopyableRole {
+    Response,
+    User,
+}
+
+impl CopyableRole {
+    fn label(self) -> &'static str {
+        match self {
+            CopyableRole::Response => "Response",
+            CopyableRole::User => "User",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CopyableMessage {
+    role: CopyableRole,
+    text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodeBlockScope {
+    LastResponse,
+    AllResponses,
+}
+
+impl CodeBlockScope {
+    fn label(self) -> &'static str {
+        match self {
+            CodeBlockScope::LastResponse => "Last response",
+            CodeBlockScope::AllResponses => "All responses",
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            CodeBlockScope::LastResponse => "Show blocks from the latest response only.",
+            CodeBlockScope::AllResponses => "Show blocks from all responses in this chat.",
+        }
+    }
+
+    fn toggle(self) -> Self {
+        match self {
+            CodeBlockScope::LastResponse => CodeBlockScope::AllResponses,
+            CodeBlockScope::AllResponses => CodeBlockScope::LastResponse,
+        }
+    }
+}
+
+impl From<CopyCodeBlockScope> for CodeBlockScope {
+    fn from(value: CopyCodeBlockScope) -> Self {
+        match value {
+            CopyCodeBlockScope::LastResponse => CodeBlockScope::LastResponse,
+            CopyCodeBlockScope::AllResponses => CodeBlockScope::AllResponses,
+        }
+    }
+}
+
+impl From<CodeBlockScope> for CopyCodeBlockScope {
+    fn from(value: CodeBlockScope) -> Self {
+        match value {
+            CodeBlockScope::LastResponse => CopyCodeBlockScope::LastResponse,
+            CodeBlockScope::AllResponses => CopyCodeBlockScope::AllResponses,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MessageFilter {
+    Responses,
+    User,
+    Both,
+}
+
+impl MessageFilter {
+    fn label(self) -> &'static str {
+        match self {
+            MessageFilter::Responses => "Responses",
+            MessageFilter::User => "User messages",
+            MessageFilter::Both => "Responses + user messages",
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            MessageFilter::Responses => "Only assistant responses",
+            MessageFilter::User => "Only your messages",
+            MessageFilter::Both => "Both response and user messages",
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            MessageFilter::Responses => MessageFilter::User,
+            MessageFilter::User => MessageFilter::Both,
+            MessageFilter::Both => MessageFilter::Responses,
+        }
+    }
+
+    fn includes(self, role: CopyableRole) -> bool {
+        match self {
+            MessageFilter::Responses => role == CopyableRole::Response,
+            MessageFilter::User => role == CopyableRole::User,
+            MessageFilter::Both => true,
+        }
+    }
+}
+
+impl From<CopyMessageFilter> for MessageFilter {
+    fn from(value: CopyMessageFilter) -> Self {
+        match value {
+            CopyMessageFilter::Responses => MessageFilter::Responses,
+            CopyMessageFilter::User => MessageFilter::User,
+            CopyMessageFilter::Both => MessageFilter::Both,
+        }
+    }
+}
+
+impl From<MessageFilter> for CopyMessageFilter {
+    fn from(value: MessageFilter) -> Self {
+        match value {
+            MessageFilter::Responses => CopyMessageFilter::Responses,
+            MessageFilter::User => CopyMessageFilter::User,
+            MessageFilter::Both => CopyMessageFilter::Both,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CopyCodeBlockCandidate {
+    label: String,
+    preview: String,
+    search_value: String,
+    content: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FencedCodeBlock {
     language: Option<String>,
     content: String,
+}
+
+fn first_non_empty_preview(content: &str) -> String {
+    let snippet = content
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("")
+        .trim();
+    if snippet.is_empty() {
+        "(empty)".to_string()
+    } else {
+        truncate_text(snippet, 80)
+    }
 }
 
 fn extract_fenced_code_blocks(markdown: &str) -> Vec<FencedCodeBlock> {

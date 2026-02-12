@@ -22,4 +22,7 @@ Press Tab to queue a message instead of sending it immediately; Enter always sen
 Paste an image with Ctrl+V to attach it to your next message.
 Press Ctrl+R (or F8) to copy the last assistant output.
 Press Ctrl+Shift+B (or F6) to choose and copy a code block from the last assistant output.
+Use /copy-last-output to copy the latest assistant response.
+Use /copy-code-block to open the code block copy picker.
+Use /copy-message to copy a previous chat message.
 You can resume a previous conversation by running `codex resume`

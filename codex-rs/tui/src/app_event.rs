@@ -33,6 +33,19 @@ use codex_protocol::config_types::Personality;
 use codex_protocol::openai_models::ReasoningEffort;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CopyCodeBlockScope {
+    LastResponse,
+    AllResponses,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CopyMessageFilter {
+    Responses,
+    User,
+    Both,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ChatExportFormat {
     Markdown,
     Json,
@@ -256,6 +269,19 @@ pub(crate) enum AppEvent {
     OpenAllModelsPopup {
         models: Vec<ModelPreset>,
     },
+
+    /// Open the code-block copy picker with a specific scope.
+    OpenCopyCodeBlockPicker {
+        scope: CopyCodeBlockScope,
+    },
+
+    /// Open the message copy picker with a specific filter.
+    OpenCopyMessagePicker {
+        filter: CopyMessageFilter,
+    },
+
+    /// Open the progress legend mode picker.
+    OpenProgressLegendModePicker,
 
     /// Open the confirmation prompt before enabling full access mode.
     OpenFullAccessConfirmation {

@@ -1769,6 +1769,16 @@ impl App {
             AppEvent::OpenAllModelsPopup { models } => {
                 self.chat_widget.open_all_models_popup(models);
             }
+            AppEvent::OpenCopyCodeBlockPicker { scope } => {
+                self.chat_widget
+                    .open_copy_code_block_picker_with_scope(scope);
+            }
+            AppEvent::OpenCopyMessagePicker { filter } => {
+                self.chat_widget.open_copy_message_picker(filter);
+            }
+            AppEvent::OpenProgressLegendModePicker => {
+                self.chat_widget.open_progress_legend_mode_picker();
+            }
             AppEvent::OpenFullAccessConfirmation {
                 preset,
                 return_to_permissions,

@@ -744,6 +744,31 @@ fn shortcut_overlay_lines(state: ShortcutsState) -> Vec<Line<'static>> {
         .copied()
         .unwrap_or_else(|| key_hint::ctrl(KeyCode::Char('v')));
     let paste_image = Line::from(vec![paste_key.into(), " to paste from clipboard".into()]);
+    let copy_last_output_key = state
+        .keybindings
+        .copy_last_output
+        .first()
+        .copied()
+        .unwrap_or_else(|| key_hint::ctrl(KeyCode::Char('r')));
+    let copy_last_output = Line::from(vec![
+        copy_last_output_key.into(),
+        " to copy last output".into(),
+    ]);
+    let copy_code_block_key = state
+        .keybindings
+        .copy_code_block
+        .first()
+        .copied()
+        .unwrap_or_else(|| {
+            KeyBinding::new(
+                KeyCode::Char('b'),
+                KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
+            )
+        });
+    let copy_code_block = Line::from(vec![
+        copy_code_block_key.into(),
+        " to copy code block".into(),
+    ]);
 
     let copy_prompt_key = state
         .keybindings
@@ -789,6 +814,8 @@ fn shortcut_overlay_lines(state: ShortcutsState) -> Vec<Line<'static>> {
         queue_message_tab,
         file_paths,
         paste_image,
+        copy_last_output,
+        copy_code_block,
         copy_prompt,
         external_editor,
         edit_previous,
