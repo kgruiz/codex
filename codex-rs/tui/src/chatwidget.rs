@@ -20,6 +20,7 @@
 //! is in progress and while MCP server startup is in progress. Those lifecycles are tracked
 //! independently (`agent_turn_running` and `mcp_startup_status`) and synchronized via
 //! `update_task_running_state`.
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -241,6 +242,7 @@ use codex_common::approval_presets::builtin_approval_presets;
 use codex_core::AuthManager;
 use codex_core::CodexAuth;
 use codex_core::ThreadManager;
+use codex_core::config::types::CopyUiMode;
 use codex_core::config::types::DiffView;
 use codex_core::config::types::ProgressLegendMode;
 use codex_core::protocol::AskForApproval;
@@ -570,6 +572,8 @@ pub(crate) struct ChatWidget {
     has_completed_assistant_message: bool,
     last_assistant_output_markdown: Option<String>,
     copyable_messages: Vec<CopyableMessage>,
+    copy_code_ui_state: Option<CopyCodeUiState>,
+    copy_message_ui_state: Option<CopyMessageUiState>,
     forked_from: Option<ThreadId>,
     frame_requester: FrameRequester,
     // Whether to include the initial welcome banner on session configured
@@ -2550,6 +2554,8 @@ impl ChatWidget {
             has_completed_assistant_message: false,
             last_assistant_output_markdown: None,
             copyable_messages: Vec::new(),
+            copy_code_ui_state: None,
+            copy_message_ui_state: None,
             forked_from: None,
             queued_user_messages: VecDeque::new(),
             next_queued_user_message_id: 1,
@@ -2735,6 +2741,8 @@ impl ChatWidget {
             has_completed_assistant_message: false,
             last_assistant_output_markdown: None,
             copyable_messages: Vec::new(),
+            copy_code_ui_state: None,
+            copy_message_ui_state: None,
             forked_from: None,
             saw_plan_update_this_turn: false,
             saw_plan_item_this_turn: false,
@@ -2908,6 +2916,8 @@ impl ChatWidget {
             has_completed_assistant_message: false,
             last_assistant_output_markdown: None,
             copyable_messages: Vec::new(),
+            copy_code_ui_state: None,
+            copy_message_ui_state: None,
             forked_from: None,
             queued_user_messages: VecDeque::new(),
             next_queued_user_message_id: 1,
@@ -4656,17 +4666,100 @@ impl ChatWidget {
     }
 
     pub(crate) fn open_copy_code_block_picker_with_scope(&mut self, scope: CopyCodeBlockScope) {
-        self.open_copy_code_block_picker_with_scope_internal(scope.into());
+        let scope = scope.into();
+        self.copy_code_ui_state = Some(CopyCodeUiState::new(
+            scope,
+            self.config.tui_copy_code_ui_mode,
+        ));
+        self.show_copy_code_block_view();
     }
 
-    fn open_copy_code_block_picker_with_scope_internal(&mut self, scope: CodeBlockScope) {
+    pub(crate) fn set_copy_code_block_scope(&mut self, scope: CopyCodeBlockScope) {
+        let scope = scope.into();
+        if let Some(state) = self.copy_code_ui_state.as_mut() {
+            state.scope = scope;
+            state.selected_id = None;
+            state.selected_ids.clear();
+        } else {
+            self.copy_code_ui_state = Some(CopyCodeUiState::new(
+                scope,
+                self.config.tui_copy_code_ui_mode,
+            ));
+        }
+        self.show_copy_code_block_view();
+    }
+
+    pub(crate) fn toggle_copy_code_block_ui_mode(&mut self) {
+        if let Some(state) = self.copy_code_ui_state.as_mut() {
+            state.ui_mode = match state.ui_mode {
+                CopyUiMode::Picker => CopyUiMode::Navigator,
+                CopyUiMode::Navigator => CopyUiMode::Picker,
+            };
+        }
+        self.show_copy_code_block_view();
+    }
+
+    pub(crate) fn toggle_copy_code_block_multi_select_mode(&mut self) {
+        if let Some(state) = self.copy_code_ui_state.as_mut() {
+            state.multi_select = !state.multi_select;
+            if !state.multi_select {
+                state.selected_ids.clear();
+            }
+        }
+        self.show_copy_code_block_view();
+    }
+
+    pub(crate) fn toggle_copy_code_block_selection(&mut self, id: String) {
+        if let Some(state) = self.copy_code_ui_state.as_mut() {
+            state.selected_id = Some(id.clone());
+            if !state.selected_ids.insert(id.clone()) {
+                state.selected_ids.remove(&id);
+            }
+        }
+        self.show_copy_code_block_view();
+    }
+
+    pub(crate) fn copy_selected_code_blocks(&mut self) {
+        let Some(state) = self.copy_code_ui_state.as_ref() else {
+            return;
+        };
+        if state.selected_ids.is_empty() {
+            self.add_to_history(history_cell::new_info_event(
+                "No code blocks selected.".to_string(),
+                None,
+            ));
+            self.request_redraw();
+            return;
+        }
+        let selected = state.selected_ids.clone();
+        let contents = self
+            .code_block_candidates_for_scope(state.scope)
+            .into_iter()
+            .filter(|candidate| selected.contains(&candidate.id))
+            .map(|candidate| candidate.content)
+            .collect::<Vec<_>>();
+        if contents.is_empty() {
+            self.add_to_history(history_cell::new_info_event(
+                "No code blocks selected.".to_string(),
+                None,
+            ));
+            self.request_redraw();
+            return;
+        }
+        self.copy_joined_items_to_clipboard(contents, "code block", "code blocks");
+    }
+
+    fn show_copy_code_block_view(&mut self) {
+        let Some(state) = self.copy_code_ui_state.clone() else {
+            return;
+        };
         let has_any_response = self
             .copyable_messages
             .iter()
             .any(|message| message.role == CopyableRole::Response);
-        let candidates = self.code_block_candidates_for_scope(scope);
+        let candidates = self.code_block_candidates_for_scope(state.scope);
         if candidates.is_empty() && !has_any_response {
-            let message = match scope {
+            let message = match state.scope {
                 CodeBlockScope::LastResponse => {
                     if self.last_response_markdown().is_some() {
                         "No code blocks to copy."
@@ -4681,18 +4774,62 @@ impl ChatWidget {
             return;
         }
 
-        let mut items = vec![SelectionItem {
-            name: format!("Scope: {}", scope.label()),
-            description: Some(scope.description().to_string()),
-            actions: vec![Box::new(move |tx| {
-                tx.send(AppEvent::OpenCopyCodeBlockPicker {
-                    scope: scope.toggle().into(),
-                });
-            })],
-            dismiss_on_select: false,
-            ..Default::default()
-        }];
+        let mut items = vec![
+            SelectionItem {
+                name: format!("View: {}", copy_ui_mode_label(state.ui_mode)),
+                description: Some(
+                    "Switch between picker and navigator (session only).".to_string(),
+                ),
+                actions: vec![Box::new(|tx| {
+                    tx.send(AppEvent::ToggleCopyCodeBlockUiMode);
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+            SelectionItem {
+                name: format!("Scope: {}", state.scope.label()),
+                description: Some(state.scope.description().to_string()),
+                actions: vec![Box::new(move |tx| {
+                    tx.send(AppEvent::SetCopyCodeBlockScope {
+                        scope: state.scope.toggle().into(),
+                    });
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+            SelectionItem {
+                name: format!(
+                    "Selection: {}",
+                    if state.multi_select {
+                        "multi"
+                    } else {
+                        "single"
+                    }
+                ),
+                description: Some("Toggle multi-select mode.".to_string()),
+                actions: vec![Box::new(|tx| {
+                    tx.send(AppEvent::ToggleCopyCodeBlockMultiSelect);
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+        ];
 
+        if state.multi_select {
+            let selected_count = state.selected_ids.len();
+            items.push(SelectionItem {
+                name: format!("Copy selected ({selected_count})"),
+                description: Some("Copy all selected code blocks.".to_string()),
+                is_disabled: selected_count == 0,
+                actions: vec![Box::new(|tx| {
+                    tx.send(AppEvent::CopySelectedCodeBlocks);
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            });
+        }
+
+        let top_rows = items.len();
         let has_candidates = !candidates.is_empty();
         if !has_candidates {
             items.push(SelectionItem {
@@ -4702,14 +4839,25 @@ impl ChatWidget {
             });
         }
 
-        items.extend(candidates.into_iter().map(|candidate| {
-            let content = candidate.content;
-            SelectionItem {
-                name: candidate.label,
-                description: Some(candidate.preview),
-                search_value: Some(candidate.search_value),
-                actions: vec![Box::new(move |tx| {
-                    match copy_text_to_clipboard(&content) {
+        for candidate in &candidates {
+            let id = candidate.id.clone();
+            let content = candidate.content.clone();
+            let selected = state.selected_ids.contains(&id);
+            let label = if state.multi_select {
+                format!("[{}] {}", if selected { "x" } else { " " }, candidate.label)
+            } else {
+                candidate.label.clone()
+            };
+            items.push(SelectionItem {
+                name: label,
+                description: Some(candidate.preview.clone()),
+                search_value: Some(candidate.search_value.clone()),
+                actions: if state.multi_select {
+                    vec![Box::new(move |tx| {
+                        tx.send(AppEvent::ToggleCopyCodeBlockSelection { id: id.clone() });
+                    })]
+                } else {
+                    vec![Box::new(move |tx| match copy_text_to_clipboard(&content) {
                         Ok(()) => tx.send(AppEvent::InsertHistoryCell(Box::new(
                             history_cell::new_info_event(
                                 "Copied code block to clipboard.".to_string(),
@@ -4721,27 +4869,128 @@ impl ChatWidget {
                                 "Failed to copy code block to clipboard: {err}",
                             )),
                         ))),
-                    };
-                })],
+                    })]
+                },
                 dismiss_on_select: true,
                 ..Default::default()
-            }
-        }));
+            });
+        }
+
+        let initial_selected_idx =
+            selected_index_for_candidates(top_rows, &candidates, state.selected_id.as_deref())
+                .or_else(|| has_candidates.then_some(top_rows))
+                .or(Some(0));
+        let (subtitle, searchable, search_placeholder) = match state.ui_mode {
+            CopyUiMode::Picker => (
+                format!("Choose a block to copy · {}", state.scope.label()),
+                true,
+                Some("Type to search code blocks".to_string()),
+            ),
+            CopyUiMode::Navigator => (
+                format!("Navigate blocks in chat order · {}", state.scope.label()),
+                false,
+                None,
+            ),
+        };
 
         self.bottom_pane.show_selection_view(SelectionViewParams {
             title: Some("Copy code block".to_string()),
-            subtitle: Some(format!("Choose a block to copy · {}", scope.label())),
+            subtitle: Some(subtitle),
             footer_hint: Some(standard_popup_hint_line()),
-            is_searchable: true,
-            search_placeholder: Some("Type to search code blocks".to_string()),
+            is_searchable: searchable,
+            search_placeholder,
             items,
-            initial_selected_idx: Some(if has_candidates { 1 } else { 0 }),
+            initial_selected_idx,
             ..Default::default()
         });
         self.request_redraw();
     }
 
     pub(crate) fn open_copy_message_picker(&mut self, filter: CopyMessageFilter) {
+        let filter = filter.into();
+        self.copy_message_ui_state = Some(CopyMessageUiState::new(
+            filter,
+            self.config.tui_copy_message_ui_mode,
+        ));
+        self.show_copy_message_view();
+    }
+
+    pub(crate) fn set_copy_message_filter(&mut self, filter: CopyMessageFilter) {
+        let filter = filter.into();
+        if let Some(state) = self.copy_message_ui_state.as_mut() {
+            state.filter = filter;
+            state.selected_id = None;
+            state.selected_ids.clear();
+        } else {
+            self.copy_message_ui_state = Some(CopyMessageUiState::new(
+                filter,
+                self.config.tui_copy_message_ui_mode,
+            ));
+        }
+        self.show_copy_message_view();
+    }
+
+    pub(crate) fn toggle_copy_message_ui_mode(&mut self) {
+        if let Some(state) = self.copy_message_ui_state.as_mut() {
+            state.ui_mode = match state.ui_mode {
+                CopyUiMode::Picker => CopyUiMode::Navigator,
+                CopyUiMode::Navigator => CopyUiMode::Picker,
+            };
+        }
+        self.show_copy_message_view();
+    }
+
+    pub(crate) fn toggle_copy_message_multi_select_mode(&mut self) {
+        if let Some(state) = self.copy_message_ui_state.as_mut() {
+            state.multi_select = !state.multi_select;
+            if !state.multi_select {
+                state.selected_ids.clear();
+            }
+        }
+        self.show_copy_message_view();
+    }
+
+    pub(crate) fn toggle_copy_message_selection(&mut self, id: String) {
+        if let Some(state) = self.copy_message_ui_state.as_mut() {
+            state.selected_id = Some(id.clone());
+            if !state.selected_ids.insert(id.clone()) {
+                state.selected_ids.remove(&id);
+            }
+        }
+        self.show_copy_message_view();
+    }
+
+    pub(crate) fn copy_selected_messages(&mut self) {
+        let Some(state) = self.copy_message_ui_state.as_ref() else {
+            return;
+        };
+        if state.selected_ids.is_empty() {
+            self.add_to_history(history_cell::new_info_event(
+                "No messages selected.".to_string(),
+                None,
+            ));
+            self.request_redraw();
+            return;
+        }
+        let selected = state.selected_ids.clone();
+        let contents = self
+            .message_candidates_for_filter(state.filter)
+            .into_iter()
+            .filter(|candidate| selected.contains(&candidate.id))
+            .map(|candidate| candidate.content)
+            .collect::<Vec<_>>();
+        if contents.is_empty() {
+            self.add_to_history(history_cell::new_info_event(
+                "No messages selected.".to_string(),
+                None,
+            ));
+            self.request_redraw();
+            return;
+        }
+        self.copy_joined_items_to_clipboard(contents, "message", "messages");
+    }
+
+    fn show_copy_message_view(&mut self) {
         if self.copyable_messages.is_empty() {
             self.add_to_history(history_cell::new_info_event(
                 "No messages to copy.".to_string(),
@@ -4750,83 +4999,196 @@ impl ChatWidget {
             self.request_redraw();
             return;
         }
-
-        let filter = MessageFilter::from(filter);
-        let mut items = vec![SelectionItem {
-            name: format!("Filter: {}", filter.label()),
-            description: Some(filter.description().to_string()),
-            actions: vec![Box::new(move |tx| {
-                tx.send(AppEvent::OpenCopyMessagePicker {
-                    filter: filter.next().into(),
-                });
-            })],
-            dismiss_on_select: false,
-            ..Default::default()
-        }];
-
-        let mut matched = 0usize;
-        for (idx, message) in self
-            .copyable_messages
-            .iter()
-            .rev()
-            .filter(|message| filter.includes(message.role))
-            .enumerate()
-        {
-            matched += 1;
-            let snippet = message
-                .text
-                .lines()
-                .find(|line| !line.trim().is_empty())
-                .unwrap_or("")
-                .trim();
-            let preview = if snippet.is_empty() {
-                "(empty message)".to_string()
-            } else {
-                truncate_text(snippet, 80)
-            };
-            let role_label = message.role.label();
-            let content = message.text.clone();
+        let Some(state) = self.copy_message_ui_state.clone() else {
+            return;
+        };
+        let candidates = self.message_candidates_for_filter(state.filter);
+        let mut items = vec![
+            SelectionItem {
+                name: format!("View: {}", copy_ui_mode_label(state.ui_mode)),
+                description: Some(
+                    "Switch between picker and navigator (session only).".to_string(),
+                ),
+                actions: vec![Box::new(|tx| {
+                    tx.send(AppEvent::ToggleCopyMessageUiMode);
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+            SelectionItem {
+                name: format!("Filter: {}", state.filter.label()),
+                description: Some(state.filter.description().to_string()),
+                actions: vec![Box::new(move |tx| {
+                    tx.send(AppEvent::SetCopyMessageFilter {
+                        filter: state.filter.next().into(),
+                    });
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+            SelectionItem {
+                name: format!(
+                    "Selection: {}",
+                    if state.multi_select {
+                        "multi"
+                    } else {
+                        "single"
+                    }
+                ),
+                description: Some("Toggle multi-select mode.".to_string()),
+                actions: vec![Box::new(|tx| {
+                    tx.send(AppEvent::ToggleCopyMessageMultiSelect);
+                })],
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+        ];
+        if state.multi_select {
+            let selected_count = state.selected_ids.len();
             items.push(SelectionItem {
-                name: format!("#{} · {}", idx + 1, role_label),
-                description: Some(preview),
-                search_value: Some(format!("{role_label} {content}")),
-                actions: vec![Box::new(move |tx| match copy_text_to_clipboard(&content) {
-                    Ok(()) => tx.send(AppEvent::InsertHistoryCell(Box::new(
-                        history_cell::new_info_event(
-                            "Copied message to clipboard.".to_string(),
-                            None,
-                        ),
-                    ))),
-                    Err(err) => tx.send(AppEvent::InsertHistoryCell(Box::new(
-                        history_cell::new_error_event(format!(
-                            "Failed to copy message to clipboard: {err}",
-                        )),
-                    ))),
+                name: format!("Copy selected ({selected_count})"),
+                description: Some("Copy all selected messages.".to_string()),
+                is_disabled: selected_count == 0,
+                actions: vec![Box::new(|tx| {
+                    tx.send(AppEvent::CopySelectedMessages);
                 })],
                 dismiss_on_select: true,
                 ..Default::default()
             });
         }
 
-        if matched == 0 {
+        let top_rows = items.len();
+        let has_candidates = !candidates.is_empty();
+        if !has_candidates {
             items.push(SelectionItem {
                 name: "No messages in this filter".to_string(),
                 is_disabled: true,
                 ..Default::default()
             });
         }
+        for candidate in &candidates {
+            let id = candidate.id.clone();
+            let content = candidate.content.clone();
+            let selected = state.selected_ids.contains(&id);
+            let label = if state.multi_select {
+                format!("[{}] {}", if selected { "x" } else { " " }, candidate.label)
+            } else {
+                candidate.label.clone()
+            };
+            items.push(SelectionItem {
+                name: label,
+                description: Some(candidate.preview.clone()),
+                search_value: Some(candidate.search_value.clone()),
+                actions: if state.multi_select {
+                    vec![Box::new(move |tx| {
+                        tx.send(AppEvent::ToggleCopyMessageSelection { id: id.clone() });
+                    })]
+                } else {
+                    vec![Box::new(move |tx| match copy_text_to_clipboard(&content) {
+                        Ok(()) => tx.send(AppEvent::InsertHistoryCell(Box::new(
+                            history_cell::new_info_event(
+                                "Copied message to clipboard.".to_string(),
+                                None,
+                            ),
+                        ))),
+                        Err(err) => tx.send(AppEvent::InsertHistoryCell(Box::new(
+                            history_cell::new_error_event(format!(
+                                "Failed to copy message to clipboard: {err}",
+                            )),
+                        ))),
+                    })]
+                },
+                dismiss_on_select: true,
+                ..Default::default()
+            });
+        }
 
+        let initial_selected_idx =
+            selected_index_for_candidates(top_rows, &candidates, state.selected_id.as_deref())
+                .or_else(|| has_candidates.then_some(top_rows))
+                .or(Some(0));
+        let (subtitle, searchable, search_placeholder) = match state.ui_mode {
+            CopyUiMode::Picker => (
+                format!("Choose a message to copy · {}", state.filter.label()),
+                true,
+                Some("Type to search messages".to_string()),
+            ),
+            CopyUiMode::Navigator => (
+                format!("Navigate messages in chat order · {}", state.filter.label()),
+                false,
+                None,
+            ),
+        };
         self.bottom_pane.show_selection_view(SelectionViewParams {
             title: Some("Copy message".to_string()),
-            subtitle: Some(format!("Choose a message to copy · {}", filter.label())),
+            subtitle: Some(subtitle),
             footer_hint: Some(standard_popup_hint_line()),
             items,
-            is_searchable: true,
-            search_placeholder: Some("Type to search messages".to_string()),
-            initial_selected_idx: Some(if matched == 0 { 0 } else { 1 }),
+            is_searchable: searchable,
+            search_placeholder,
+            initial_selected_idx,
             ..Default::default()
         });
         self.request_redraw();
+    }
+
+    fn copy_joined_items_to_clipboard(
+        &mut self,
+        contents: Vec<String>,
+        singular: &str,
+        plural: &str,
+    ) {
+        let text = contents.join("\n\n");
+        match copy_text_to_clipboard(&text) {
+            Ok(()) => self.add_to_history(history_cell::new_info_event(
+                format!(
+                    "Copied {} {} to clipboard.",
+                    contents.len(),
+                    if contents.len() == 1 {
+                        singular
+                    } else {
+                        plural
+                    }
+                ),
+                None,
+            )),
+            Err(err) => self.add_to_history(history_cell::new_error_event(format!(
+                "Failed to copy selected {plural} to clipboard: {err}",
+            ))),
+        }
+        self.request_redraw();
+    }
+
+    fn message_candidates_for_filter(&self, filter: MessageFilter) -> Vec<CopyMessageCandidate> {
+        self.copyable_messages
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|(_, message)| filter.includes(message.role))
+            .enumerate()
+            .map(|(display_idx, (message_idx, message))| {
+                let snippet = message
+                    .text
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or("")
+                    .trim();
+                let preview = if snippet.is_empty() {
+                    "(empty message)".to_string()
+                } else {
+                    truncate_text(snippet, 80)
+                };
+                let role_label = message.role.label();
+                let content = message.text.clone();
+                CopyMessageCandidate {
+                    id: format!("msg-{message_idx}"),
+                    label: format!("#{} · {}", display_idx + 1, role_label),
+                    preview,
+                    search_value: format!("{role_label} {content}"),
+                    content,
+                }
+            })
+            .collect()
     }
 
     fn code_block_candidates_for_scope(
@@ -4848,6 +5210,7 @@ impl ChatWidget {
                     let preview = first_non_empty_preview(&candidate.content);
                     let search_value = format!("{label} {preview}");
                     candidates.push(CopyCodeBlockCandidate {
+                        id: format!("last-{}", idx + 1),
                         label,
                         preview,
                         search_value,
@@ -4872,6 +5235,7 @@ impl ChatWidget {
                         let preview = first_non_empty_preview(&candidate.content);
                         let search_value = format!("{label} {preview}");
                         candidates.push(CopyCodeBlockCandidate {
+                            id: format!("all-{}-{}", response_idx + 1, block_idx + 1),
                             label,
                             preview,
                             search_value,
@@ -8766,10 +9130,101 @@ impl From<MessageFilter> for CopyMessageFilter {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CopyCodeBlockCandidate {
+    id: String,
     label: String,
     preview: String,
     search_value: String,
     content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CopyMessageCandidate {
+    id: String,
+    label: String,
+    preview: String,
+    search_value: String,
+    content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CopyCodeUiState {
+    scope: CodeBlockScope,
+    ui_mode: CopyUiMode,
+    multi_select: bool,
+    selected_id: Option<String>,
+    selected_ids: BTreeSet<String>,
+}
+
+impl CopyCodeUiState {
+    fn new(scope: CodeBlockScope, ui_mode: CopyUiMode) -> Self {
+        Self {
+            scope,
+            ui_mode,
+            multi_select: false,
+            selected_id: None,
+            selected_ids: BTreeSet::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CopyMessageUiState {
+    filter: MessageFilter,
+    ui_mode: CopyUiMode,
+    multi_select: bool,
+    selected_id: Option<String>,
+    selected_ids: BTreeSet<String>,
+}
+
+impl CopyMessageUiState {
+    fn new(filter: MessageFilter, ui_mode: CopyUiMode) -> Self {
+        Self {
+            filter,
+            ui_mode,
+            multi_select: false,
+            selected_id: None,
+            selected_ids: BTreeSet::new(),
+        }
+    }
+}
+
+fn copy_ui_mode_label(mode: CopyUiMode) -> &'static str {
+    match mode {
+        CopyUiMode::Picker => "picker",
+        CopyUiMode::Navigator => "navigator",
+    }
+}
+
+fn selected_index_for_candidates<T>(
+    top_rows: usize,
+    candidates: &[T],
+    selected_id: Option<&str>,
+) -> Option<usize>
+where
+    T: CopyCandidateId,
+{
+    selected_id.and_then(|id| {
+        candidates
+            .iter()
+            .position(|candidate| candidate.candidate_id() == id)
+            .map(|idx| top_rows + idx)
+    })
+}
+
+trait CopyCandidateId {
+    fn candidate_id(&self) -> &str;
+}
+
+impl CopyCandidateId for CopyCodeBlockCandidate {
+    fn candidate_id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl CopyCandidateId for CopyMessageCandidate {
+    fn candidate_id(&self) -> &str {
+        &self.id
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

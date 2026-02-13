@@ -270,15 +270,43 @@ pub(crate) enum AppEvent {
         models: Vec<ModelPreset>,
     },
 
-    /// Open the code-block copy picker with a specific scope.
-    OpenCopyCodeBlockPicker {
+    /// Change the copy-code scope and reopen the current copy UI.
+    SetCopyCodeBlockScope {
         scope: CopyCodeBlockScope,
     },
 
-    /// Open the message copy picker with a specific filter.
-    OpenCopyMessagePicker {
+    /// Toggle copy-code UI mode between picker and navigator (session only).
+    ToggleCopyCodeBlockUiMode,
+
+    /// Toggle copy-code selection mode between single and multi (session only).
+    ToggleCopyCodeBlockMultiSelect,
+
+    /// Toggle a code-block candidate in multi-select mode.
+    ToggleCopyCodeBlockSelection {
+        id: String,
+    },
+
+    /// Copy all currently selected code blocks.
+    CopySelectedCodeBlocks,
+
+    /// Change the copy-message filter and reopen the current copy UI.
+    SetCopyMessageFilter {
         filter: CopyMessageFilter,
     },
+
+    /// Toggle copy-message UI mode between picker and navigator (session only).
+    ToggleCopyMessageUiMode,
+
+    /// Toggle copy-message selection mode between single and multi (session only).
+    ToggleCopyMessageMultiSelect,
+
+    /// Toggle a message candidate in multi-select mode.
+    ToggleCopyMessageSelection {
+        id: String,
+    },
+
+    /// Copy all currently selected messages.
+    CopySelectedMessages,
 
     /// Open the progress legend mode picker.
     OpenProgressLegendModePicker,

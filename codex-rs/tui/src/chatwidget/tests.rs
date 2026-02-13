@@ -819,6 +819,8 @@ async fn make_chatwidget_manual(
         has_completed_assistant_message: false,
         last_assistant_output_markdown: None,
         copyable_messages: Vec::new(),
+        copy_code_ui_state: None,
+        copy_message_ui_state: None,
         forked_from: None,
         frame_requester: FrameRequester::test_dummy(),
         show_welcome_banner: true,
@@ -2035,12 +2037,13 @@ async fn copy_code_block_picker_scope_toggle_reopens_with_all_responses() {
     );
 
     chat.handle_key_event(KeyEvent::from(KeyCode::Up));
+    chat.handle_key_event(KeyEvent::from(KeyCode::Up));
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     let scope = match rx.try_recv() {
-        Ok(AppEvent::OpenCopyCodeBlockPicker { scope }) => scope,
-        other => panic!("expected OpenCopyCodeBlockPicker event, got {other:?}"),
+        Ok(AppEvent::SetCopyCodeBlockScope { scope }) => scope,
+        other => panic!("expected SetCopyCodeBlockScope event, got {other:?}"),
     };
-    chat.open_copy_code_block_picker_with_scope(scope);
+    chat.set_copy_code_block_scope(scope);
 
     let popup = render_bottom_popup(&chat, 90);
     assert!(

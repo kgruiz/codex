@@ -301,6 +301,13 @@
       },
       "type": "object"
     },
+    "CopyUiMode": {
+      "enum": [
+        "picker",
+        "navigator"
+      ],
+      "type": "string"
+    },
     "DiffView": {
       "enum": [
         "pretty",
@@ -1130,6 +1137,24 @@
           "default": true,
           "description": "Enable animations (welcome screen, shimmer effects, spinners). Defaults to `true`.",
           "type": "boolean"
+        },
+        "copy_code_ui_mode": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CopyUiMode"
+            }
+          ],
+          "default": "picker",
+          "description": "Default UI for copy-code actions (`picker` or `navigator`).\n\nDefaults to `picker`."
+        },
+        "copy_message_ui_mode": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CopyUiMode"
+            }
+          ],
+          "default": "picker",
+          "description": "Default UI for copy-message actions (`picker` or `navigator`).\n\nDefaults to `picker`."
         },
         "diff_view": {
           "allOf": [

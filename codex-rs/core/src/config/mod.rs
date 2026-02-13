@@ -1,6 +1,7 @@
 use crate::auth::AuthCredentialsStoreMode;
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
+use crate::config::types::CopyUiMode;
 use crate::config::types::DEFAULT_OTEL_ENVIRONMENT;
 use crate::config::types::DiffView;
 use crate::config::types::History;
@@ -239,6 +240,12 @@ pub struct Config {
 
     /// Optional category-level style overrides for progress timeline bars.
     pub tui_progress_trace_style: Option<ProgressTraceStyleConfig>,
+
+    /// Default UI for copy-code actions (`picker` or `navigator`).
+    pub tui_copy_code_ui_mode: CopyUiMode,
+
+    /// Default UI for copy-message actions (`picker` or `navigator`).
+    pub tui_copy_message_ui_mode: CopyUiMode,
 
     /// Default diff format shown in the TUI.
     pub diff_view: DiffView,
@@ -1750,6 +1757,16 @@ impl Config {
                 .tui
                 .as_ref()
                 .and_then(|t| t.progress_trace_style.clone()),
+            tui_copy_code_ui_mode: cfg
+                .tui
+                .as_ref()
+                .map(|t| t.copy_code_ui_mode)
+                .unwrap_or_default(),
+            tui_copy_message_ui_mode: cfg
+                .tui
+                .as_ref()
+                .map(|t| t.copy_message_ui_mode)
+                .unwrap_or_default(),
             diff_view: cfg.tui.as_ref().map(|t| t.diff_view).unwrap_or_default(),
             otel: {
                 let t: OtelConfigToml = cfg.otel.unwrap_or_default();
@@ -1989,6 +2006,8 @@ persistence = "none"
                 status_line: None,
                 progress_legend_mode: ProgressLegendMode::Off,
                 progress_trace_style: None,
+                copy_code_ui_mode: CopyUiMode::Picker,
+                copy_message_ui_mode: CopyUiMode::Picker,
                 diff_view: DiffView::Pretty,
             }
         );
@@ -3944,6 +3963,8 @@ model_verbosity = "high"
                 tui_status_line: None,
                 tui_progress_legend_mode: ProgressLegendMode::Off,
                 tui_progress_trace_style: None,
+                tui_copy_code_ui_mode: CopyUiMode::Picker,
+                tui_copy_message_ui_mode: CopyUiMode::Picker,
                 diff_view: DiffView::Pretty,
                 otel: OtelConfig::default(),
             },
@@ -4035,6 +4056,8 @@ model_verbosity = "high"
             tui_status_line: None,
             tui_progress_legend_mode: ProgressLegendMode::Off,
             tui_progress_trace_style: None,
+            tui_copy_code_ui_mode: CopyUiMode::Picker,
+            tui_copy_message_ui_mode: CopyUiMode::Picker,
             diff_view: DiffView::Pretty,
             otel: OtelConfig::default(),
         };
@@ -4141,6 +4164,8 @@ model_verbosity = "high"
             tui_status_line: None,
             tui_progress_legend_mode: ProgressLegendMode::Off,
             tui_progress_trace_style: None,
+            tui_copy_code_ui_mode: CopyUiMode::Picker,
+            tui_copy_message_ui_mode: CopyUiMode::Picker,
             diff_view: DiffView::Pretty,
             otel: OtelConfig::default(),
         };
@@ -4233,6 +4258,8 @@ model_verbosity = "high"
             tui_status_line: None,
             tui_progress_legend_mode: ProgressLegendMode::Off,
             tui_progress_trace_style: None,
+            tui_copy_code_ui_mode: CopyUiMode::Picker,
+            tui_copy_message_ui_mode: CopyUiMode::Picker,
             diff_view: DiffView::Pretty,
             otel: OtelConfig::default(),
         };

@@ -467,6 +467,14 @@ pub enum ProgressLegendMode {
     Always,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum CopyUiMode {
+    #[default]
+    Picker,
+    Navigator,
+}
+
 impl fmt::Display for ProgressLegendMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match self {
@@ -572,6 +580,18 @@ pub struct Tui {
     /// Optional category-level style overrides for progress timeline bars.
     #[serde(default)]
     pub progress_trace_style: Option<ProgressTraceStyleConfig>,
+
+    /// Default UI for copy-code actions (`picker` or `navigator`).
+    ///
+    /// Defaults to `picker`.
+    #[serde(default)]
+    pub copy_code_ui_mode: CopyUiMode,
+
+    /// Default UI for copy-message actions (`picker` or `navigator`).
+    ///
+    /// Defaults to `picker`.
+    #[serde(default)]
+    pub copy_message_ui_mode: CopyUiMode,
 
     /// Default diff format shown in the TUI.
     ///

@@ -1769,12 +1769,35 @@ impl App {
             AppEvent::OpenAllModelsPopup { models } => {
                 self.chat_widget.open_all_models_popup(models);
             }
-            AppEvent::OpenCopyCodeBlockPicker { scope } => {
-                self.chat_widget
-                    .open_copy_code_block_picker_with_scope(scope);
+            AppEvent::SetCopyCodeBlockScope { scope } => {
+                self.chat_widget.set_copy_code_block_scope(scope);
             }
-            AppEvent::OpenCopyMessagePicker { filter } => {
-                self.chat_widget.open_copy_message_picker(filter);
+            AppEvent::ToggleCopyCodeBlockUiMode => {
+                self.chat_widget.toggle_copy_code_block_ui_mode();
+            }
+            AppEvent::ToggleCopyCodeBlockMultiSelect => {
+                self.chat_widget.toggle_copy_code_block_multi_select_mode();
+            }
+            AppEvent::ToggleCopyCodeBlockSelection { id } => {
+                self.chat_widget.toggle_copy_code_block_selection(id);
+            }
+            AppEvent::CopySelectedCodeBlocks => {
+                self.chat_widget.copy_selected_code_blocks();
+            }
+            AppEvent::SetCopyMessageFilter { filter } => {
+                self.chat_widget.set_copy_message_filter(filter);
+            }
+            AppEvent::ToggleCopyMessageUiMode => {
+                self.chat_widget.toggle_copy_message_ui_mode();
+            }
+            AppEvent::ToggleCopyMessageMultiSelect => {
+                self.chat_widget.toggle_copy_message_multi_select_mode();
+            }
+            AppEvent::ToggleCopyMessageSelection { id } => {
+                self.chat_widget.toggle_copy_message_selection(id);
+            }
+            AppEvent::CopySelectedMessages => {
+                self.chat_widget.copy_selected_messages();
             }
             AppEvent::OpenProgressLegendModePicker => {
                 self.chat_widget.open_progress_legend_mode_picker();
