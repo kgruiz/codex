@@ -13,20 +13,14 @@ use similar::TextDiff;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::OnceLock;
-use syntect::easy::HighlightLines;
-use syntect::highlighting::Color as SyntectColor;
-use syntect::highlighting::FontStyle as SyntectFontStyle;
-use syntect::highlighting::Style as SyntectStyle;
-use syntect::highlighting::Theme;
-use syntect::highlighting::ThemeSet;
-use syntect::parsing::SyntaxSet;
 use unicode_width::UnicodeWidthStr;
 
 use crate::exec_command::relativize_to_home;
 use crate::render::line_utils::line_to_static;
 use crate::render::line_utils::prefix_lines;
 use crate::render::renderable::Renderable;
+use crate::render::syntect::DEFAULT_SYNTAX_THEME;
+use crate::render::syntect::SyntectHighlighter;
 use crate::wrapping::RtOptions;
 use crate::wrapping::word_wrap_line;
 use codex_core::config::types::DiffView;
@@ -99,7 +93,7 @@ pub(crate) fn create_diff_summary(
     wrap_cols: usize,
     view: DiffView,
 ) -> Vec<RtLine<'static>> {
-    let view_lines = render_diff_view(changes, cwd, wrap_cols, view);
+    let view_lines = render_diff_view(changes, cwd, wrap_cols, view, DEFAULT_SYNTAX_THEME);
     if view_lines.is_empty() {
         vec![RtLine::from("(no changes)".dim().italic())]
     } else {
@@ -112,13 +106,14 @@ pub(crate) fn render_diff_view(
     cwd: &Path,
     wrap_cols: usize,
     view: DiffView,
+    syntax_theme: &str,
 ) -> Vec<RtLine<'static>> {
     if changes.is_empty() {
         return Vec::new();
     }
     let rows = collect_rows(changes);
     match view {
-        DiffView::Pretty => render_changes_pretty(rows, wrap_cols, cwd),
+        DiffView::Pretty => render_changes_pretty(rows, wrap_cols, cwd, syntax_theme),
         _ => render_changes_block(rows, wrap_cols, cwd, view),
     }
 }
@@ -244,7 +239,12 @@ fn render_changes_block(
     out
 }
 
-fn render_changes_pretty(rows: Vec<Row>, wrap_cols: usize, cwd: &Path) -> Vec<RtLine<'static>> {
+fn render_changes_pretty(
+    rows: Vec<Row>,
+    wrap_cols: usize,
+    cwd: &Path,
+    syntax_theme: &str,
+) -> Vec<RtLine<'static>> {
     let mut out: Vec<RtLine<'static>> = Vec::new();
     let mut first_excerpt = true;
 
@@ -269,6 +269,7 @@ fn render_changes_pretty(rows: Vec<Row>, wrap_cols: usize, cwd: &Path) -> Vec<Rt
                     lines,
                     wrap_cols,
                     &highlight_path,
+                    syntax_theme,
                     &mut first_excerpt,
                 );
             }
@@ -290,6 +291,7 @@ fn render_changes_pretty(rows: Vec<Row>, wrap_cols: usize, cwd: &Path) -> Vec<Rt
                     lines,
                     wrap_cols,
                     &highlight_path,
+                    syntax_theme,
                     &mut first_excerpt,
                 );
             }
@@ -346,6 +348,7 @@ fn render_changes_pretty(rows: Vec<Row>, wrap_cols: usize, cwd: &Path) -> Vec<Rt
                         lines,
                         wrap_cols,
                         &highlight_path,
+                        syntax_theme,
                         &mut first_excerpt,
                     );
                 }
@@ -375,6 +378,7 @@ fn push_pretty_excerpt(
     lines: Vec<PrettyDiffLine>,
     wrap_cols: usize,
     highlight_path: &Path,
+    syntax_theme: &str,
     first_excerpt: &mut bool,
 ) {
     if !*first_excerpt {
@@ -397,7 +401,7 @@ fn push_pretty_excerpt(
 
     let max_line_number = lines.iter().map(|line| line.line_number).max().unwrap_or(0);
     let line_number_width = line_number_width(max_line_number);
-    let highlighted_lines = highlight_pretty_lines(&lines, highlight_path);
+    let highlighted_lines = highlight_pretty_lines(&lines, highlight_path, syntax_theme);
 
     for (line, spans) in lines.into_iter().zip(highlighted_lines.into_iter()) {
         out.extend(push_wrapped_pretty_diff_line(
@@ -1114,131 +1118,20 @@ fn push_wrapped_inline_diff_line(
         .collect()
 }
 
-fn highlight_pretty_lines(lines: &[PrettyDiffLine], path: &Path) -> Vec<Vec<RtSpan<'static>>> {
+fn highlight_pretty_lines(
+    lines: &[PrettyDiffLine],
+    path: &Path,
+    syntax_theme: &str,
+) -> Vec<Vec<RtSpan<'static>>> {
     let content_lines = lines
         .iter()
         .map(|line| line.text.clone())
         .collect::<Vec<_>>();
-    highlight_lines_syntect(&content_lines, path)
-}
-
-fn highlight_lines_syntect(lines: &[String], path: &Path) -> Vec<Vec<RtSpan<'static>>> {
-    let syntax_set = syntect_syntax_set();
-    let syntax = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .and_then(|ext| syntax_set.find_syntax_by_extension(ext))
-        .unwrap_or_else(|| syntax_set.find_syntax_plain_text());
-    let theme = syntect_theme();
-    let mut highlighter = HighlightLines::new(syntax, theme);
-    lines
+    let mut highlighter = SyntectHighlighter::from_path(path, syntax_theme);
+    content_lines
         .iter()
-        .map(|line| {
-            if line.is_empty() {
-                return Vec::new();
-            }
-            match highlighter.highlight_line(line, syntax_set) {
-                Ok(ranges) => ranges
-                    .into_iter()
-                    .map(|(style, text)| {
-                        RtSpan::styled(text.to_string(), syntect_style_to_ratatui(style))
-                    })
-                    .collect(),
-                Err(_) => vec![line.to_string().into()],
-            }
-        })
+        .map(|line| highlighter.highlight_line(line))
         .collect()
-}
-
-fn syntect_syntax_set() -> &'static SyntaxSet {
-    static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
-    SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines)
-}
-
-fn syntect_theme() -> &'static Theme {
-    static THEME: OnceLock<Theme> = OnceLock::new();
-    THEME.get_or_init(|| {
-        let theme_set = ThemeSet::load_defaults();
-        #[expect(clippy::expect_used)]
-        theme_set
-            .themes
-            .get("base16-ocean.dark")
-            .or_else(|| theme_set.themes.values().next())
-            .expect("syntect themes missing")
-            .clone()
-    })
-}
-
-fn syntect_style_to_ratatui(style: SyntectStyle) -> Style {
-    let mut out = Style::default();
-    if style.foreground.a != 0 {
-        out = out.fg(syntect_color_to_ratatui(style.foreground));
-    }
-    if style.font_style.contains(SyntectFontStyle::BOLD) {
-        out = out.add_modifier(Modifier::BOLD);
-    }
-    if style.font_style.contains(SyntectFontStyle::ITALIC) {
-        out = out.add_modifier(Modifier::ITALIC);
-    }
-    if style.font_style.contains(SyntectFontStyle::UNDERLINE) {
-        out = out.add_modifier(Modifier::UNDERLINED);
-    }
-    out
-}
-
-fn syntect_color_to_ratatui(color: SyntectColor) -> Color {
-    let r = color.r;
-    let g = color.g;
-    let b = color.b;
-    if r == g && g == b {
-        return if r < 64 {
-            Color::Black
-        } else if r < 128 {
-            Color::DarkGray
-        } else if r < 192 {
-            Color::Gray
-        } else {
-            Color::White
-        };
-    }
-
-    let max = r.max(g).max(b);
-    let bright = max > 200;
-    if r >= g && r >= b {
-        if g > b {
-            if bright {
-                Color::LightYellow
-            } else {
-                Color::Yellow
-            }
-        } else if bright {
-            Color::LightRed
-        } else {
-            Color::Red
-        }
-    } else if g >= r && g >= b {
-        if r > b {
-            if bright {
-                Color::LightYellow
-            } else {
-                Color::Yellow
-            }
-        } else if bright {
-            Color::LightGreen
-        } else {
-            Color::Green
-        }
-    } else if r > g {
-        if bright {
-            Color::LightMagenta
-        } else {
-            Color::Magenta
-        }
-    } else if bright {
-        Color::LightBlue
-    } else {
-        Color::Blue
-    }
 }
 
 pub(crate) fn display_path_for(path: &Path, cwd: &Path) -> String {

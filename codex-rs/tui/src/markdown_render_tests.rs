@@ -660,10 +660,25 @@ fn link() {
 }
 
 #[test]
-fn code_block_unhighlighted() {
+fn code_block_highlighted_for_known_language() {
     let text = render_markdown_text("```rust\nfn main() {}\n```\n");
-    let expected = Text::from_iter([
+    assert_eq!(
+        text.lines[0],
         Line::from(Span::from("╭ code: rust").dim()),
+    );
+    assert_eq!(text.lines[1].spans[0], Span::from("│ ").dim());
+    assert!(
+        text.lines[1].spans.len() >= 2,
+        "expected highlighted code spans, got {:?}",
+        text.lines[1]
+    );
+}
+
+#[test]
+fn code_block_unhighlighted_for_unknown_language() {
+    let text = render_markdown_text("```unknownlang\nfn main() {}\n```\n");
+    let expected = Text::from_iter([
+        Line::from(Span::from("╭ code: unknownlang").dim()),
         Line::from_iter([Span::from("│ ").dim(), Span::from("fn main() {}")]),
     ]);
     assert_eq!(text, expected);

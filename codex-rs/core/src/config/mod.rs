@@ -247,6 +247,9 @@ pub struct Config {
     /// Default UI for copy-message actions (`picker` or `navigator`).
     pub tui_copy_message_ui_mode: CopyUiMode,
 
+    /// Syntect theme used for syntax highlighting in the TUI.
+    pub tui_syntax_highlight_theme: String,
+
     /// Default diff format shown in the TUI.
     pub diff_view: DiffView,
 
@@ -1767,6 +1770,11 @@ impl Config {
                 .as_ref()
                 .map(|t| t.copy_message_ui_mode)
                 .unwrap_or_default(),
+            tui_syntax_highlight_theme: cfg
+                .tui
+                .as_ref()
+                .map(|t| t.syntax_highlight_theme.clone())
+                .unwrap_or_else(|| "base16-ocean.dark".to_string()),
             diff_view: cfg.tui.as_ref().map(|t| t.diff_view).unwrap_or_default(),
             otel: {
                 let t: OtelConfigToml = cfg.otel.unwrap_or_default();
@@ -2008,6 +2016,7 @@ persistence = "none"
                 progress_trace_style: None,
                 copy_code_ui_mode: CopyUiMode::Picker,
                 copy_message_ui_mode: CopyUiMode::Picker,
+                syntax_highlight_theme: "base16-ocean.dark".to_string(),
                 diff_view: DiffView::Pretty,
             }
         );
@@ -3965,6 +3974,7 @@ model_verbosity = "high"
                 tui_progress_trace_style: None,
                 tui_copy_code_ui_mode: CopyUiMode::Picker,
                 tui_copy_message_ui_mode: CopyUiMode::Picker,
+                tui_syntax_highlight_theme: "base16-ocean.dark".to_string(),
                 diff_view: DiffView::Pretty,
                 otel: OtelConfig::default(),
             },
@@ -4058,6 +4068,7 @@ model_verbosity = "high"
             tui_progress_trace_style: None,
             tui_copy_code_ui_mode: CopyUiMode::Picker,
             tui_copy_message_ui_mode: CopyUiMode::Picker,
+            tui_syntax_highlight_theme: "base16-ocean.dark".to_string(),
             diff_view: DiffView::Pretty,
             otel: OtelConfig::default(),
         };
@@ -4166,6 +4177,7 @@ model_verbosity = "high"
             tui_progress_trace_style: None,
             tui_copy_code_ui_mode: CopyUiMode::Picker,
             tui_copy_message_ui_mode: CopyUiMode::Picker,
+            tui_syntax_highlight_theme: "base16-ocean.dark".to_string(),
             diff_view: DiffView::Pretty,
             otel: OtelConfig::default(),
         };
@@ -4260,6 +4272,7 @@ model_verbosity = "high"
             tui_progress_trace_style: None,
             tui_copy_code_ui_mode: CopyUiMode::Picker,
             tui_copy_message_ui_mode: CopyUiMode::Picker,
+            tui_syntax_highlight_theme: "base16-ocean.dark".to_string(),
             diff_view: DiffView::Pretty,
             otel: OtelConfig::default(),
         };

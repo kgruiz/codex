@@ -30,6 +30,7 @@ pub(crate) async fn get_git_diff(
     cwd: &Path,
     view: DiffView,
     width: usize,
+    syntax_theme: &str,
 ) -> io::Result<GitDiffResult> {
     // First check if we are inside a Git repository.
     if !inside_git_repo(cwd).await? {
@@ -37,7 +38,7 @@ pub(crate) async fn get_git_diff(
     }
 
     let GitChanges { changes, warnings } = collect_git_changes(cwd).await?;
-    let view_lines = render_diff_view(&changes, cwd, width, view);
+    let view_lines = render_diff_view(&changes, cwd, width, view, syntax_theme);
     let mut lines = if view_lines.is_empty() {
         vec![RtLine::from("(no changes)".dim().italic())]
     } else {

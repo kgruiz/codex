@@ -2467,6 +2467,9 @@ impl ChatWidget {
         let progress_legend_mode = config.tui_progress_legend_mode;
         let (progress_trace_styles, progress_trace_style_warnings) =
             resolve_progress_trace_styles(config.tui_progress_trace_style.as_ref());
+        crate::markdown_render::set_syntax_highlight_theme(
+            config.tui_syntax_highlight_theme.clone(),
+        );
         let mut rng = rand::rng();
         let placeholder = PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string();
         let codex_op_tx = spawn_agent(config.clone(), app_event_tx.clone(), thread_manager);
@@ -2655,6 +2658,9 @@ impl ChatWidget {
         let progress_legend_mode = config.tui_progress_legend_mode;
         let (progress_trace_styles, progress_trace_style_warnings) =
             resolve_progress_trace_styles(config.tui_progress_trace_style.as_ref());
+        crate::markdown_render::set_syntax_highlight_theme(
+            config.tui_syntax_highlight_theme.clone(),
+        );
         let mut rng = rand::rng();
         let placeholder = PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string();
 
@@ -2828,6 +2834,9 @@ impl ChatWidget {
         let progress_legend_mode = config.tui_progress_legend_mode;
         let (progress_trace_styles, progress_trace_style_warnings) =
             resolve_progress_trace_styles(config.tui_progress_trace_style.as_ref());
+        crate::markdown_render::set_syntax_highlight_theme(
+            config.tui_syntax_highlight_theme.clone(),
+        );
         let mut rng = rand::rng();
         let placeholder = PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string();
 
@@ -3445,9 +3454,10 @@ impl ChatWidget {
                 let tx = self.app_event_tx.clone();
                 let cwd = self.config.cwd.clone();
                 let diff_view = self.config.diff_view;
+                let syntax_theme = self.config.tui_syntax_highlight_theme.clone();
                 let width = self.last_rendered_width.get().unwrap_or(80);
                 tokio::spawn(async move {
-                    let result = match get_git_diff(&cwd, diff_view, width).await {
+                    let result = match get_git_diff(&cwd, diff_view, width, &syntax_theme).await {
                         Ok(result) => result,
                         Err(e) => GitDiffResult::Error(format!("Failed to compute diff: {e}")),
                     };
@@ -3656,9 +3666,10 @@ impl ChatWidget {
                 self.add_diff_in_progress();
                 let tx = self.app_event_tx.clone();
                 let cwd = self.config.cwd.clone();
+                let syntax_theme = self.config.tui_syntax_highlight_theme.clone();
                 let width = self.last_rendered_width.get().unwrap_or(80);
                 tokio::spawn(async move {
-                    let result = match get_git_diff(&cwd, diff_view, width).await {
+                    let result = match get_git_diff(&cwd, diff_view, width, &syntax_theme).await {
                         Ok(result) => result,
                         Err(e) => GitDiffResult::Error(format!("Failed to compute diff: {e}")),
                     };

@@ -475,6 +475,10 @@ pub enum CopyUiMode {
     Navigator,
 }
 
+fn default_syntax_highlight_theme() -> String {
+    "base16-ocean.dark".to_string()
+}
+
 impl fmt::Display for ProgressLegendMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match self {
@@ -592,6 +596,12 @@ pub struct Tui {
     /// Defaults to `picker`.
     #[serde(default)]
     pub copy_message_ui_mode: CopyUiMode,
+
+    /// Syntect theme used for syntax highlighting in the TUI.
+    ///
+    /// Defaults to `base16-ocean.dark`.
+    #[serde(default = "default_syntax_highlight_theme")]
+    pub syntax_highlight_theme: String,
 
     /// Default diff format shown in the TUI.
     ///
