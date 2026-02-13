@@ -1225,7 +1225,7 @@
         },
         "syntax_highlight_theme": {
           "default": "base16-ocean.dark",
-          "description": "Syntect theme used for syntax highlighting in the TUI.\n\nDefaults to `base16-ocean.dark`.",
+          "description": "Theme used for syntax highlighting in the TUI.\n\nAccepts either a built-in syntect theme name (for example `base16-ocean.dark`) or `vscode:<path-to-theme.json>` for a VS Code theme file.\n\nDefaults to `base16-ocean.dark`.",
           "type": "string"
         }
       },

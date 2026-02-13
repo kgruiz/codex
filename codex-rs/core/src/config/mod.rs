@@ -247,7 +247,10 @@ pub struct Config {
     /// Default UI for copy-message actions (`picker` or `navigator`).
     pub tui_copy_message_ui_mode: CopyUiMode,
 
-    /// Syntect theme used for syntax highlighting in the TUI.
+    /// Theme used for syntax highlighting in the TUI.
+    ///
+    /// Accepts either a built-in syntect theme name or
+    /// `vscode:<path-to-theme.json>`.
     pub tui_syntax_highlight_theme: String,
 
     /// Default diff format shown in the TUI.

@@ -2,7 +2,9 @@ use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Span as RtSpan;
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Mutex;
 use std::sync::OnceLock;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::Color as SyntectColor;
@@ -12,8 +14,11 @@ use syntect::highlighting::Theme;
 use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxReference;
 use syntect::parsing::SyntaxSet;
+use tracing::warn;
+use vscode_theme_syntect::parse_vscode_theme_file;
 
 pub(crate) const DEFAULT_SYNTAX_THEME: &str = "base16-ocean.dark";
+const VS_CODE_THEME_PREFIX: &str = "vscode:";
 
 pub(crate) struct SyntectHighlighter {
     inner: HighlightLines<'static>,
@@ -78,6 +83,12 @@ fn syntect_themes() -> &'static ThemeSet {
 }
 
 fn syntect_theme(theme_name: &str) -> &'static Theme {
+    if let Some(theme_path) = theme_name.strip_prefix(VS_CODE_THEME_PREFIX)
+        && let Some(theme) = vscode_theme(theme_name, theme_path)
+    {
+        return theme;
+    }
+
     let theme_set = syntect_themes();
     #[expect(clippy::expect_used)]
     theme_set
@@ -86,6 +97,56 @@ fn syntect_theme(theme_name: &str) -> &'static Theme {
         .or_else(|| theme_set.themes.get(DEFAULT_SYNTAX_THEME))
         .or_else(|| theme_set.themes.values().next())
         .expect("syntect themes missing")
+}
+
+fn vscode_theme(theme_name: &str, theme_path: &str) -> Option<&'static Theme> {
+    let cache = vscode_theme_cache();
+    let mut cache = cache.lock().ok()?;
+
+    if let Some(cached) = cache.get(theme_name).copied() {
+        return cached;
+    }
+
+    let loaded = load_vscode_theme(theme_name, theme_path);
+    cache.insert(theme_name.to_string(), loaded);
+    loaded
+}
+
+fn vscode_theme_cache() -> &'static Mutex<HashMap<String, Option<&'static Theme>>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<&'static Theme>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn load_vscode_theme(theme_name: &str, theme_path: &str) -> Option<&'static Theme> {
+    if theme_path.is_empty() {
+        warn!("invalid syntax theme '{theme_name}': missing vscode theme path");
+        return None;
+    }
+
+    let path = Path::new(theme_path);
+    let vscode_theme = match parse_vscode_theme_file(path) {
+        Ok(theme) => theme,
+        Err(err) => {
+            warn!(
+                "failed to load vscode syntax theme '{theme_name}' from {}: {err}",
+                path.display()
+            );
+            return None;
+        }
+    };
+
+    let theme = match Theme::try_from(vscode_theme) {
+        Ok(theme) => theme,
+        Err(err) => {
+            warn!(
+                "failed to convert vscode syntax theme '{theme_name}' from {}: {err}",
+                path.display()
+            );
+            return None;
+        }
+    };
+
+    Some(Box::leak(Box::new(theme)))
 }
 
 fn syntect_style_to_ratatui(style: SyntectStyle) -> Style {
@@ -157,5 +218,59 @@ fn syntect_color_to_ratatui(color: SyntectColor) -> Color {
         Color::LightBlue
     } else {
         Color::Blue
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn built_in_theme_is_still_supported() {
+        let mut highlighter =
+            SyntectHighlighter::from_language(Some("rust"), DEFAULT_SYNTAX_THEME).expect("rust");
+        let spans = highlighter.highlight_line("fn main() {}");
+        assert!(!spans.is_empty());
+    }
+
+    #[test]
+    fn invalid_vscode_theme_falls_back_to_default() {
+        let mut highlighter = SyntectHighlighter::from_language(
+            Some("rust"),
+            "vscode:/path/that/does/not/exist.json",
+        )
+        .expect("rust");
+        let spans = highlighter.highlight_line("fn main() {}");
+        assert!(!spans.is_empty());
+    }
+
+    #[test]
+    fn valid_vscode_theme_file_is_supported() -> anyhow::Result<()> {
+        let file = NamedTempFile::new()?;
+        std::fs::write(
+            file.path(),
+            r##"{
+  "name": "Test Theme",
+  "colors": {
+    "editor.background": "#1e1e1e",
+    "editor.foreground": "#d4d4d4"
+  },
+  "tokenColors": [
+    {
+      "scope": "source.rust",
+      "settings": {
+        "foreground": "#ff0000"
+      }
+    }
+  ]
+}"##,
+        )?;
+        let theme_name = format!("{VS_CODE_THEME_PREFIX}{}", file.path().display());
+        let mut highlighter =
+            SyntectHighlighter::from_language(Some("rust"), &theme_name).expect("rust");
+        let spans = highlighter.highlight_line("fn main() {}");
+        assert!(!spans.is_empty());
+        Ok(())
     }
 }

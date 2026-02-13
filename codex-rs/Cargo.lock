@@ -2162,6 +2162,7 @@ dependencies = [
  "unicode-width 0.2.1",
  "url",
  "uuid",
+ "vscode-theme-syntect",
  "vt100",
  "which",
  "windows-sys 0.52.0",
@@ -4726,6 +4727,15 @@ checksum = "8c942ebf8e95485ca0d52d97da7c5a2c387d0e7f0ba4c35e93bfcaee045955b3"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "jsonc-parser"
+version = "0.26.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d6d80e6d70e7911a29f3cf3f44f452df85d06f73572b494ca99a2cad3fcf8f4"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
@@ -9692,6 +9702,20 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vscode-theme-syntect"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c028eb68d5e93020208849d3844402fefae21bc9bcf23d37b6e6d7e92a93e977"
+dependencies = [
+ "jsonc-parser",
+ "log",
+ "serde",
+ "serde_json",
+ "syntect",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "vt100"

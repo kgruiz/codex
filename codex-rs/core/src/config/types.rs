@@ -597,7 +597,11 @@ pub struct Tui {
     #[serde(default)]
     pub copy_message_ui_mode: CopyUiMode,
 
-    /// Syntect theme used for syntax highlighting in the TUI.
+    /// Theme used for syntax highlighting in the TUI.
+    ///
+    /// Accepts either a built-in syntect theme name (for example
+    /// `base16-ocean.dark`) or `vscode:<path-to-theme.json>` for a VS Code
+    /// theme file.
     ///
     /// Defaults to `base16-ocean.dark`.
     #[serde(default = "default_syntax_highlight_theme")]
