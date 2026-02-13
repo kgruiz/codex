@@ -122,16 +122,13 @@ impl Keybindings {
             paste
         };
 
-        let copy_prompt = vec![KeyBinding::new(KeyCode::Char('c'), KeyModifiers::ALT)];
+        let copy_prompt = vec![KeyBinding::new(KeyCode::Char('l'), KeyModifiers::CONTROL)];
         let copy_last_output = vec![
             KeyBinding::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
             KeyBinding::new(KeyCode::F(8), KeyModifiers::NONE),
         ];
         let copy_code_block = vec![
-            KeyBinding::new(
-                KeyCode::Char('b'),
-                KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
-            ),
+            KeyBinding::new(KeyCode::Char('b'), KeyModifiers::CONTROL),
             KeyBinding::new(KeyCode::F(6), KeyModifiers::NONE),
         ];
 
@@ -291,12 +288,18 @@ mod tests {
         assert_eq!(
             bindings.copy_code_block,
             vec![
-                KeyBinding::new(
-                    KeyCode::Char('b'),
-                    KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
-                ),
+                KeyBinding::new(KeyCode::Char('b'), KeyModifiers::CONTROL),
                 KeyBinding::new(KeyCode::F(6), KeyModifiers::NONE),
             ],
+        );
+    }
+
+    #[test]
+    fn defaults_include_copy_prompt_shortcut() {
+        let bindings = Keybindings::from_config(&HashMap::new(), true, false);
+        assert_eq!(
+            bindings.copy_prompt,
+            vec![KeyBinding::new(KeyCode::Char('l'), KeyModifiers::CONTROL),],
         );
     }
 

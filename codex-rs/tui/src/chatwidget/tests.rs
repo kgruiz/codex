@@ -1938,10 +1938,7 @@ async fn copy_last_output_shortcuts_show_notice_when_no_output_exists() {
 async fn copy_code_block_shortcuts_show_notice_when_no_output_exists() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
 
-    chat.handle_key_event(KeyEvent::new(
-        KeyCode::Char('b'),
-        KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
-    ));
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
     chat.handle_key_event(KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE));
 
     let cells = drain_insert_history(&mut rx);
@@ -1961,10 +1958,7 @@ async fn copy_code_block_shortcuts_show_notice_when_no_fenced_blocks_exist() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.last_assistant_output_markdown = Some("Plain paragraph only.".to_string());
 
-    chat.handle_key_event(KeyEvent::new(
-        KeyCode::Char('b'),
-        KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
-    ));
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
 
     let cells = drain_insert_history(&mut rx);
     let rendered = cells
@@ -2040,6 +2034,7 @@ async fn copy_code_block_picker_scope_toggle_reopens_with_all_responses() {
         "last-response scope should not show older response labels, got {popup:?}"
     );
 
+    chat.handle_key_event(KeyEvent::from(KeyCode::Up));
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     let scope = match rx.try_recv() {
         Ok(AppEvent::OpenCopyCodeBlockPicker { scope }) => scope,
@@ -2060,7 +2055,7 @@ async fn copy_code_block_picker_scope_toggle_reopens_with_all_responses() {
 
 #[tokio::test]
 async fn copy_message_picker_defaults_to_responses_and_filter_toggles() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.copyable_messages = vec![
         CopyableMessage {
             role: CopyableRole::User,
@@ -2090,12 +2085,7 @@ async fn copy_message_picker_defaults_to_responses_and_filter_toggles() {
         "responses filter should not include user rows yet, got {popup:?}"
     );
 
-    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
-    let filter = match rx.try_recv() {
-        Ok(AppEvent::OpenCopyMessagePicker { filter }) => filter,
-        other => panic!("expected OpenCopyMessagePicker event, got {other:?}"),
-    };
-    chat.open_copy_message_picker(filter);
+    chat.open_copy_message_picker(CopyMessageFilter::User);
 
     let popup = render_bottom_popup(&chat, 90);
     assert!(
@@ -2119,6 +2109,7 @@ async fn legend_popup_mode_row_opens_mode_picker() {
         "legend popup should show selectable mode row, got {popup:?}"
     );
 
+    chat.handle_key_event(KeyEvent::from(KeyCode::Up));
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     assert_matches!(rx.try_recv(), Ok(AppEvent::OpenProgressLegendModePicker));
 

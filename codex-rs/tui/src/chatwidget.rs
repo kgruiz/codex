@@ -4693,7 +4693,8 @@ impl ChatWidget {
             ..Default::default()
         }];
 
-        if candidates.is_empty() {
+        let has_candidates = !candidates.is_empty();
+        if !has_candidates {
             items.push(SelectionItem {
                 name: "No code blocks in this scope".to_string(),
                 is_disabled: true,
@@ -4734,6 +4735,7 @@ impl ChatWidget {
             is_searchable: true,
             search_placeholder: Some("Type to search code blocks".to_string()),
             items,
+            initial_selected_idx: Some(if has_candidates { 1 } else { 0 }),
             ..Default::default()
         });
         self.request_redraw();
@@ -4821,6 +4823,7 @@ impl ChatWidget {
             items,
             is_searchable: true,
             search_placeholder: Some("Type to search messages".to_string()),
+            initial_selected_idx: Some(if matched == 0 { 0 } else { 1 }),
             ..Default::default()
         });
         self.request_redraw();
@@ -5722,6 +5725,7 @@ impl ChatWidget {
             title: Some("Progress Legend".to_string()),
             footer_hint: Some(standard_popup_hint_line()),
             items,
+            initial_selected_idx: Some(1),
             ..Default::default()
         });
     }
