@@ -23,6 +23,7 @@ const VS_CODE_THEME_PREFIX: &str = "vscode:";
 pub(crate) struct SyntectHighlighter {
     inner: HighlightLines<'static>,
     syntax_set: &'static SyntaxSet,
+    use_truecolor: bool,
 }
 
 impl SyntectHighlighter {
@@ -53,6 +54,7 @@ impl SyntectHighlighter {
         Self {
             inner: HighlightLines::new(syntax, theme),
             syntax_set: syntect_syntax_set(),
+            use_truecolor: theme_name.starts_with(VS_CODE_THEME_PREFIX),
         }
     }
 
@@ -64,7 +66,10 @@ impl SyntectHighlighter {
             Ok(ranges) => ranges
                 .into_iter()
                 .map(|(style, text)| {
-                    RtSpan::styled(text.to_string(), syntect_style_to_ratatui(style))
+                    RtSpan::styled(
+                        text.to_string(),
+                        syntect_style_to_ratatui(style, self.use_truecolor),
+                    )
                 })
                 .collect(),
             Err(_) => vec![line.to_string().into()],
@@ -188,10 +193,10 @@ fn load_vscode_theme(theme_name: &str, theme_path: &str) -> Option<&'static Them
     Some(Box::leak(Box::new(theme)))
 }
 
-fn syntect_style_to_ratatui(style: SyntectStyle) -> Style {
+fn syntect_style_to_ratatui(style: SyntectStyle, use_truecolor: bool) -> Style {
     let mut out = Style::default();
     if style.foreground.a != 0 {
-        out = out.fg(syntect_color_to_ratatui(style.foreground));
+        out = out.fg(syntect_color_to_ratatui(style.foreground, use_truecolor));
     }
     if style.font_style.contains(SyntectFontStyle::BOLD) {
         out = out.add_modifier(Modifier::BOLD);
@@ -205,7 +210,11 @@ fn syntect_style_to_ratatui(style: SyntectStyle) -> Style {
     out
 }
 
-fn syntect_color_to_ratatui(color: SyntectColor) -> Color {
+fn syntect_color_to_ratatui(color: SyntectColor, use_truecolor: bool) -> Color {
+    if use_truecolor {
+        return Color::Rgb(color.r, color.g, color.b);
+    }
+
     let r = color.r;
     let g = color.g;
     let b = color.b;
