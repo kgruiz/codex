@@ -23,6 +23,7 @@ final class StatusMenuController {
     animationFrame: Int,
     now: Date
   ) {
+    _ = animationFrame
     UpdateButton(
       connectionState: connectionState,
       runningCount: turns.filter { $0.status == .inProgress }.count)
@@ -43,11 +44,8 @@ final class StatusMenuController {
       menu.addItem(empty)
     } else {
       for turn in turns {
-        let item = NSMenuItem(
-          title: TurnTitle(turn: turn, animationFrame: animationFrame, now: now),
-          action: nil,
-          keyEquivalent: ""
-        )
+        let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        item.view = TurnMenuRowView(turn: turn, now: now)
         item.isEnabled = false
         menu.addItem(item)
       }
@@ -107,83 +105,6 @@ final class StatusMenuController {
       return "CodexMenuBar - error: \(message)"
     case .disconnected:
       return "CodexMenuBar - disconnected"
-    }
-  }
-
-  private func TurnTitle(turn: ActiveTurn, animationFrame: Int, now: Date) -> String {
-    let statusLabel = StatusLabel(turn.status)
-    let elapsed = turn.ElapsedString(now: now)
-    let bar = ProgressBar(turn: turn, animationFrame: animationFrame)
-    let legend = LegendText(turn)
-    let label = turn.latestLabel ?? "no detail"
-    return
-      "[\(turn.threadId.prefix(8))/\(turn.turnId)] \(statusLabel) \(elapsed) \(bar)\n  \(legend) - \(label)"
-  }
-
-  private func StatusLabel(_ status: TurnExecutionStatus) -> String {
-    switch status {
-    case .inProgress:
-      return "Working"
-    case .completed:
-      return "Completed"
-    case .interrupted:
-      return "Interrupted"
-    case .failed:
-      return "Failed"
-    }
-  }
-
-  private func ProgressBar(turn: ActiveTurn, animationFrame: Int) -> String {
-    switch turn.status {
-    case .inProgress:
-      return IndeterminateBar(animationFrame: animationFrame)
-    case .completed:
-      return "[██████████]"
-    case .interrupted:
-      return "[███░░░░░░░]"
-    case .failed:
-      return "[██░░░░░░░░]"
-    }
-  }
-
-  private func IndeterminateBar(animationFrame: Int, width: Int = 10, window: Int = 3) -> String {
-    if width <= 0 {
-      return "[]"
-    }
-    var chars = Array(repeating: Character("░"), count: width)
-    let start = animationFrame % width
-    for offset in 0..<window {
-      let index = (start + offset) % width
-      chars[index] = "█"
-    }
-    return "[\(String(chars))]"
-  }
-
-  private func LegendText(_ turn: ActiveTurn) -> String {
-    let categories = turn.ActiveCategories()
-    if categories.isEmpty {
-      return "trace: none"
-    }
-    let parts = categories.map(CategoryLabel)
-    return "trace: \(parts.joined(separator: " "))"
-  }
-
-  private func CategoryLabel(_ category: ProgressCategory) -> String {
-    switch category {
-    case .tool:
-      return "[tool]"
-    case .edit:
-      return "[edit]"
-    case .waiting:
-      return "[wait]"
-    case .network:
-      return "[net]"
-    case .prefill:
-      return "[prefill]"
-    case .reasoning:
-      return "[reason]"
-    case .gen:
-      return "[gen]"
     }
   }
 }

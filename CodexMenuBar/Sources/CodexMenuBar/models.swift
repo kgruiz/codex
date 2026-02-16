@@ -61,6 +61,22 @@ struct ProgressTraceSnapshot {
   let timestamp: Date
 }
 
+enum TimelineSegmentKind: Equatable {
+  case category(ProgressCategory)
+  case idle
+}
+
+struct TimelineSegment: Equatable {
+  let kind: TimelineSegmentKind
+  let startedAt: Date
+  let endedAt: Date
+  let label: String?
+
+  var duration: TimeInterval {
+    max(0, endedAt.timeIntervalSince(startedAt))
+  }
+}
+
 final class ActiveTurn {
   let endpointId: String
   let threadId: String
@@ -160,5 +176,98 @@ final class ActiveTurn {
     let minutes = (totalSeconds % 3600) / 60
     let seconds = totalSeconds % 60
     return "\(hours)h \(String(format: "%02d", minutes))m \(String(format: "%02d", seconds))s"
+  }
+
+  func TimelineSegments(now: Date) -> [TimelineSegment] {
+    let endDate = endedAt ?? now
+    if endDate <= startedAt {
+      return []
+    }
+
+    var segments: [TimelineSegment] = []
+    var activeCounts: [ProgressCategory: Int] = [:]
+    var activeLabels: [ProgressCategory: String] = [:]
+    var cursor = startedAt
+
+    for snapshot in traceHistory {
+      let timestamp = min(max(snapshot.timestamp, startedAt), endDate)
+      if timestamp > cursor {
+        AppendSegment(
+          into: &segments,
+          start: cursor,
+          end: timestamp,
+          activeCounts: activeCounts,
+          activeLabels: activeLabels
+        )
+        cursor = timestamp
+      }
+
+      switch snapshot.state {
+      case .started:
+        let count = activeCounts[snapshot.category] ?? 0
+        activeCounts[snapshot.category] = count + 1
+        if let label = snapshot.label, !label.isEmpty {
+          activeLabels[snapshot.category] = label
+        }
+      case .completed:
+        let count = activeCounts[snapshot.category] ?? 0
+        let nextCount = max(0, count - 1)
+        activeCounts[snapshot.category] = nextCount
+        if nextCount == 0 {
+          activeLabels.removeValue(forKey: snapshot.category)
+        }
+      }
+    }
+
+    if endDate > cursor {
+      AppendSegment(
+        into: &segments,
+        start: cursor,
+        end: endDate,
+        activeCounts: activeCounts,
+        activeLabels: activeLabels
+      )
+    }
+
+    return segments
+  }
+
+  private func AppendSegment(
+    into segments: inout [TimelineSegment],
+    start: Date,
+    end: Date,
+    activeCounts: [ProgressCategory: Int],
+    activeLabels: [ProgressCategory: String]
+  ) {
+    if end <= start {
+      return
+    }
+
+    let activeCategory =
+      activeCounts
+      .compactMap { category, count in count > 0 ? category : nil }
+      .sorted { $0.sortOrder < $1.sortOrder }
+      .first
+
+    let kind: TimelineSegmentKind
+    let label: String?
+    if let activeCategory {
+      kind = .category(activeCategory)
+      label = activeLabels[activeCategory]
+    } else {
+      kind = .idle
+      label = nil
+    }
+
+    if var last = segments.last, last.kind == kind, last.label == label,
+      abs(last.endedAt.timeIntervalSince(start)) < 0.001
+    {
+      last = TimelineSegment(
+        kind: last.kind, startedAt: last.startedAt, endedAt: end, label: last.label)
+      segments[segments.count - 1] = last
+      return
+    }
+
+    segments.append(TimelineSegment(kind: kind, startedAt: start, endedAt: end, label: label))
   }
 }
