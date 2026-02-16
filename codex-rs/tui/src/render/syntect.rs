@@ -82,6 +82,45 @@ fn syntect_themes() -> &'static ThemeSet {
     THEMES.get_or_init(ThemeSet::load_defaults)
 }
 
+pub(crate) fn validate_syntax_theme(theme_name: &str) -> Option<String> {
+    if let Some(theme_path) = theme_name.strip_prefix(VS_CODE_THEME_PREFIX) {
+        return validate_vscode_theme(theme_name, theme_path).err();
+    }
+
+    if syntect_themes().themes.contains_key(theme_name) {
+        return None;
+    }
+
+    Some(format!(
+        "Unable to load syntax highlight theme '{theme_name}'. Falling back to '{DEFAULT_SYNTAX_THEME}'."
+    ))
+}
+
+fn validate_vscode_theme(theme_name: &str, theme_path: &str) -> Result<(), String> {
+    if theme_path.is_empty() {
+        return Err(format!(
+            "Unable to load syntax highlight theme '{theme_name}': missing vscode theme path. Falling back to '{DEFAULT_SYNTAX_THEME}'."
+        ));
+    }
+
+    let path = Path::new(theme_path);
+    let vscode_theme = parse_vscode_theme_file(path).map_err(|err| {
+        format!(
+            "Unable to load syntax highlight theme '{theme_name}' from {}: {err}. Falling back to '{DEFAULT_SYNTAX_THEME}'.",
+            path.display()
+        )
+    })?;
+
+    Theme::try_from(vscode_theme).map_err(|err| {
+        format!(
+            "Unable to load syntax highlight theme '{theme_name}' from {}: {err}. Falling back to '{DEFAULT_SYNTAX_THEME}'.",
+            path.display()
+        )
+    })?;
+
+    Ok(())
+}
+
 fn syntect_theme(theme_name: &str) -> &'static Theme {
     if let Some(theme_path) = theme_name.strip_prefix(VS_CODE_THEME_PREFIX)
         && let Some(theme) = vscode_theme(theme_name, theme_path)
@@ -232,6 +271,14 @@ mod tests {
             SyntectHighlighter::from_language(Some("rust"), DEFAULT_SYNTAX_THEME).expect("rust");
         let spans = highlighter.highlight_line("fn main() {}");
         assert!(!spans.is_empty());
+        assert_eq!(validate_syntax_theme(DEFAULT_SYNTAX_THEME), None);
+    }
+
+    #[test]
+    fn unknown_built_in_theme_returns_warning() {
+        let warning = validate_syntax_theme("base16-not-a-real-theme").expect("warning");
+        assert!(warning.contains("base16-not-a-real-theme"));
+        assert!(warning.contains(DEFAULT_SYNTAX_THEME));
     }
 
     #[test]
@@ -243,6 +290,26 @@ mod tests {
         .expect("rust");
         let spans = highlighter.highlight_line("fn main() {}");
         assert!(!spans.is_empty());
+        let warning =
+            validate_syntax_theme("vscode:/path/that/does/not/exist.json").expect("warning");
+        assert!(warning.contains(DEFAULT_SYNTAX_THEME));
+    }
+
+    #[test]
+    fn empty_vscode_theme_path_returns_warning() {
+        let warning = validate_syntax_theme("vscode:").expect("warning");
+        assert!(warning.contains("missing vscode theme path"));
+        assert!(warning.contains(DEFAULT_SYNTAX_THEME));
+    }
+
+    #[test]
+    fn invalid_vscode_theme_json_returns_warning() -> anyhow::Result<()> {
+        let file = NamedTempFile::new()?;
+        std::fs::write(file.path(), "{not valid json")?;
+        let theme_name = format!("{VS_CODE_THEME_PREFIX}{}", file.path().display());
+        let warning = validate_syntax_theme(&theme_name).expect("warning");
+        assert!(warning.contains(DEFAULT_SYNTAX_THEME));
+        Ok(())
     }
 
     #[test]
@@ -271,6 +338,7 @@ mod tests {
             SyntectHighlighter::from_language(Some("rust"), &theme_name).expect("rust");
         let spans = highlighter.highlight_line("fn main() {}");
         assert!(!spans.is_empty());
+        assert_eq!(validate_syntax_theme(&theme_name), None);
         Ok(())
     }
 }

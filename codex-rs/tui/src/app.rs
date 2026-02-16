@@ -233,6 +233,18 @@ fn emit_project_config_warnings(app_event_tx: &AppEventSender, config: &Config) 
     )));
 }
 
+fn emit_syntax_theme_warning(app_event_tx: &AppEventSender, config: &Config) {
+    let Some(message) =
+        crate::render::syntect::validate_syntax_theme(&config.tui_syntax_highlight_theme)
+    else {
+        return;
+    };
+
+    app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
+        history_cell::new_warning_event(message),
+    )));
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SessionSummary {
     usage_line: String,
@@ -932,6 +944,7 @@ impl App {
         let (app_event_tx, mut app_event_rx) = unbounded_channel();
         let app_event_tx = AppEventSender::new(app_event_tx);
         emit_project_config_warnings(&app_event_tx, &config);
+        emit_syntax_theme_warning(&app_event_tx, &config);
         tui.set_notification_method(config.tui_notification_method);
 
         let harness_overrides =
@@ -2856,6 +2869,50 @@ mod tests {
             vec![base_cwd.join("rel")]
         );
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn emit_syntax_theme_warning_emits_warning_cell_for_invalid_theme() {
+        let codex_home = tempdir().expect("temp codex home");
+        let mut config = ConfigBuilder::default()
+            .codex_home(codex_home.path().to_path_buf())
+            .build()
+            .await
+            .expect("config");
+        config.tui_syntax_highlight_theme = "base16-not-a-real-theme".to_string();
+
+        let (tx, mut rx) = unbounded_channel();
+        let app_event_tx = AppEventSender::new(tx);
+        emit_syntax_theme_warning(&app_event_tx, &config);
+
+        let rendered = match rx.try_recv() {
+            Ok(AppEvent::InsertHistoryCell(cell)) => cell
+                .display_lines(120)
+                .into_iter()
+                .flat_map(|line| line.spans.into_iter().map(|span| span.content.to_string()))
+                .collect::<String>(),
+            Ok(other) => panic!("expected warning history cell, got {other:?}"),
+            Err(err) => panic!("expected warning history cell, got {err}"),
+        };
+        assert!(rendered.contains("base16-not-a-real-theme"));
+        assert!(rendered.contains("base16-ocean.dark"));
+    }
+
+    #[tokio::test]
+    async fn emit_syntax_theme_warning_skips_valid_theme() {
+        let codex_home = tempdir().expect("temp codex home");
+        let mut config = ConfigBuilder::default()
+            .codex_home(codex_home.path().to_path_buf())
+            .build()
+            .await
+            .expect("config");
+        config.tui_syntax_highlight_theme = "base16-ocean.dark".to_string();
+
+        let (tx, mut rx) = unbounded_channel();
+        let app_event_tx = AppEventSender::new(tx);
+        emit_syntax_theme_warning(&app_event_tx, &config);
+
+        assert!(rx.try_recv().is_err(), "expected no warning history cell");
     }
 
     #[tokio::test]
