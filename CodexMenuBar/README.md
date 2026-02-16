@@ -2,7 +2,7 @@
 
 `CodexMenuBar` is a standalone macOS menu bar companion app.
 
-It does not modify or depend on `Codex.app` internals. It launches `codex app-server` over stdio and renders active turn progress in the menu bar dropdown.
+It does not modify or depend on `Codex.app` internals. It discovers embedded app-server websocket endpoints published by interactive `codex` CLI sessions and renders active turn progress in the menu bar dropdown.
 
 ## Features
 
@@ -28,7 +28,7 @@ cd CodexMenuBar
 swift run CodexMenuBar
 ```
 
-When running, the app starts `codex app-server --listen stdio://` and listens for:
+When running, the app scans `~/.codex/runtime/menubar/endpoints/*.json` for websocket endpoints and listens for:
 
 - `turn/started`
 - `turn/completed`
