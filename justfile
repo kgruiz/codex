@@ -79,6 +79,39 @@ build-for-release:
 mcp-server-run *args:
     cargo run -p codex-mcp-server -- "$@"
 
+[no-cd]
+codex-menubar-build:
+    if ! command -v swift >/dev/null 2>&1; then echo "swift is required"; exit 1; fi
+    cd CodexMenuBar && swift build
+
+[no-cd]
+codex-menubar-run:
+    if ! command -v swift >/dev/null 2>&1; then echo "swift is required"; exit 1; fi
+    cd CodexMenuBar && swift run CodexMenuBar
+
+[no-cd]
+codex-menubar-install:
+    just codex-menubar-build
+    APP_DIR="$HOME/Applications/CodexMenuBar.app"
+    BIN_SRC="$PWD/CodexMenuBar/.build/debug/CodexMenuBar"
+    BIN_DST="$APP_DIR/Contents/MacOS/CodexMenuBar"
+    PLIST="$APP_DIR/Contents/Info.plist"
+    mkdir -p "$APP_DIR/Contents/MacOS"
+    cp "$BIN_SRC" "$BIN_DST"
+    chmod +x "$BIN_DST"
+    printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+        '<plist version="1.0">' \
+        '<dict>' \
+        '  <key>CFBundleIdentifier</key><string>com.openai.codex.menubar</string>' \
+        '  <key>CFBundleName</key><string>CodexMenuBar</string>' \
+        '  <key>CFBundleExecutable</key><string>CodexMenuBar</string>' \
+        '  <key>CFBundlePackageType</key><string>APPL</string>' \
+        '  <key>LSUIElement</key><true/>' \
+        '</dict>' \
+        '</plist>' > "$PLIST"
+    open "$APP_DIR"
+
 # Regenerate the json schema for config.toml from the current config types.
 write-config-schema:
     cargo run -p codex-core --bin codex-write-config-schema
