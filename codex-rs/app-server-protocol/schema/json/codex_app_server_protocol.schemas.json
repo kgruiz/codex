@@ -4402,6 +4402,50 @@
           "type": "object"
         },
         {
+          "properties": {
+            "category": {
+              "$ref": "#/definitions/v2/ProgressTraceCategory"
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/definitions/v2/ProgressTraceState"
+            },
+            "thread_id": {
+              "$ref": "#/definitions/v2/ThreadId"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "progress_trace"
+              ],
+              "title": "ProgressTraceEventMsgType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "category",
+            "state",
+            "thread_id",
+            "turn_id",
+            "type"
+          ],
+          "title": "ProgressTraceEventMsg",
+          "type": "object"
+        },
+        {
           "description": "Collab interaction: agent spawn begin.",
           "properties": {
             "call_id": {
@@ -6377,6 +6421,25 @@
       },
       "type": "object"
     },
+    "ProgressTraceCategory": {
+      "enum": [
+        "tool",
+        "edit",
+        "waiting",
+        "network",
+        "prefill",
+        "reasoning",
+        "gen"
+      ],
+      "type": "string"
+    },
+    "ProgressTraceState": {
+      "enum": [
+        "started",
+        "completed"
+      ],
+      "type": "string"
+    },
     "RateLimitSnapshot": {
       "properties": {
         "credits": {
@@ -7823,6 +7886,26 @@
             "params"
           ],
           "title": "Turn/plan/updatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "turn/progressTrace"
+              ],
+              "title": "Turn/progressTraceNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/TurnProgressTraceNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Turn/progressTraceNotification",
           "type": "object"
         },
         {
@@ -12402,6 +12485,25 @@
         },
         "type": "object"
       },
+      "ProgressTraceCategory": {
+        "enum": [
+          "tool",
+          "edit",
+          "waiting",
+          "network",
+          "prefill",
+          "reasoning",
+          "gen"
+        ],
+        "type": "string"
+      },
+      "ProgressTraceState": {
+        "enum": [
+          "started",
+          "completed"
+        ],
+        "type": "string"
+      },
       "RateLimitSnapshot": {
         "properties": {
           "credits": {
@@ -15531,6 +15633,37 @@
           "turnId"
         ],
         "title": "TurnPlanUpdatedNotification",
+        "type": "object"
+      },
+      "TurnProgressTraceNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "category": {
+            "$ref": "#/definitions/v2/ProgressTraceCategory"
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/definitions/v2/ProgressTraceState"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "state",
+          "threadId",
+          "turnId"
+        ],
+        "title": "TurnProgressTraceNotification",
         "type": "object"
       },
       "TurnStartParams": {

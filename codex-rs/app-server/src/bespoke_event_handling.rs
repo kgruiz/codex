@@ -45,6 +45,8 @@ use codex_app_server_protocol::McpToolCallStatus;
 use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::PatchChangeKind as V2PatchChangeKind;
 use codex_app_server_protocol::PlanDeltaNotification;
+use codex_app_server_protocol::ProgressTraceCategory as V2ProgressTraceCategory;
+use codex_app_server_protocol::ProgressTraceState as V2ProgressTraceState;
 use codex_app_server_protocol::RawResponseItemCompletedNotification;
 use codex_app_server_protocol::ReasoningSummaryPartAddedNotification;
 use codex_app_server_protocol::ReasoningSummaryTextDeltaNotification;
@@ -68,6 +70,7 @@ use codex_app_server_protocol::TurnError;
 use codex_app_server_protocol::TurnInterruptResponse;
 use codex_app_server_protocol::TurnPlanStep;
 use codex_app_server_protocol::TurnPlanUpdatedNotification;
+use codex_app_server_protocol::TurnProgressTraceNotification;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::build_turns_from_event_msgs;
 use codex_core::CodexThread;
@@ -82,6 +85,7 @@ use codex_core::protocol::FileChange as CoreFileChange;
 use codex_core::protocol::McpToolCallBeginEvent;
 use codex_core::protocol::McpToolCallEndEvent;
 use codex_core::protocol::Op;
+use codex_core::protocol::ProgressTraceEvent;
 use codex_core::protocol::ReviewDecision;
 use codex_core::protocol::TokenCountEvent;
 use codex_core::protocol::TurnDiffEvent;
@@ -1126,6 +1130,9 @@ pub(crate) async fn apply_bespoke_event_handling(
                     .await;
             }
         }
+        EventMsg::ProgressTrace(progress_trace_event) => {
+            handle_turn_progress_trace(progress_trace_event, api_version, outgoing.as_ref()).await;
+        }
         EventMsg::TurnDiff(turn_diff_event) => {
             handle_turn_diff(
                 conversation_id,
@@ -1166,6 +1173,25 @@ async fn handle_turn_diff(
         };
         outgoing
             .send_server_notification(ServerNotification::TurnDiffUpdated(notification))
+            .await;
+    }
+}
+
+async fn handle_turn_progress_trace(
+    progress_trace_event: ProgressTraceEvent,
+    api_version: ApiVersion,
+    outgoing: &OutgoingMessageSender,
+) {
+    if let ApiVersion::V2 = api_version {
+        let notification = TurnProgressTraceNotification {
+            thread_id: progress_trace_event.thread_id.to_string(),
+            turn_id: progress_trace_event.turn_id,
+            category: V2ProgressTraceCategory::from(progress_trace_event.category),
+            state: V2ProgressTraceState::from(progress_trace_event.state),
+            label: progress_trace_event.label,
+        };
+        outgoing
+            .send_server_notification(ServerNotification::TurnProgressTrace(notification))
             .await;
     }
 }
@@ -1840,6 +1866,9 @@ mod tests {
     use codex_app_server_protocol::TurnPlanStepStatus;
     use codex_core::protocol::CreditsSnapshot;
     use codex_core::protocol::McpInvocation;
+    use codex_core::protocol::ProgressTraceCategory as CoreProgressTraceCategory;
+    use codex_core::protocol::ProgressTraceEvent;
+    use codex_core::protocol::ProgressTraceState as CoreProgressTraceState;
     use codex_core::protocol::RateLimitSnapshot;
     use codex_core::protocol::RateLimitWindow;
     use codex_core::protocol::TokenUsage;
@@ -2456,6 +2485,67 @@ mod tests {
         };
 
         assert_eq!(notification, expected);
+    }
+
+    #[tokio::test]
+    async fn test_handle_turn_progress_trace_emits_v2_notification() -> Result<()> {
+        let (tx, mut rx) = mpsc::channel(CHANNEL_CAPACITY);
+        let outgoing = OutgoingMessageSender::new(tx);
+        let thread_id = ThreadId::new();
+
+        handle_turn_progress_trace(
+            ProgressTraceEvent {
+                thread_id,
+                turn_id: "turn-1".to_string(),
+                category: CoreProgressTraceCategory::Tool,
+                state: CoreProgressTraceState::Started,
+                label: Some("running tool call".to_string()),
+                source: None,
+            },
+            ApiVersion::V2,
+            &outgoing,
+        )
+        .await;
+
+        let msg = recv_broadcast_message(&mut rx).await?;
+        match msg {
+            OutgoingMessage::AppServerNotification(ServerNotification::TurnProgressTrace(
+                notification,
+            )) => {
+                assert_eq!(notification.thread_id, thread_id.to_string());
+                assert_eq!(notification.turn_id, "turn-1");
+                assert_eq!(notification.category, V2ProgressTraceCategory::Tool);
+                assert_eq!(notification.state, V2ProgressTraceState::Started);
+                assert_eq!(notification.label.as_deref(), Some("running tool call"));
+            }
+            other => bail!("unexpected message: {other:?}"),
+        }
+
+        assert!(rx.try_recv().is_err(), "no extra messages expected");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_handle_turn_progress_trace_is_noop_for_v1() -> Result<()> {
+        let (tx, mut rx) = mpsc::channel(CHANNEL_CAPACITY);
+        let outgoing = OutgoingMessageSender::new(tx);
+
+        handle_turn_progress_trace(
+            ProgressTraceEvent {
+                thread_id: ThreadId::new(),
+                turn_id: "turn-1".to_string(),
+                category: CoreProgressTraceCategory::Network,
+                state: CoreProgressTraceState::Completed,
+                label: None,
+                source: None,
+            },
+            ApiVersion::V1,
+            &outgoing,
+        )
+        .await;
+
+        assert!(rx.try_recv().is_err(), "no messages expected");
+        Ok(())
     }
 
     #[tokio::test]

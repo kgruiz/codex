@@ -30,6 +30,8 @@ use codex_protocol::protocol::AskForApproval as CoreAskForApproval;
 use codex_protocol::protocol::CodexErrorInfo as CoreCodexErrorInfo;
 use codex_protocol::protocol::CreditsSnapshot as CoreCreditsSnapshot;
 use codex_protocol::protocol::NetworkAccess as CoreNetworkAccess;
+use codex_protocol::protocol::ProgressTraceCategory as CoreProgressTraceCategory;
+use codex_protocol::protocol::ProgressTraceState as CoreProgressTraceState;
 use codex_protocol::protocol::RateLimitSnapshot as CoreRateLimitSnapshot;
 use codex_protocol::protocol::RateLimitWindow as CoreRateLimitWindow;
 use codex_protocol::protocol::SessionSource as CoreSessionSource;
@@ -2638,6 +2640,36 @@ impl From<CorePlanStepStatus> for TurnPlanStepStatus {
             CorePlanStepStatus::Completed => Self::Completed,
         }
     }
+}
+
+v2_enum_from_core! {
+    pub enum ProgressTraceCategory from CoreProgressTraceCategory {
+        Tool,
+        Edit,
+        Waiting,
+        Network,
+        Prefill,
+        Reasoning,
+        Gen
+    }
+}
+
+v2_enum_from_core! {
+    pub enum ProgressTraceState from CoreProgressTraceState {
+        Started,
+        Completed
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct TurnProgressTraceNotification {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub category: ProgressTraceCategory,
+    pub state: ProgressTraceState,
+    pub label: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

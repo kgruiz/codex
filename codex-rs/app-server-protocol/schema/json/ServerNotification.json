@@ -2997,6 +2997,50 @@
           "type": "object"
         },
         {
+          "properties": {
+            "category": {
+              "$ref": "#/definitions/ProgressTraceCategory2"
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/definitions/ProgressTraceState2"
+            },
+            "thread_id": {
+              "$ref": "#/definitions/ThreadId"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "progress_trace"
+              ],
+              "title": "ProgressTraceEventMsgType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "category",
+            "state",
+            "thread_id",
+            "turn_id",
+            "type"
+          ],
+          "title": "ProgressTraceEventMsg",
+          "type": "object"
+        },
+        {
           "description": "Collab interaction: agent spawn begin.",
           "properties": {
             "call_id": {
@@ -4199,6 +4243,44 @@
         "enterprise",
         "edu",
         "unknown"
+      ],
+      "type": "string"
+    },
+    "ProgressTraceCategory": {
+      "enum": [
+        "tool",
+        "edit",
+        "waiting",
+        "network",
+        "prefill",
+        "reasoning",
+        "gen"
+      ],
+      "type": "string"
+    },
+    "ProgressTraceCategory2": {
+      "enum": [
+        "tool",
+        "edit",
+        "waiting",
+        "network",
+        "prefill",
+        "reasoning",
+        "gen"
+      ],
+      "type": "string"
+    },
+    "ProgressTraceState": {
+      "enum": [
+        "started",
+        "completed"
+      ],
+      "type": "string"
+    },
+    "ProgressTraceState2": {
+      "enum": [
+        "started",
+        "completed"
       ],
       "type": "string"
     },
@@ -6871,6 +6953,35 @@
       ],
       "type": "object"
     },
+    "TurnProgressTraceNotification": {
+      "properties": {
+        "category": {
+          "$ref": "#/definitions/ProgressTraceCategory"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/definitions/ProgressTraceState"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "category",
+        "state",
+        "threadId",
+        "turnId"
+      ],
+      "type": "object"
+    },
     "TurnStartedNotification": {
       "properties": {
         "threadId": {
@@ -7528,6 +7639,26 @@
         "params"
       ],
       "title": "Turn/plan/updatedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "turn/progressTrace"
+          ],
+          "title": "Turn/progressTraceNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/TurnProgressTraceNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Turn/progressTraceNotification",
       "type": "object"
     },
     {
