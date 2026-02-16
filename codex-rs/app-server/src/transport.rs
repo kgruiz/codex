@@ -188,34 +188,37 @@ pub(crate) async fn start_stdio_connection(
 pub(crate) async fn start_websocket_acceptor(
     bind_address: SocketAddr,
     transport_event_tx: mpsc::Sender<TransportEvent>,
-) -> IoResult<JoinHandle<()>> {
+) -> IoResult<(SocketAddr, JoinHandle<()>)> {
     let listener = TcpListener::bind(bind_address).await?;
     let local_addr = listener.local_addr()?;
     info!("app-server websocket listening on ws://{local_addr}");
 
     let connection_counter = Arc::new(AtomicU64::new(1));
-    Ok(tokio::spawn(async move {
-        loop {
-            match listener.accept().await {
-                Ok((stream, _peer_addr)) => {
-                    let connection_id =
-                        ConnectionId(connection_counter.fetch_add(1, Ordering::Relaxed));
-                    let transport_event_tx_for_connection = transport_event_tx.clone();
-                    tokio::spawn(async move {
-                        run_websocket_connection(
-                            connection_id,
-                            stream,
-                            transport_event_tx_for_connection,
-                        )
-                        .await;
-                    });
-                }
-                Err(err) => {
-                    error!("failed to accept websocket connection: {err}");
+    Ok((
+        local_addr,
+        tokio::spawn(async move {
+            loop {
+                match listener.accept().await {
+                    Ok((stream, _peer_addr)) => {
+                        let connection_id =
+                            ConnectionId(connection_counter.fetch_add(1, Ordering::Relaxed));
+                        let transport_event_tx_for_connection = transport_event_tx.clone();
+                        tokio::spawn(async move {
+                            run_websocket_connection(
+                                connection_id,
+                                stream,
+                                transport_event_tx_for_connection,
+                            )
+                            .await;
+                        });
+                    }
+                    Err(err) => {
+                        error!("failed to accept websocket connection: {err}");
+                    }
                 }
             }
-        }
-    }))
+        }),
+    ))
 }
 
 async fn run_websocket_connection(

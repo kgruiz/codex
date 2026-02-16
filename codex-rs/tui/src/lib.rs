@@ -84,6 +84,7 @@ pub mod live_wrap;
 mod markdown;
 mod markdown_render;
 mod markdown_stream;
+mod menubar_bridge;
 mod model_migration;
 mod notifications;
 pub mod onboarding;
@@ -275,7 +276,7 @@ pub async fn run_main(
         cwd,
         model_provider: model_provider_override.clone(),
         config_profile: cli.config_profile.clone(),
-        codex_linux_sandbox_exe,
+        codex_linux_sandbox_exe: codex_linux_sandbox_exe.clone(),
         show_raw_agent_reasoning: cli.oss.then_some(true),
         additional_writable_roots: additional_dirs,
         ..Default::default()
@@ -420,6 +421,7 @@ async fn run_ratatui_app(
     mut cloud_requirements: CloudRequirementsLoader,
     feedback: codex_feedback::CodexFeedback,
 ) -> color_eyre::Result<AppExitInfo> {
+    let codex_linux_sandbox_exe = overrides.codex_linux_sandbox_exe.clone();
     color_eyre::install()?;
 
     tooltips::announcement::prewarm();
@@ -699,6 +701,7 @@ async fn run_ratatui_app(
 
     let app_result = App::run(
         &mut tui,
+        codex_linux_sandbox_exe,
         auth_manager,
         config,
         cli_kv_overrides.clone(),

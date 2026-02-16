@@ -528,6 +528,7 @@ pub(crate) struct App {
     pub(crate) app_event_tx: AppEventSender,
     pub(crate) chat_widget: ChatWidget,
     pub(crate) auth_manager: Arc<AuthManager>,
+    menubar_bridge: Option<crate::menubar_bridge::MenuBarBridge>,
     /// Config is stored here so we can recreate ChatWidgets as needed.
     pub(crate) config: Config,
     pub(crate) active_profile: Option<String>,
@@ -929,6 +930,7 @@ impl App {
     #[allow(clippy::too_many_arguments)]
     pub async fn run(
         tui: &mut tui::Tui,
+        codex_linux_sandbox_exe: Option<PathBuf>,
         auth_manager: Arc<AuthManager>,
         mut config: Config,
         cli_kv_overrides: Vec<(String, TomlValue)>,
@@ -1114,6 +1116,7 @@ impl App {
             app_event_tx,
             chat_widget,
             auth_manager: auth_manager.clone(),
+            menubar_bridge: None,
             config,
             active_profile,
             cli_kv_overrides,
@@ -1142,6 +1145,15 @@ impl App {
             primary_session_configured: None,
             pending_primary_events: VecDeque::new(),
         };
+
+        app.menubar_bridge = crate::menubar_bridge::MenuBarBridge::start(
+            codex_linux_sandbox_exe,
+            Arc::new(app.config.clone()),
+            app.auth_manager.clone(),
+            app.server.clone(),
+            app.cli_kv_overrides.clone(),
+        )
+        .await;
 
         // On startup, if Agent mode (workspace-write) or ReadOnly is active, warn about world-writable dirs on Windows.
         #[cfg(target_os = "windows")]
@@ -1241,6 +1253,9 @@ impl App {
                 AppRunControl::Exit(reason) => break reason,
             }
         };
+        if let Some(menubar_bridge) = app.menubar_bridge.take() {
+            menubar_bridge.shutdown().await;
+        }
         tui.terminal.clear()?;
         Ok(AppExitInfo {
             token_usage: app.token_usage(),
@@ -2975,6 +2990,7 @@ mod tests {
             app_event_tx,
             chat_widget,
             auth_manager,
+            menubar_bridge: None,
             config,
             active_profile: None,
             cli_kv_overrides: Vec::new(),
@@ -3029,6 +3045,7 @@ mod tests {
                 app_event_tx,
                 chat_widget,
                 auth_manager,
+                menubar_bridge: None,
                 config,
                 active_profile: None,
                 cli_kv_overrides: Vec::new(),

@@ -2506,6 +2506,13 @@ impl CodexMessageProcessor {
         self.thread_manager.subscribe_thread_created()
     }
 
+    pub(crate) async fn attach_loaded_thread_listeners(&mut self) {
+        let thread_ids = self.thread_manager.list_thread_ids().await;
+        for thread_id in thread_ids {
+            self.try_attach_thread_listener(thread_id).await;
+        }
+    }
+
     /// Best-effort: attach a listener for thread_id if missing.
     pub(crate) async fn try_attach_thread_listener(&mut self, thread_id: ThreadId) {
         if self

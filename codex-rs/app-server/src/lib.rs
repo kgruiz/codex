@@ -3,6 +3,7 @@
 use codex_cloud_requirements::cloud_requirements_loader;
 use codex_common::CliConfigOverrides;
 use codex_core::AuthManager;
+use codex_core::ThreadManager;
 use codex_core::config::Config;
 use codex_core::config::ConfigBuilder;
 use codex_core::config_loader::CloudRequirementsLoader;
@@ -11,6 +12,7 @@ use codex_core::config_loader::LoaderOverrides;
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::io::Result as IoResult;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -37,6 +39,7 @@ use codex_core::config_loader::ConfigLoadError;
 use codex_core::config_loader::TextRange as CoreTextRange;
 use codex_feedback::CodexFeedback;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use toml::Value as TomlValue;
 use tracing::error;
@@ -60,6 +63,32 @@ mod outgoing_message;
 mod transport;
 
 pub use crate::transport::AppServerTransport;
+
+pub struct EmbeddedAppServerHandle {
+    websocket_url: String,
+    shutdown_tx: Option<oneshot::Sender<()>>,
+    supervisor_handle: Option<JoinHandle<()>>,
+}
+
+impl EmbeddedAppServerHandle {
+    pub fn websocket_url(&self) -> &str {
+        self.websocket_url.as_str()
+    }
+
+    pub async fn shutdown(mut self) -> IoResult<()> {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            let _ = shutdown_tx.send(());
+        }
+        if let Some(supervisor_handle) = self.supervisor_handle.take()
+            && let Err(err) = supervisor_handle.await
+        {
+            return Err(std::io::Error::other(format!(
+                "embedded app-server task failed: {err}"
+            )));
+        }
+        Ok(())
+    }
+}
 
 fn config_warning_from_error(
     summary: impl Into<String>,
@@ -205,8 +234,9 @@ pub async fn run_main_with_transport(
             start_stdio_connection(transport_event_tx.clone(), &mut stdio_handles).await?;
         }
         AppServerTransport::WebSocket { bind_address } => {
-            websocket_accept_handle =
-                Some(start_websocket_acceptor(bind_address, transport_event_tx.clone()).await?);
+            let (_local_addr, handle) =
+                start_websocket_acceptor(bind_address, transport_event_tx.clone()).await?;
+            websocket_accept_handle = Some(handle);
         }
     }
     let shutdown_when_no_connections = matches!(transport, AppServerTransport::Stdio);
@@ -351,6 +381,8 @@ pub async fn run_main_with_transport(
             cloud_requirements: cloud_requirements.clone(),
             feedback: feedback.clone(),
             config_warnings,
+            auth_manager: None,
+            thread_manager: None,
         });
         let mut thread_created_rx = processor.thread_created_receiver();
         let mut connections = HashMap::<ConnectionId, ConnectionState>::new();
@@ -445,4 +477,127 @@ pub async fn run_main_with_transport(
     }
 
     Ok(())
+}
+
+pub async fn start_embedded_websocket_server(
+    codex_linux_sandbox_exe: Option<PathBuf>,
+    config: Arc<Config>,
+    auth_manager: Arc<AuthManager>,
+    thread_manager: Arc<ThreadManager>,
+    cli_overrides: Vec<(String, TomlValue)>,
+    bind_address: SocketAddr,
+) -> IoResult<EmbeddedAppServerHandle> {
+    let (transport_event_tx, mut transport_event_rx) =
+        mpsc::channel::<TransportEvent>(CHANNEL_CAPACITY);
+    let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<OutgoingEnvelope>(CHANNEL_CAPACITY);
+    let (local_addr, websocket_accept_handle) =
+        start_websocket_acceptor(bind_address, transport_event_tx.clone()).await?;
+    let websocket_url = format!("ws://{local_addr}");
+    let loader_overrides = LoaderOverrides::default();
+    let cloud_requirements =
+        cloud_requirements_loader(auth_manager.clone(), config.chatgpt_base_url.clone());
+    let feedback = CodexFeedback::new();
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+
+    let processor_handle = tokio::spawn({
+        let outgoing_message_sender = Arc::new(OutgoingMessageSender::new(outgoing_tx));
+        let mut processor = MessageProcessor::new(MessageProcessorArgs {
+            outgoing: outgoing_message_sender,
+            codex_linux_sandbox_exe,
+            config,
+            cli_overrides,
+            loader_overrides,
+            cloud_requirements,
+            feedback,
+            config_warnings: Vec::new(),
+            auth_manager: Some(auth_manager),
+            thread_manager: Some(thread_manager),
+        });
+        let mut thread_created_rx = processor.thread_created_receiver();
+        let mut connections = HashMap::<ConnectionId, ConnectionState>::new();
+        async move {
+            let mut listen_for_threads = true;
+            loop {
+                tokio::select! {
+                    _ = &mut shutdown_rx => {
+                        break;
+                    }
+                    event = transport_event_rx.recv() => {
+                        let Some(event) = event else {
+                            break;
+                        };
+                        match event {
+                            TransportEvent::ConnectionOpened { connection_id, writer } => {
+                                connections.insert(connection_id, ConnectionState::new(writer));
+                            }
+                            TransportEvent::ConnectionClosed { connection_id } => {
+                                connections.remove(&connection_id);
+                            }
+                            TransportEvent::IncomingMessage { connection_id, message } => {
+                                match message {
+                                    JSONRPCMessage::Request(request) => {
+                                        let Some(connection_state) = connections.get_mut(&connection_id) else {
+                                            warn!("dropping request from unknown connection: {:?}", connection_id);
+                                            continue;
+                                        };
+                                        processor
+                                            .process_request(
+                                                connection_id,
+                                                request,
+                                                &mut connection_state.session,
+                                            )
+                                            .await;
+                                    }
+                                    JSONRPCMessage::Response(response) => {
+                                        processor.process_response(response).await;
+                                    }
+                                    JSONRPCMessage::Notification(notification) => {
+                                        processor.process_notification(notification).await;
+                                    }
+                                    JSONRPCMessage::Error(err) => {
+                                        processor.process_error(err).await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    envelope = outgoing_rx.recv() => {
+                        let Some(envelope) = envelope else {
+                            break;
+                        };
+                        route_outgoing_envelope(&mut connections, envelope).await;
+                    }
+                    created = thread_created_rx.recv(), if listen_for_threads => {
+                        match created {
+                            Ok(thread_id) => {
+                                if has_initialized_connections(&connections) {
+                                    processor.try_attach_thread_listener(thread_id).await;
+                                }
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                                warn!("thread_created receiver lagged; skipping resync");
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                listen_for_threads = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    drop(transport_event_tx);
+
+    let supervisor_handle = tokio::spawn(async move {
+        let _ = processor_handle.await;
+        websocket_accept_handle.abort();
+        let _ = websocket_accept_handle.await;
+    });
+
+    Ok(EmbeddedAppServerHandle {
+        websocket_url,
+        shutdown_tx: Some(shutdown_tx),
+        supervisor_handle: Some(supervisor_handle),
+    })
 }
