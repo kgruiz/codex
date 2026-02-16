@@ -1,0 +1,37 @@
+# CodexMenuBar
+
+`CodexMenuBar` is a standalone macOS menu bar companion app.
+
+It does not modify or depend on `Codex.app` internals. It launches `codex app-server` over stdio and renders active turn progress in the menu bar dropdown.
+
+## Features
+
+- Menu bar icon state for connected/running/error.
+- One row per active turn.
+- Terminal-style progress semantics:
+  - working status
+  - elapsed timer
+  - trace legend categories
+  - indeterminate progress bar while running
+
+## Build
+
+```shell
+cd CodexMenuBar
+swift build
+```
+
+## Run
+
+```shell
+cd CodexMenuBar
+swift run CodexMenuBar
+```
+
+When running, the app starts `codex app-server --listen stdio://` and listens for:
+
+- `turn/started`
+- `turn/completed`
+- `turn/progressTrace`
+
+It also uses `item/started` and `item/completed` as a fallback to synthesize trace categories if needed.
