@@ -3,11 +3,14 @@ import Foundation
 
 final class TurnMenuRowView: NSView {
   private static let rowWidth: CGFloat = 420
-  private static let rowHeight: CGFloat = 60
+  private static let rowHeight: CGFloat = 64
 
   private let topLabel = NSTextField(labelWithString: "")
   private let detailLabel = NSTextField(labelWithString: "")
   private let barView = TimelineBarView()
+  private let hoverCard = NSView()
+  private let hoverColorSwatch = NSView()
+  private let hoverLabel = NSTextField(labelWithString: "")
   private var defaultDetailText = "No detail"
 
   init(turn: ActiveTurn, now: Date) {
@@ -29,11 +32,16 @@ final class TurnMenuRowView: NSView {
     super.layout()
 
     let insets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
-    let contentRect = bounds.insetBy(dx: insets.left, dy: insets.bottom)
+    let contentRect = NSRect(
+      x: insets.left,
+      y: insets.bottom,
+      width: max(0, bounds.width - insets.left - insets.right),
+      height: max(0, bounds.height - insets.top - insets.bottom)
+    )
 
     let topHeight: CGFloat = 14
     let barHeight: CGFloat = 12
-    let detailHeight: CGFloat = 14
+    let detailHeight: CGFloat = 16
     let verticalSpacing: CGFloat = 4
 
     topLabel.frame = NSRect(
@@ -56,6 +64,21 @@ final class TurnMenuRowView: NSView {
       width: contentRect.width,
       height: detailHeight
     )
+
+    hoverCard.frame = detailLabel.frame
+    let swatchSize: CGFloat = 7
+    hoverColorSwatch.frame = NSRect(
+      x: 8,
+      y: (hoverCard.bounds.height - swatchSize) / 2,
+      width: swatchSize,
+      height: swatchSize
+    )
+    hoverLabel.frame = NSRect(
+      x: hoverColorSwatch.frame.maxX + 6,
+      y: 0,
+      width: max(0, hoverCard.bounds.width - hoverColorSwatch.frame.maxX - 14),
+      height: hoverCard.bounds.height
+    )
   }
 
   private func ConfigureViews() {
@@ -68,6 +91,21 @@ final class TurnMenuRowView: NSView {
     detailLabel.lineBreakMode = .byTruncatingTail
     detailLabel.maximumNumberOfLines = 1
 
+    hoverCard.wantsLayer = true
+    hoverCard.layer?.cornerRadius = 4
+    hoverCard.layer?.backgroundColor =
+      NSColor.controlBackgroundColor.withAlphaComponent(0.85).cgColor
+    hoverCard.layer?.borderWidth = 1
+    hoverCard.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.55).cgColor
+    hoverCard.isHidden = true
+
+    hoverColorSwatch.wantsLayer = true
+    hoverColorSwatch.layer?.cornerRadius = 3.5
+
+    hoverLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+    hoverLabel.lineBreakMode = .byTruncatingTail
+    hoverLabel.maximumNumberOfLines = 1
+
     barView.OnHoveredSegmentChanged = { [weak self] segment in
       self?.UpdateHoverText(segment: segment)
     }
@@ -75,34 +113,51 @@ final class TurnMenuRowView: NSView {
     addSubview(topLabel)
     addSubview(barView)
     addSubview(detailLabel)
+    addSubview(hoverCard)
+    hoverCard.addSubview(hoverColorSwatch)
+    hoverCard.addSubview(hoverLabel)
   }
 
   private func Update(turn: ActiveTurn, now: Date) {
     let shortThreadId = String(turn.threadId.prefix(8))
-    let topText =
+    topLabel.stringValue =
       "\(StatusLabel(turn.status)) · \(turn.ElapsedString(now: now)) · [\(shortThreadId)/\(turn.turnId)]"
-    topLabel.stringValue = topText
 
     defaultDetailText = turn.latestLabel ?? "No detail"
-    detailLabel.stringValue = defaultDetailText
-    barView.Configure(segments: turn.TimelineSegments(now: now), now: now)
+    ShowDefaultDetail()
+    barView.Configure(segments: turn.TimelineSegments(now: now))
   }
 
   private func UpdateHoverText(segment: TimelineSegment?) {
     guard let segment else {
-      detailLabel.stringValue = defaultDetailText
+      ShowDefaultDetail()
       return
     }
 
+    let segmentColor = SegmentFillColor(segment.kind)
+    hoverCard.layer?.borderColor = segmentColor.withAlphaComponent(0.8).cgColor
+    hoverColorSwatch.layer?.backgroundColor = segmentColor.cgColor
+    hoverLabel.stringValue = HoverText(segment: segment)
+
+    detailLabel.isHidden = true
+    hoverCard.isHidden = false
+  }
+
+  private func ShowDefaultDetail() {
+    detailLabel.stringValue = defaultDetailText
+    detailLabel.isHidden = false
+    hoverCard.isHidden = true
+  }
+
+  private func HoverText(segment: TimelineSegment) -> String {
     let category = SegmentKindLabel(segment.kind)
     let duration = FormatDuration(segment.duration)
-    let start = TimelineBarView.FormatClockTime(segment.startedAt)
-    let end = TimelineBarView.FormatClockTime(segment.endedAt)
+    let start = FormatClockTime(segment.startedAt)
+    let end = FormatClockTime(segment.endedAt)
     if let label = segment.label, !label.isEmpty {
-      detailLabel.stringValue = "\(category) · \(duration) · \(start)-\(end) · \(label)"
-      return
+      return "\(category) · \(duration) · \(start)-\(end) · \(label)"
     }
-    detailLabel.stringValue = "\(category) · \(duration) · \(start)-\(end)"
+    return "\(category) · \(duration) · \(start)-\(end)"
   }
 
   private func StatusLabel(_ status: TurnExecutionStatus) -> String {
@@ -126,23 +181,6 @@ final class TimelineBarView: NSView {
   private var segmentRects: [CGRect] = []
   private var hoverIndex: Int?
   private var trackingArea: NSTrackingArea?
-  private var now = Date()
-
-  fileprivate static let durationFormatter: DateComponentsFormatter = {
-    let formatter = DateComponentsFormatter()
-    formatter.allowedUnits = [.hour, .minute, .second]
-    formatter.unitsStyle = .abbreviated
-    formatter.maximumUnitCount = 2
-    formatter.zeroFormattingBehavior = [.dropLeading]
-    return formatter
-  }()
-
-  private static let timeFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.timeStyle = .medium
-    formatter.dateStyle = .none
-    return formatter
-  }()
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -154,9 +192,8 @@ final class TimelineBarView: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func Configure(segments: [TimelineSegment], now: Date) {
+  func Configure(segments: [TimelineSegment]) {
     self.segments = segments.filter { $0.duration > 0 }
-    self.now = now
     hoverIndex = nil
     segmentRects = []
     OnHoveredSegmentChanged?(nil)
@@ -168,6 +205,7 @@ final class TimelineBarView: NSView {
     if let trackingArea {
       removeTrackingArea(trackingArea)
     }
+
     let options: NSTrackingArea.Options = [
       .activeAlways,
       .mouseEnteredAndExited,
@@ -191,7 +229,6 @@ final class TimelineBarView: NSView {
     if hoverIndex != nil {
       hoverIndex = nil
       OnHoveredSegmentChanged?(nil)
-      toolTip = nil
       needsDisplay = true
     }
   }
@@ -205,7 +242,7 @@ final class TimelineBarView: NSView {
     }
 
     let trackPath = NSBezierPath(roundedRect: trackRect, xRadius: 6, yRadius: 6)
-    NSColor.quaternaryLabelColor.withAlphaComponent(0.35).setFill()
+    NSColor.controlBackgroundColor.withAlphaComponent(0.9).setFill()
     trackPath.fill()
 
     let pixelWidth = max(0, Int(trackRect.width.rounded(.down)))
@@ -231,18 +268,19 @@ final class TimelineBarView: NSView {
       segmentRects.append(segmentRect)
       x += CGFloat(width)
 
-      SegmentColor(segments[index].kind).setFill()
+      SegmentFillColor(segments[index].kind).setFill()
       NSBezierPath(rect: segmentRect).fill()
     }
 
     if widths.count >= 2 {
-      NSColor.separatorColor.withAlphaComponent(0.55).setStroke()
+      NSColor.separatorColor.withAlphaComponent(0.65).setStroke()
       for index in 1..<widths.count {
         let previousRect = segmentRects[index - 1]
         let currentRect = segmentRects[index]
         if previousRect.isNull || currentRect.isNull {
           continue
         }
+
         let boundaryX = currentRect.minX
         let separator = NSBezierPath()
         separator.move(to: CGPoint(x: boundaryX, y: trackRect.minY))
@@ -254,17 +292,17 @@ final class TimelineBarView: NSView {
 
     NSGraphicsContext.restoreGraphicsState()
 
-    NSColor.separatorColor.setStroke()
+    NSColor.separatorColor.withAlphaComponent(0.9).setStroke()
     trackPath.lineWidth = 1
     trackPath.stroke()
 
     if let hoverIndex, hoverIndex < segmentRects.count {
       let rect = segmentRects[hoverIndex]
       if !rect.isNull {
-        NSColor.controlAccentColor.withAlphaComponent(0.9).setStroke()
+        NSColor.controlAccentColor.withAlphaComponent(0.95).setStroke()
         let highlightPath = NSBezierPath(
           roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
-        highlightPath.lineWidth = 1
+        highlightPath.lineWidth = 1.2
         highlightPath.stroke()
       }
     }
@@ -278,29 +316,11 @@ final class TimelineBarView: NSView {
 
     hoverIndex = nextIndex
     if let nextIndex, nextIndex < segments.count {
-      let segment = segments[nextIndex]
-      OnHoveredSegmentChanged?(segment)
-      toolTip = TooltipText(segment: segment)
+      OnHoveredSegmentChanged?(segments[nextIndex])
     } else {
       OnHoveredSegmentChanged?(nil)
-      toolTip = nil
     }
     needsDisplay = true
-  }
-
-  private func TooltipText(segment: TimelineSegment) -> String {
-    let category = SegmentKindLabel(segment.kind)
-    let start = Self.FormatClockTime(segment.startedAt)
-    let end = Self.FormatClockTime(segment.endedAt)
-    let duration = FormatDuration(segment.duration)
-    if let label = segment.label, !label.isEmpty {
-      return "\(category)\n\(start) - \(end)\nDuration: \(duration)\n\(label)"
-    }
-    return "\(category)\n\(start) - \(end)\nDuration: \(duration)"
-  }
-
-  static func FormatClockTime(_ date: Date) -> String {
-    timeFormatter.string(from: date)
   }
 
   private func AllocatePixelWidths(totalWidth: Int) -> [Int] {
@@ -320,9 +340,7 @@ final class TimelineBarView: NSView {
 
     let exactWidths = durations.map { ($0 / totalDuration) * Double(totalWidth) }
     var widths = exactWidths.map { Int($0.rounded(.down)) }
-    let remainders = exactWidths.enumerated().map { index, value in
-      value - Double(Int(value.rounded(.down)))
-    }
+    let remainders = exactWidths.map { $0 - Double(Int($0.rounded(.down))) }
     let minimumWidths = exactWidths.map { $0 > 0 ? 1 : 0 }
 
     for index in widths.indices {
@@ -373,6 +391,7 @@ final class TimelineBarView: NSView {
         }
         return durations[lhs] > durations[rhs]
       }
+
       if order.isEmpty {
         return widths
       }
@@ -387,29 +406,45 @@ final class TimelineBarView: NSView {
 
     return widths
   }
+}
 
-  private func SegmentColor(_ kind: TimelineSegmentKind) -> NSColor {
-    switch kind {
-    case .category(let category):
-      switch category {
-      case .tool:
-        return NSColor.labelColor
-      case .edit:
-        return NSColor.systemPurple
-      case .waiting:
-        return NSColor.systemRed
-      case .network:
-        return NSColor.systemBlue
-      case .prefill:
-        return NSColor.systemOrange
-      case .reasoning:
-        return NSColor.systemTeal
-      case .gen:
-        return NSColor.systemGreen
-      }
-    case .idle:
-      return NSColor.tertiaryLabelColor.withAlphaComponent(0.45)
+private let durationFormatter: DateComponentsFormatter = {
+  let formatter = DateComponentsFormatter()
+  formatter.allowedUnits = [.hour, .minute, .second]
+  formatter.unitsStyle = .abbreviated
+  formatter.maximumUnitCount = 2
+  formatter.zeroFormattingBehavior = [.dropLeading]
+  return formatter
+}()
+
+private let clockTimeFormatter: DateFormatter = {
+  let formatter = DateFormatter()
+  formatter.timeStyle = .medium
+  formatter.dateStyle = .none
+  return formatter
+}()
+
+private func SegmentFillColor(_ kind: TimelineSegmentKind) -> NSColor {
+  switch kind {
+  case .category(let category):
+    switch category {
+    case .tool:
+      return NSColor.systemIndigo.withAlphaComponent(0.95)
+    case .edit:
+      return NSColor.systemPurple.withAlphaComponent(0.95)
+    case .waiting:
+      return NSColor.systemRed.withAlphaComponent(0.95)
+    case .network:
+      return NSColor.systemBlue.withAlphaComponent(0.95)
+    case .prefill:
+      return NSColor.systemOrange.withAlphaComponent(0.95)
+    case .reasoning:
+      return NSColor.systemPink.withAlphaComponent(0.95)
+    case .gen:
+      return NSColor.systemGreen.withAlphaComponent(0.95)
     }
+  case .idle:
+    return NSColor.systemGray.withAlphaComponent(0.55)
   }
 }
 
@@ -437,9 +472,13 @@ private func SegmentKindLabel(_ kind: TimelineSegmentKind) -> String {
   }
 }
 
+private func FormatClockTime(_ date: Date) -> String {
+  clockTimeFormatter.string(from: date)
+}
+
 private func FormatDuration(_ duration: TimeInterval) -> String {
   if duration <= 0 {
     return "0s"
   }
-  return TimelineBarView.durationFormatter.string(from: duration) ?? "0s"
+  return durationFormatter.string(from: duration) ?? "0s"
 }

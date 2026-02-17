@@ -186,6 +186,7 @@ final class ActiveTurn {
 
     var segments: [TimelineSegment] = []
     var activeCounts: [ProgressCategory: Int] = [:]
+    var activeStartedAt: [ProgressCategory: Date] = [:]
     var activeLabels: [ProgressCategory: String] = [:]
     var cursor = startedAt
 
@@ -197,6 +198,7 @@ final class ActiveTurn {
           start: cursor,
           end: timestamp,
           activeCounts: activeCounts,
+          activeStartedAt: activeStartedAt,
           activeLabels: activeLabels
         )
         cursor = timestamp
@@ -206,6 +208,7 @@ final class ActiveTurn {
       case .started:
         let count = activeCounts[snapshot.category] ?? 0
         activeCounts[snapshot.category] = count + 1
+        activeStartedAt[snapshot.category] = timestamp
         if let label = snapshot.label, !label.isEmpty {
           activeLabels[snapshot.category] = label
         }
@@ -214,6 +217,7 @@ final class ActiveTurn {
         let nextCount = max(0, count - 1)
         activeCounts[snapshot.category] = nextCount
         if nextCount == 0 {
+          activeStartedAt.removeValue(forKey: snapshot.category)
           activeLabels.removeValue(forKey: snapshot.category)
         }
       }
@@ -225,6 +229,7 @@ final class ActiveTurn {
         start: cursor,
         end: endDate,
         activeCounts: activeCounts,
+        activeStartedAt: activeStartedAt,
         activeLabels: activeLabels
       )
     }
@@ -237,6 +242,7 @@ final class ActiveTurn {
     start: Date,
     end: Date,
     activeCounts: [ProgressCategory: Int],
+    activeStartedAt: [ProgressCategory: Date],
     activeLabels: [ProgressCategory: String]
   ) {
     if end <= start {
@@ -246,7 +252,14 @@ final class ActiveTurn {
     let activeCategory =
       activeCounts
       .compactMap { category, count in count > 0 ? category : nil }
-      .sorted { $0.sortOrder < $1.sortOrder }
+      .sorted { lhs, rhs in
+        let lhsStartedAt = activeStartedAt[lhs] ?? Date.distantPast
+        let rhsStartedAt = activeStartedAt[rhs] ?? Date.distantPast
+        if lhsStartedAt != rhsStartedAt {
+          return lhsStartedAt > rhsStartedAt
+        }
+        return lhs.sortOrder < rhs.sortOrder
+      }
       .first
 
     let kind: TimelineSegmentKind
