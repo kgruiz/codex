@@ -35,3 +35,5 @@ When running, the app scans `~/.codex/runtime/menubar/endpoints/*.json` for webs
 - `turn/progressTrace`
 
 It also uses `item/started` and `item/completed` as a fallback to synthesize trace categories if needed.
+
+Endpoint files are lease-based. Active `codex` sessions refresh `lastHeartbeatAt` periodically, and the menu bar prunes stale endpoint files (dead PID or expired lease) to prevent unbounded growth.

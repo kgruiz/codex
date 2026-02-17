@@ -354,15 +354,24 @@ final class AppServerClient {
   private var rootDirectoryWatchPath: String?
   private var endpointDirectoryWatchPath: String?
   private let resyncIntervalSeconds: TimeInterval = 15.0
+  private let endpointLeaseFreshnessSeconds: TimeInterval = 15.0
+  private let endpointStaleFileTTLSeconds: TimeInterval = 30 * 60
   private var shouldRun = false
   private var state: AppServerConnectionState = .disconnected
   private var lastEndpointIds: [String] = []
+  private let timestampFormatterWithFractionalSeconds = ISO8601DateFormatter()
+  private let timestampFormatter = ISO8601DateFormatter()
 
   init() {
     let config = URLSessionConfiguration.default
     config.timeoutIntervalForRequest = 30
     config.timeoutIntervalForResource = 30
     session = URLSession(configuration: config)
+    timestampFormatterWithFractionalSeconds.formatOptions = [
+      .withInternetDateTime,
+      .withFractionalSeconds,
+    ]
+    timestampFormatter.formatOptions = [.withInternetDateTime]
   }
 
   deinit {
@@ -608,6 +617,7 @@ final class AppServerClient {
 
   private func ReadRuntimeEndpointsOnQueue() -> [String: RuntimeEndpoint] {
     let endpointDir = EndpointDirectoryURL()
+    let now = Date()
 
     guard
       let fileUrls = try? FileManager.default.contentsOfDirectory(
@@ -639,11 +649,32 @@ final class AppServerClient {
         (dict["pid"] as? Int)
         ?? ((dict["pid"] as? String).flatMap { Int($0) })
         ?? Int(endpointId)
-      if let pid, !IsProcessAlive(pid) {
+      let lastHeartbeatAt = ParseTimestamp(dict["lastHeartbeatAt"])
+      let startedAt = ParseTimestamp(dict["startedAt"])
+      let isPidAlive = pid.map(IsProcessAlive) ?? false
+      let isFreshLease =
+        lastHeartbeatAt.map { now.timeIntervalSince($0) <= endpointLeaseFreshnessSeconds } ?? true
+      let isActiveEndpoint = isPidAlive && isFreshLease
+
+      let shouldDeleteForDeadPid = pid != nil && !isPidAlive
+      let shouldDeleteForExpiredLease =
+        lastHeartbeatAt.map { now.timeIntervalSince($0) > endpointStaleFileTTLSeconds } ?? false
+      let shouldDeleteForAncientFile =
+        lastHeartbeatAt == nil
+        && startedAt.map { now.timeIntervalSince($0) > endpointStaleFileTTLSeconds } ?? false
+        && (pid == nil || !isPidAlive)
+      if shouldDeleteForDeadPid || shouldDeleteForExpiredLease || shouldDeleteForAncientFile {
+        DeleteEndpointFileIfPresent(fileUrl)
+      }
+
+      if !isActiveEndpoint {
         continue
       }
       endpoints[endpointId] = RuntimeEndpoint(
-        endpointId: endpointId, endpointUrl: endpointUrl, pid: pid)
+        endpointId: endpointId,
+        endpointUrl: endpointUrl,
+        pid: pid
+      )
     }
 
     return endpoints
@@ -726,6 +757,27 @@ final class AppServerClient {
     }
 
     return false
+  }
+
+  private func ParseTimestamp(_ rawValue: Any?) -> Date? {
+    guard let rawValue = rawValue as? String, !rawValue.isEmpty else {
+      return nil
+    }
+    if let parsed = timestampFormatterWithFractionalSeconds.date(from: rawValue) {
+      return parsed
+    }
+    return timestampFormatter.date(from: rawValue)
+  }
+
+  private func DeleteEndpointFileIfPresent(_ fileUrl: URL) {
+    do {
+      try FileManager.default.removeItem(at: fileUrl)
+    } catch {
+      let nsError = error as NSError
+      if nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileNoSuchFileError {
+        return
+      }
+    }
   }
 
   private func DispatchNotification(method: String, params: [String: Any]) {
