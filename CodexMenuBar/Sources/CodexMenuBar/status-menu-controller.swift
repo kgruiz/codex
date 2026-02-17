@@ -18,34 +18,35 @@ final class StatusMenuController {
   }
 
   func Render(
-    turns: [ActiveTurn],
+    endpointRows: [EndpointRow],
     connectionState: AppServerConnectionState,
     animationFrame: Int,
     now: Date
   ) {
     _ = animationFrame
+    let runningCount = endpointRows.filter { $0.activeTurn != nil }.count
     UpdateButton(
       connectionState: connectionState,
-      runningCount: turns.filter { $0.status == .inProgress }.count)
+      runningCount: runningCount)
 
     menu.removeAllItems()
     let status = NSMenuItem(
       title: HeaderTitle(
         connectionState: connectionState,
-        runningCount: turns.filter { $0.status == .inProgress }.count), action: nil,
+        runningCount: runningCount), action: nil,
       keyEquivalent: "")
     status.isEnabled = false
     menu.addItem(status)
     menu.addItem(.separator())
 
-    if turns.isEmpty {
-      let empty = NSMenuItem(title: "No active turns", action: nil, keyEquivalent: "")
+    if endpointRows.isEmpty {
+      let empty = NSMenuItem(title: "No active Codex sessions", action: nil, keyEquivalent: "")
       empty.isEnabled = false
       menu.addItem(empty)
     } else {
-      for turn in turns {
+      for endpointRow in endpointRows {
         let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        item.view = TurnMenuRowView(turn: turn, now: now)
+        item.view = TurnMenuRowView(endpointRow: endpointRow, now: now)
         item.isEnabled = false
         menu.addItem(item)
       }

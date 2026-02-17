@@ -36,6 +36,20 @@ final class TurnStore {
     turnsByKey[key] = turn
   }
 
+  func MarkTurnCompletedIfPresent(
+    endpointId: String,
+    threadId: String,
+    turnId: String,
+    status: TurnExecutionStatus,
+    at now: Date
+  ) {
+    let key = TurnKey(endpointId: endpointId, threadId: threadId, turnId: turnId)
+    guard let existing = turnsByKey[key] else {
+      return
+    }
+    existing.ApplyStatus(status, at: now)
+  }
+
   func RecordProgress(
     endpointId: String,
     threadId: String,
@@ -91,5 +105,29 @@ final class TurnStore {
 
   func RunningTurnCount() -> Int {
     turnsByKey.values.filter { $0.status == .inProgress }.count
+  }
+
+  func EndpointRows(activeEndpointIds: [String]) -> [EndpointRow] {
+    var endpointIds = Set(activeEndpointIds)
+    for turn in turnsByKey.values where turn.status == .inProgress {
+      endpointIds.insert(turn.endpointId)
+    }
+
+    let sortedEndpointIds = endpointIds.sorted()
+    return sortedEndpointIds.map { endpointId in
+      let activeTurn = turnsByKey.values
+        .filter { $0.endpointId == endpointId && $0.status == .inProgress }
+        .sorted { lhs, rhs in
+          if lhs.startedAt != rhs.startedAt {
+            return lhs.startedAt > rhs.startedAt
+          }
+          if lhs.threadId != rhs.threadId {
+            return lhs.threadId < rhs.threadId
+          }
+          return lhs.turnId < rhs.turnId
+        }
+        .first
+      return EndpointRow(endpointId: endpointId, activeTurn: activeTurn)
+    }
   }
 }

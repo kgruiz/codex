@@ -12,11 +12,12 @@ final class TurnMenuRowView: NSView {
   private let hoverColorSwatch = NSView()
   private let hoverLabel = NSTextField(labelWithString: "")
   private var defaultDetailText = "No detail"
+  private var barVisible = true
 
-  init(turn: ActiveTurn, now: Date) {
+  init(endpointRow: EndpointRow, now: Date) {
     super.init(frame: NSRect(x: 0, y: 0, width: Self.rowWidth, height: Self.rowHeight))
     ConfigureViews()
-    Update(turn: turn, now: now)
+    Update(endpointRow: endpointRow, now: now)
   }
 
   @available(*, unavailable)
@@ -57,6 +58,7 @@ final class TurnMenuRowView: NSView {
       width: contentRect.width,
       height: barHeight
     )
+    barView.isHidden = !barVisible
 
     detailLabel.frame = NSRect(
       x: contentRect.minX,
@@ -118,17 +120,35 @@ final class TurnMenuRowView: NSView {
     hoverCard.addSubview(hoverLabel)
   }
 
-  private func Update(turn: ActiveTurn, now: Date) {
+  private func Update(endpointRow: EndpointRow, now: Date) {
+    let shortEndpointId = String(endpointRow.endpointId.prefix(8))
+    guard let turn = endpointRow.activeTurn else {
+      barVisible = false
+      topLabel.stringValue = "Codex \(shortEndpointId) · Idle"
+      defaultDetailText = "No active run"
+      barView.Configure(segments: [])
+      ShowDefaultDetail()
+      needsLayout = true
+      return
+    }
+
+    barVisible = true
     let shortThreadId = String(turn.threadId.prefix(8))
     topLabel.stringValue =
-      "\(StatusLabel(turn.status)) · \(turn.ElapsedString(now: now)) · [\(shortThreadId)/\(turn.turnId)]"
+      "Codex \(shortEndpointId) · \(StatusLabel(turn.status)) \(turn.ElapsedString(now: now)) · [\(shortThreadId)/\(turn.turnId)]"
 
     defaultDetailText = turn.latestLabel ?? "No detail"
-    ShowDefaultDetail()
     barView.Configure(segments: turn.TimelineSegments(now: now))
+    ShowDefaultDetail()
+    needsLayout = true
   }
 
   private func UpdateHoverText(segment: TimelineSegment?) {
+    guard barVisible else {
+      ShowDefaultDetail()
+      return
+    }
+
     guard let segment else {
       ShowDefaultDetail()
       return

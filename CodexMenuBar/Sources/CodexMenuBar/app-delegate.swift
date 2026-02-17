@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private let appServerClient = AppServerClient()
 
   private var connectionState: AppServerConnectionState = .disconnected
+  private var activeEndpointIds: [String] = []
   private var animationFrame = 0
   private var timer: Timer?
 
@@ -43,6 +44,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       self.Render()
     }
 
+    appServerClient.OnEndpointIdsChanged = { [weak self] endpointIds in
+      guard let self else {
+        return
+      }
+      self.activeEndpointIds = endpointIds
+      self.Render()
+    }
+
     appServerClient.OnNotification = { [weak self] method, params in
       guard let self else {
         return
@@ -71,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   private func Render() {
     statusMenu.Render(
-      turns: turnStore.Snapshot(),
+      endpointRows: turnStore.EndpointRows(activeEndpointIds: activeEndpointIds),
       connectionState: connectionState,
       animationFrame: animationFrame,
       now: Date()
@@ -118,6 +127,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     let status = TurnExecutionStatus(serverValue: turn["status"] as? String ?? "failed")
     let endpointId = params["endpointId"] as? String ?? "unknown"
+    let fromSnapshot = params["fromSnapshot"] as? Bool ?? false
+    if fromSnapshot {
+      turnStore.MarkTurnCompletedIfPresent(
+        endpointId: endpointId,
+        threadId: threadId,
+        turnId: turnId,
+        status: status,
+        at: Date()
+      )
+      return
+    }
     turnStore.MarkTurnCompleted(
       endpointId: endpointId,
       threadId: threadId,

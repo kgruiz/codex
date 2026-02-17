@@ -31,6 +31,8 @@ private final class EndpointConnection {
   private var isConnected = false
   private var nextRequestId = 1
   private var pendingResponses: [Int: ([String: Any]) -> Void] = [:]
+  private var lastSnapshotRequestAt = Date.distantPast
+  private let snapshotRefreshInterval: TimeInterval = 1.0
 
   init(endpointId: String, endpointUrl: URL, queue: DispatchQueue, session: URLSession) {
     self.endpointId = endpointId
@@ -61,6 +63,19 @@ private final class EndpointConnection {
       return
     }
     DisconnectOnQueue(notify: true)
+  }
+
+  func RefreshSnapshotIfNeeded() {
+    guard isConnected else {
+      return
+    }
+
+    let now = Date()
+    if now.timeIntervalSince(lastSnapshotRequestAt) < snapshotRefreshInterval {
+      return
+    }
+
+    RequestThreadSnapshotOnQueue()
   }
 
   private func StartReceiveLoopOnQueue() {
@@ -165,6 +180,7 @@ private final class EndpointConnection {
   }
 
   private func RequestThreadSnapshotOnQueue() {
+    lastSnapshotRequestAt = Date()
     SendRequestOnQueue(method: "thread/loaded/list", params: nil) { [weak self] result in
       guard let self else {
         return
@@ -206,6 +222,7 @@ private final class EndpointConnection {
             "turn": turn,
           ]
           params["endpointId"] = self.endpointId
+          params["fromSnapshot"] = true
           self.OnNotification?("turn/started", params)
         } else {
           var params: [String: Any] = [
@@ -213,6 +230,7 @@ private final class EndpointConnection {
             "turn": turn,
           ]
           params["endpointId"] = self.endpointId
+          params["fromSnapshot"] = true
           self.OnNotification?("turn/completed", params)
         }
       }
@@ -283,6 +301,7 @@ private final class EndpointConnection {
 final class AppServerClient {
   var OnNotification: ((String, [String: Any]) -> Void)?
   var OnStateChange: ((AppServerConnectionState) -> Void)?
+  var OnEndpointIdsChanged: (([String]) -> Void)?
 
   private let workQueue = DispatchQueue(label: "com.openai.codex.menubar.appserver")
   private let session: URLSession
@@ -343,6 +362,8 @@ final class AppServerClient {
       connection.Stop()
     }
 
+    DispatchEndpointIds([])
+
     if emitState {
       EmitState(.disconnected)
     }
@@ -352,7 +373,7 @@ final class AppServerClient {
     endpointScanTimer?.cancel()
 
     let timer = DispatchSource.makeTimerSource(queue: workQueue)
-    timer.schedule(deadline: .now(), repeating: 2.0)
+    timer.schedule(deadline: .now(), repeating: 0.5)
     timer.setEventHandler { [weak self] in
       self?.ScanEndpointsOnQueue()
     }
@@ -422,6 +443,7 @@ final class AppServerClient {
     for endpoint in endpoints.values {
       if let existing = endpointConnections[endpoint.endpointId] {
         if existing.endpointUrl == endpoint.endpointUrl {
+          existing.RefreshSnapshotIfNeeded()
           continue
         }
         existing.Stop()
@@ -450,6 +472,9 @@ final class AppServerClient {
       endpointConnections[endpoint.endpointId] = connection
       connection.Start()
     }
+
+    let endpointIds = endpointConnections.keys.sorted()
+    DispatchEndpointIds(endpointIds)
   }
 
   private func DispatchNotification(method: String, params: [String: Any]) {
@@ -484,6 +509,12 @@ final class AppServerClient {
     state = nextState
     DispatchQueue.main.async { [weak self] in
       self?.OnStateChange?(nextState)
+    }
+  }
+
+  private func DispatchEndpointIds(_ endpointIds: [String]) {
+    DispatchQueue.main.async { [weak self] in
+      self?.OnEndpointIdsChanged?(endpointIds)
     }
   }
 }

@@ -77,6 +77,11 @@ struct TimelineSegment: Equatable {
   }
 }
 
+struct EndpointRow {
+  let endpointId: String
+  let activeTurn: ActiveTurn?
+}
+
 final class ActiveTurn {
   let endpointId: String
   let threadId: String
