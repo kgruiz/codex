@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 enum AppServerConnectionState: Equatable {
@@ -306,9 +307,15 @@ final class AppServerClient {
   private let workQueue = DispatchQueue(label: "com.openai.codex.menubar.appserver")
   private let session: URLSession
   private var endpointConnections: [String: EndpointConnection] = [:]
-  private var endpointScanTimer: DispatchSourceTimer?
+  private var endpointResyncTimer: DispatchSourceTimer?
+  private var rootDirectoryWatcher: DispatchSourceFileSystemObject?
+  private var endpointDirectoryWatcher: DispatchSourceFileSystemObject?
+  private var rootDirectoryWatchPath: String?
+  private var endpointDirectoryWatchPath: String?
+  private let resyncIntervalSeconds: TimeInterval = 15.0
   private var shouldRun = false
   private var state: AppServerConnectionState = .disconnected
+  private var lastEndpointIds: [String] = []
 
   init() {
     let config = URLSessionConfiguration.default
@@ -346,15 +353,18 @@ final class AppServerClient {
   private func StartOnQueue(initialState: AppServerConnectionState) {
     shouldRun = true
     EmitState(initialState)
-    StartScanTimerOnQueue()
+    StartResyncTimerOnQueue()
+    RefreshDirectoryWatchersOnQueue()
     ScanEndpointsOnQueue()
   }
 
   private func StopOnQueue(emitState: Bool) {
     shouldRun = false
 
-    endpointScanTimer?.cancel()
-    endpointScanTimer = nil
+    endpointResyncTimer?.cancel()
+    endpointResyncTimer = nil
+    CancelRootDirectoryWatcherOnQueue()
+    CancelEndpointDirectoryWatcherOnQueue()
 
     let existing = endpointConnections
     endpointConnections.removeAll()
@@ -369,15 +379,15 @@ final class AppServerClient {
     }
   }
 
-  private func StartScanTimerOnQueue() {
-    endpointScanTimer?.cancel()
+  private func StartResyncTimerOnQueue() {
+    endpointResyncTimer?.cancel()
 
     let timer = DispatchSource.makeTimerSource(queue: workQueue)
-    timer.schedule(deadline: .now(), repeating: 0.5)
+    timer.schedule(deadline: .now() + resyncIntervalSeconds, repeating: resyncIntervalSeconds)
     timer.setEventHandler { [weak self] in
       self?.ScanEndpointsOnQueue()
     }
-    endpointScanTimer = timer
+    endpointResyncTimer = timer
     timer.resume()
   }
 
@@ -386,17 +396,137 @@ final class AppServerClient {
       return
     }
 
+    RefreshDirectoryWatchersOnQueue()
     let endpoints = ReadRuntimeEndpointsOnQueue()
     ReconcileEndpointsOnQueue(endpoints)
     RefreshStateOnQueue()
   }
 
+  private func RefreshDirectoryWatchersOnQueue() {
+    RefreshRootDirectoryWatcherOnQueue()
+    RefreshEndpointDirectoryWatcherOnQueue()
+  }
+
+  private func RefreshRootDirectoryWatcherOnQueue() {
+    let nextWatchPath = ResolveRootDirectoryWatchPathOnQueue()
+    if nextWatchPath == rootDirectoryWatchPath, rootDirectoryWatcher != nil {
+      return
+    }
+
+    CancelRootDirectoryWatcherOnQueue()
+
+    guard let nextWatchPath else {
+      return
+    }
+    guard let source = MakeDirectoryWatcherSourceOnQueue(path: nextWatchPath) else {
+      return
+    }
+
+    source.setEventHandler { [weak self] in
+      guard let self else {
+        return
+      }
+      self.ScanEndpointsOnQueue()
+    }
+    source.resume()
+    rootDirectoryWatcher = source
+    rootDirectoryWatchPath = nextWatchPath
+  }
+
+  private func RefreshEndpointDirectoryWatcherOnQueue() {
+    let endpointDirectoryPath = EndpointDirectoryURL().path
+    guard DirectoryExists(path: endpointDirectoryPath) else {
+      CancelEndpointDirectoryWatcherOnQueue()
+      return
+    }
+    if endpointDirectoryPath == endpointDirectoryWatchPath, endpointDirectoryWatcher != nil {
+      return
+    }
+
+    CancelEndpointDirectoryWatcherOnQueue()
+
+    guard let source = MakeDirectoryWatcherSourceOnQueue(path: endpointDirectoryPath) else {
+      return
+    }
+    source.setEventHandler { [weak self] in
+      guard let self else {
+        return
+      }
+      self.ScanEndpointsOnQueue()
+    }
+    source.resume()
+    endpointDirectoryWatcher = source
+    endpointDirectoryWatchPath = endpointDirectoryPath
+  }
+
+  private func CancelRootDirectoryWatcherOnQueue() {
+    rootDirectoryWatcher?.setEventHandler(handler: nil)
+    rootDirectoryWatcher?.cancel()
+    rootDirectoryWatcher = nil
+    rootDirectoryWatchPath = nil
+  }
+
+  private func CancelEndpointDirectoryWatcherOnQueue() {
+    endpointDirectoryWatcher?.setEventHandler(handler: nil)
+    endpointDirectoryWatcher?.cancel()
+    endpointDirectoryWatcher = nil
+    endpointDirectoryWatchPath = nil
+  }
+
+  private func MakeDirectoryWatcherSourceOnQueue(path: String) -> DispatchSourceFileSystemObject? {
+    let descriptor = open(path, O_EVTONLY)
+    if descriptor < 0 {
+      return nil
+    }
+
+    let source = DispatchSource.makeFileSystemObjectSource(
+      fileDescriptor: descriptor,
+      eventMask: [.write, .rename, .delete, .attrib],
+      queue: workQueue
+    )
+    source.setCancelHandler {
+      close(descriptor)
+    }
+    return source
+  }
+
+  private func ResolveRootDirectoryWatchPathOnQueue() -> String? {
+    let candidates = [
+      MenubarRuntimeDirectoryURL().path,
+      RuntimeDirectoryURL().path,
+      CodexHomeDirectoryURL().path,
+      URL(fileURLWithPath: NSHomeDirectory()).path,
+    ]
+    for path in candidates where DirectoryExists(path: path) {
+      return path
+    }
+    return nil
+  }
+
+  private func CodexHomeDirectoryURL() -> URL {
+    URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex")
+  }
+
+  private func RuntimeDirectoryURL() -> URL {
+    CodexHomeDirectoryURL().appendingPathComponent("runtime")
+  }
+
+  private func MenubarRuntimeDirectoryURL() -> URL {
+    RuntimeDirectoryURL().appendingPathComponent("menubar")
+  }
+
+  private func EndpointDirectoryURL() -> URL {
+    MenubarRuntimeDirectoryURL().appendingPathComponent("endpoints")
+  }
+
+  private func DirectoryExists(path: String) -> Bool {
+    var isDirectory: ObjCBool = false
+    let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+    return exists && isDirectory.boolValue
+  }
+
   private func ReadRuntimeEndpointsOnQueue() -> [String: RuntimeEndpoint] {
-    let endpointDir = URL(fileURLWithPath: NSHomeDirectory())
-      .appendingPathComponent(".codex")
-      .appendingPathComponent("runtime")
-      .appendingPathComponent("menubar")
-      .appendingPathComponent("endpoints")
+    let endpointDir = EndpointDirectoryURL()
 
     guard
       let fileUrls = try? FileManager.default.contentsOfDirectory(
@@ -513,6 +643,10 @@ final class AppServerClient {
   }
 
   private func DispatchEndpointIds(_ endpointIds: [String]) {
+    if endpointIds == lastEndpointIds {
+      return
+    }
+    lastEndpointIds = endpointIds
     DispatchQueue.main.async { [weak self] in
       self?.OnEndpointIdsChanged?(endpointIds)
     }
