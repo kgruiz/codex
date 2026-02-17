@@ -177,6 +177,17 @@ final class TurnStore {
     }
   }
 
+  func ResolveThreadId(endpointId: String, turnId: String) -> String? {
+    let matchingTurn = turnsByKey.values.first { turn in
+      turn.endpointId == endpointId && turn.turnId == turnId
+    }
+    if let matchingTurn {
+      return matchingTurn.threadId
+    }
+
+    return metadataByEndpoint[endpointId]?.threadId
+  }
+
   func Tick(now: Date) {
     let expiredKeys = turnsByKey.compactMap { key, turn -> String? in
       guard let endedAt = turn.endedAt else {

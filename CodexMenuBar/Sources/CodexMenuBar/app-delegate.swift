@@ -112,14 +112,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private func HandleTurnStarted(params: [String: Any]) {
+    let endpointId = params["endpointId"] as? String ?? "unknown"
     guard
-      let threadId = params["threadId"] as? String,
       let turn = params["turn"] as? [String: Any],
       let turnId = turn["id"] as? String
     else {
       return
     }
-    let endpointId = params["endpointId"] as? String ?? "unknown"
+    guard let threadId = ResolveThreadId(params: params, endpointId: endpointId, turnId: turnId)
+    else {
+      return
+    }
     turnStore.UpsertTurnStarted(
       endpointId: endpointId, threadId: threadId, turnId: turnId, at: Date())
     turnStore.UpdateTurnMetadata(
@@ -127,15 +130,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private func HandleTurnCompleted(params: [String: Any]) {
+    let endpointId = params["endpointId"] as? String ?? "unknown"
     guard
-      let threadId = params["threadId"] as? String,
       let turn = params["turn"] as? [String: Any],
       let turnId = turn["id"] as? String
     else {
       return
     }
+    guard let threadId = ResolveThreadId(params: params, endpointId: endpointId, turnId: turnId)
+    else {
+      return
+    }
     let status = CompletedStatusFromServerValue(turn["status"] as? String)
-    let endpointId = params["endpointId"] as? String ?? "unknown"
     let fromSnapshot = params["fromSnapshot"] as? Bool ?? false
     if fromSnapshot {
       turnStore.MarkTurnCompletedIfPresent(
@@ -184,9 +190,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private func HandleTurnProgressTrace(params: [String: Any]) {
+    let endpointId = params["endpointId"] as? String ?? "unknown"
+
     guard
-      let threadId = params["threadId"] as? String,
-      let turnId = params["turnId"] as? String,
+      let turnId = StringValue(params["turnId"]) ?? StringValue(params["turn_id"]),
       let categoryRaw = params["category"] as? String,
       let stateRaw = params["state"] as? String,
       let category = ProgressCategory(rawValue: categoryRaw),
@@ -195,8 +202,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       return
     }
 
+    guard let threadId = ResolveThreadId(params: params, endpointId: endpointId, turnId: turnId)
+    else {
+      return
+    }
+
     let label = params["label"] as? String
-    let endpointId = params["endpointId"] as? String ?? "unknown"
     turnStore.RecordProgress(
       endpointId: endpointId,
       threadId: threadId,
@@ -209,16 +220,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private func HandleItemLifecycle(params: [String: Any], state: ProgressState) {
+    let endpointId = params["endpointId"] as? String ?? "unknown"
+
     guard
-      let threadId = params["threadId"] as? String,
-      let turnId = params["turnId"] as? String,
+      let turnId = StringValue(params["turnId"]) ?? StringValue(params["turn_id"]),
       let item = params["item"] as? [String: Any],
       let itemType = item["type"] as? String
     else {
       return
     }
 
-    let endpointId = params["endpointId"] as? String ?? "unknown"
+    guard let threadId = ResolveThreadId(params: params, endpointId: endpointId, turnId: turnId)
+    else {
+      return
+    }
+
     turnStore.ApplyItemMetadata(
       endpointId: endpointId,
       threadId: threadId,
@@ -268,5 +284,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       return .completed
     }
     return parsed
+  }
+
+  private func ResolveThreadId(
+    params: [String: Any],
+    endpointId: String,
+    turnId: String
+  ) -> String? {
+    if let threadId = StringValue(params["threadId"]) ?? StringValue(params["thread_id"]) {
+      return threadId
+    }
+
+    return turnStore.ResolveThreadId(endpointId: endpointId, turnId: turnId)
+  }
+
+  private func StringValue(_ value: Any?) -> String? {
+    guard let value = value as? String else {
+      return nil
+    }
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 }

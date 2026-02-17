@@ -34,7 +34,8 @@ private final class EndpointConnection {
   private var nextRequestId = 1
   private var pendingResponses: [Int: ([String: Any]) -> Void] = [:]
   private var lastSnapshotRequestAt = Date.distantPast
-  private let snapshotRefreshInterval: TimeInterval = 1.0
+  private let snapshotRefreshInterval: TimeInterval = 0.5
+  private let snapshotSummaryTimeout: TimeInterval = 2.0
 
   init(endpointId: String, endpointUrl: URL, queue: DispatchQueue, session: URLSession) {
     self.endpointId = endpointId
@@ -140,12 +141,12 @@ private final class EndpointConnection {
     guard let id = responseId else {
       return
     }
-    guard let result = dict["result"] as? [String: Any] else {
-      pendingResponses.removeValue(forKey: id)
+    let handler = pendingResponses.removeValue(forKey: id)
+    if let result = dict["result"] as? [String: Any] {
+      handler?(result)
       return
     }
-    let handler = pendingResponses.removeValue(forKey: id)
-    handler?(result)
+    handler?([:])
   }
 
   private func ResponseIdFrom(_ dict: [String: Any]) -> Int? {
@@ -198,16 +199,36 @@ private final class EndpointConnection {
 
       var pending = threadIds.count
       var activeTurnKeys = Set<String>()
+      var didEmitSummary = false
+
+      let emitSummary: () -> Void = { [weak self] in
+        guard let self else {
+          return
+        }
+        if didEmitSummary {
+          return
+        }
+        didEmitSummary = true
+        self.EmitSnapshotSummaryOnQueue(activeTurnKeys: activeTurnKeys.sorted())
+      }
+
+      self.queue.asyncAfter(deadline: .now() + self.snapshotSummaryTimeout) {
+        emitSummary()
+      }
 
       for threadId in threadIds {
         self.RequestThreadReadOnQueue(threadId: threadId) { keys in
+          if didEmitSummary {
+            return
+          }
+
           for key in keys {
             activeTurnKeys.insert(key)
           }
 
           pending -= 1
           if pending == 0 {
-            self.EmitSnapshotSummaryOnQueue(activeTurnKeys: activeTurnKeys.sorted())
+            emitSummary()
           }
         }
       }
@@ -464,7 +485,7 @@ final class AppServerClient {
     endpointSnapshotTimer?.cancel()
 
     let timer = DispatchSource.makeTimerSource(queue: workQueue)
-    timer.schedule(deadline: .now() + 1.0, repeating: 1.0)
+    timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
     timer.setEventHandler { [weak self] in
       self?.RefreshSnapshotsOnQueue()
     }
