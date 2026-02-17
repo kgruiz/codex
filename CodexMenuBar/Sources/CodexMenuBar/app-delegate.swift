@@ -30,6 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     statusMenu.ReconnectHandler = { [weak self] in
       self?.appServerClient.Restart()
     }
+    statusMenu.ReconnectEndpointHandler = { [weak self] endpointId in
+      self?.appServerClient.ReconnectEndpoint(endpointId)
+    }
     statusMenu.QuitHandler = {
       NSApplication.shared.terminate(nil)
     }
@@ -89,6 +92,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   private func HandleNotification(method: String, params: [String: Any]) {
     switch method {
+    case "thread/snapshot":
+      HandleThreadSnapshot(params: params)
     case "turn/started":
       HandleTurnStarted(params: params)
     case "turn/completed":
@@ -115,6 +120,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let endpointId = params["endpointId"] as? String ?? "unknown"
     turnStore.UpsertTurnStarted(
       endpointId: endpointId, threadId: threadId, turnId: turnId, at: Date())
+    turnStore.UpdateTurnMetadata(
+      endpointId: endpointId, threadId: threadId, turnId: turnId, turn: turn, at: Date())
   }
 
   private func HandleTurnCompleted(params: [String: Any]) {
@@ -136,6 +143,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         status: status,
         at: Date()
       )
+      turnStore.UpdateTurnMetadata(
+        endpointId: endpointId, threadId: threadId, turnId: turnId, turn: turn, at: Date())
       return
     }
     turnStore.MarkTurnCompleted(
@@ -145,6 +154,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       status: status,
       at: Date()
     )
+    turnStore.UpdateTurnMetadata(
+      endpointId: endpointId, threadId: threadId, turnId: turnId, turn: turn, at: Date())
+  }
+
+  private func HandleThreadSnapshot(params: [String: Any]) {
+    guard
+      let endpointId = params["endpointId"] as? String,
+      let thread = params["thread"] as? [String: Any]
+    else {
+      return
+    }
+    turnStore.ApplyThreadSnapshot(endpointId: endpointId, thread: thread, at: Date())
   }
 
   private func HandleTurnProgressTrace(params: [String: Any]) {
@@ -177,13 +198,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       let threadId = params["threadId"] as? String,
       let turnId = params["turnId"] as? String,
       let item = params["item"] as? [String: Any],
-      let itemType = item["type"] as? String,
-      let category = CategoryFromItemType(itemType)
+      let itemType = item["type"] as? String
     else {
       return
     }
 
     let endpointId = params["endpointId"] as? String ?? "unknown"
+    turnStore.ApplyItemMetadata(
+      endpointId: endpointId,
+      threadId: threadId,
+      turnId: turnId,
+      item: item,
+      at: Date()
+    )
+
+    guard let category = CategoryFromItemType(itemType) else {
+      return
+    }
+
     turnStore.RecordProgress(
       endpointId: endpointId,
       threadId: threadId,

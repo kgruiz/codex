@@ -212,6 +212,12 @@ private final class EndpointConnection {
         return
       }
 
+      var snapshotParams: [String: Any] = [
+        "thread": thread
+      ]
+      snapshotParams["endpointId"] = self.endpointId
+      self.OnNotification?("thread/snapshot", snapshotParams)
+
       for turn in turns {
         guard turn["id"] is String else {
           continue
@@ -344,6 +350,12 @@ final class AppServerClient {
     }
   }
 
+  func ReconnectEndpoint(_ endpointId: String) {
+    workQueue.async { [weak self] in
+      self?.ReconnectEndpointOnQueue(endpointId)
+    }
+  }
+
   func Stop() {
     workQueue.async { [weak self] in
       self?.StopOnQueue(emitState: true)
@@ -355,6 +367,16 @@ final class AppServerClient {
     EmitState(initialState)
     StartResyncTimerOnQueue()
     RefreshDirectoryWatchersOnQueue()
+    ScanEndpointsOnQueue()
+  }
+
+  private func ReconnectEndpointOnQueue(_ endpointId: String) {
+    guard shouldRun else {
+      return
+    }
+
+    let connection = endpointConnections.removeValue(forKey: endpointId)
+    connection?.Stop()
     ScanEndpointsOnQueue()
   }
 

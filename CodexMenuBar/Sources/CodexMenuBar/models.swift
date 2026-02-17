@@ -77,9 +77,30 @@ struct TimelineSegment: Equatable {
   }
 }
 
+struct EndpointMetadata {
+  var chatTitle: String?
+  var promptPreview: String?
+  var cwd: String?
+  var model: String?
+  var threadId: String?
+  var turnId: String?
+  var lastTraceCategory: ProgressCategory?
+  var lastTraceLabel: String?
+  var lastEventAt: Date?
+}
+
 struct EndpointRow {
   let endpointId: String
   let activeTurn: ActiveTurn?
+  let chatTitle: String?
+  let promptPreview: String?
+  let cwd: String?
+  let model: String?
+  let threadId: String?
+  let turnId: String?
+  let lastTraceCategory: ProgressCategory?
+  let lastTraceLabel: String?
+  let lastEventAt: Date?
 }
 
 final class ActiveTurn {

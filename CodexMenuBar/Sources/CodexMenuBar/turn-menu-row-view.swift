@@ -3,7 +3,13 @@ import Foundation
 
 final class TurnMenuRowView: NSView {
   private static let rowWidth: CGFloat = 420
-  private static let rowHeight: CGFloat = 64
+  private static let collapsedRowHeight: CGFloat = 64
+  private static let expandedRowHeight: CGFloat = 172
+
+  private let endpointRow: EndpointRow
+  private let isExpanded: Bool
+  private let onToggle: ((String) -> Void)?
+  private let onReconnectEndpoint: ((String) -> Void)?
 
   private let topLabel = NSTextField(labelWithString: "")
   private let detailLabel = NSTextField(labelWithString: "")
@@ -11,13 +17,30 @@ final class TurnMenuRowView: NSView {
   private let hoverCard = NSView()
   private let hoverColorSwatch = NSView()
   private let hoverLabel = NSTextField(labelWithString: "")
+  private let expandedContainer = NSView()
+  private let chatLabel = NSTextField(labelWithString: "")
+  private let promptLabel = NSTextField(labelWithString: "")
+  private let metadataLabel = NSTextField(labelWithString: "")
+  private let reconnectButton = NSButton(title: "Reconnect this endpoint", target: nil, action: nil)
+
   private var defaultDetailText = "No detail"
   private var barVisible = true
 
-  init(endpointRow: EndpointRow, now: Date) {
-    super.init(frame: NSRect(x: 0, y: 0, width: Self.rowWidth, height: Self.rowHeight))
+  init(
+    endpointRow: EndpointRow,
+    now: Date,
+    isExpanded: Bool,
+    onToggle: ((String) -> Void)?,
+    onReconnectEndpoint: ((String) -> Void)?
+  ) {
+    self.endpointRow = endpointRow
+    self.isExpanded = isExpanded
+    self.onToggle = onToggle
+    self.onReconnectEndpoint = onReconnectEndpoint
+    let rowHeight = isExpanded ? Self.expandedRowHeight : Self.collapsedRowHeight
+    super.init(frame: NSRect(x: 0, y: 0, width: Self.rowWidth, height: rowHeight))
     ConfigureViews()
-    Update(endpointRow: endpointRow, now: now)
+    Update(now: now)
   }
 
   @available(*, unavailable)
@@ -26,7 +49,22 @@ final class TurnMenuRowView: NSView {
   }
 
   override var intrinsicContentSize: NSSize {
-    NSSize(width: Self.rowWidth, height: Self.rowHeight)
+    NSSize(
+      width: Self.rowWidth,
+      height: isExpanded ? Self.expandedRowHeight : Self.collapsedRowHeight
+    )
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    let pointInSelf = convert(event.locationInWindow, from: nil)
+    if isExpanded {
+      let pointInExpanded = convert(pointInSelf, to: expandedContainer)
+      if reconnectButton.frame.contains(pointInExpanded) {
+        super.mouseDown(with: event)
+        return
+      }
+    }
+    onToggle?(endpointRow.endpointId)
   }
 
   override func layout() {
@@ -44,27 +82,28 @@ final class TurnMenuRowView: NSView {
     let barHeight: CGFloat = 12
     let detailHeight: CGFloat = 16
     let verticalSpacing: CGFloat = 4
+    let expandedHeight: CGFloat = isExpanded ? 98 : 0
 
-    topLabel.frame = NSRect(
+    detailLabel.frame = NSRect(
       x: contentRect.minX,
-      y: contentRect.maxY - topHeight,
+      y: contentRect.minY + expandedHeight,
       width: contentRect.width,
-      height: topHeight
+      height: detailHeight
     )
 
     barView.frame = NSRect(
       x: contentRect.minX,
-      y: topLabel.frame.minY - verticalSpacing - barHeight,
+      y: detailLabel.frame.maxY + verticalSpacing,
       width: contentRect.width,
       height: barHeight
     )
     barView.isHidden = !barVisible
 
-    detailLabel.frame = NSRect(
+    topLabel.frame = NSRect(
       x: contentRect.minX,
-      y: contentRect.minY,
+      y: barView.frame.maxY + verticalSpacing,
       width: contentRect.width,
-      height: detailHeight
+      height: topHeight
     )
 
     hoverCard.frame = detailLabel.frame
@@ -81,9 +120,49 @@ final class TurnMenuRowView: NSView {
       width: max(0, hoverCard.bounds.width - hoverColorSwatch.frame.maxX - 14),
       height: hoverCard.bounds.height
     )
+
+    expandedContainer.frame = NSRect(
+      x: contentRect.minX,
+      y: contentRect.minY,
+      width: contentRect.width,
+      height: expandedHeight
+    )
+    expandedContainer.isHidden = !isExpanded
+
+    if isExpanded {
+      let innerInset: CGFloat = 8
+      let availableWidth = max(0, expandedContainer.bounds.width - (innerInset * 2))
+
+      chatLabel.frame = NSRect(
+        x: innerInset,
+        y: expandedContainer.bounds.height - 16,
+        width: availableWidth,
+        height: 14
+      )
+      promptLabel.frame = NSRect(
+        x: innerInset,
+        y: expandedContainer.bounds.height - 47,
+        width: availableWidth,
+        height: 28
+      )
+      metadataLabel.frame = NSRect(
+        x: innerInset,
+        y: 22,
+        width: availableWidth,
+        height: 36
+      )
+      reconnectButton.frame = NSRect(
+        x: max(innerInset, availableWidth - 170 + innerInset),
+        y: 2,
+        width: 170,
+        height: 18
+      )
+    }
   }
 
   private func ConfigureViews() {
+    wantsLayer = true
+
     topLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
     topLabel.lineBreakMode = .byTruncatingTail
     topLabel.maximumNumberOfLines = 1
@@ -108,6 +187,30 @@ final class TurnMenuRowView: NSView {
     hoverLabel.lineBreakMode = .byTruncatingTail
     hoverLabel.maximumNumberOfLines = 1
 
+    expandedContainer.wantsLayer = true
+    expandedContainer.layer?.cornerRadius = 4
+    expandedContainer.layer?.backgroundColor =
+      NSColor.controlBackgroundColor.withAlphaComponent(0.5).cgColor
+
+    chatLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+    chatLabel.lineBreakMode = .byTruncatingTail
+    chatLabel.maximumNumberOfLines = 1
+
+    promptLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+    promptLabel.textColor = .secondaryLabelColor
+    promptLabel.lineBreakMode = .byTruncatingTail
+    promptLabel.maximumNumberOfLines = 2
+
+    metadataLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+    metadataLabel.textColor = .secondaryLabelColor
+    metadataLabel.lineBreakMode = .byTruncatingTail
+    metadataLabel.maximumNumberOfLines = 3
+
+    reconnectButton.target = self
+    reconnectButton.action = #selector(OnReconnectPressed)
+    reconnectButton.bezelStyle = .rounded
+    reconnectButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+
     barView.OnHoveredSegmentChanged = { [weak self] segment in
       self?.UpdateHoverText(segment: segment)
     }
@@ -118,16 +221,27 @@ final class TurnMenuRowView: NSView {
     addSubview(hoverCard)
     hoverCard.addSubview(hoverColorSwatch)
     hoverCard.addSubview(hoverLabel)
+    addSubview(expandedContainer)
+    expandedContainer.addSubview(chatLabel)
+    expandedContainer.addSubview(promptLabel)
+    expandedContainer.addSubview(metadataLabel)
+    expandedContainer.addSubview(reconnectButton)
   }
 
-  private func Update(endpointRow: EndpointRow, now: Date) {
+  @objc
+  private func OnReconnectPressed() {
+    onReconnectEndpoint?(endpointRow.endpointId)
+  }
+
+  private func Update(now: Date) {
     let shortEndpointId = String(endpointRow.endpointId.prefix(8))
     guard let turn = endpointRow.activeTurn else {
       barVisible = false
       topLabel.stringValue = "Codex \(shortEndpointId) · Idle"
-      defaultDetailText = "No active run"
+      defaultDetailText = endpointRow.lastTraceLabel ?? "No active run"
       barView.Configure(segments: [])
       ShowDefaultDetail()
+      UpdateExpandedFields(now: now)
       needsLayout = true
       return
     }
@@ -136,11 +250,48 @@ final class TurnMenuRowView: NSView {
     let shortThreadId = String(turn.threadId.prefix(8))
     topLabel.stringValue =
       "Codex \(shortEndpointId) · \(StatusLabel(turn.status)) \(turn.ElapsedString(now: now)) · [\(shortThreadId)/\(turn.turnId)]"
-
-    defaultDetailText = turn.latestLabel ?? "No detail"
+    defaultDetailText = endpointRow.lastTraceLabel ?? turn.latestLabel ?? "No detail"
     barView.Configure(segments: turn.TimelineSegments(now: now))
     ShowDefaultDetail()
+    UpdateExpandedFields(now: now)
     needsLayout = true
+  }
+
+  private func UpdateExpandedFields(now: Date) {
+    let chatTitle = endpointRow.chatTitle ?? endpointRow.threadId ?? "Unknown chat"
+    chatLabel.stringValue = "Chat: \(Truncate(chatTitle, limit: 72))"
+
+    let promptPreview = endpointRow.promptPreview ?? "No prompt available"
+    promptLabel.stringValue = "Prompt: \(Truncate(promptPreview, limit: 180))"
+
+    var metadataParts: [String] = []
+    if let activeTurn = endpointRow.activeTurn {
+      metadataParts.append(
+        "Status: \(StatusLabel(activeTurn.status)) · \(activeTurn.ElapsedString(now: now))")
+    } else {
+      metadataParts.append("Status: Idle")
+    }
+    metadataParts.append("Workspace: \(Truncate(endpointRow.cwd ?? "unknown", limit: 58))")
+    metadataParts.append("Model: \(Truncate(endpointRow.model ?? "unknown", limit: 36))")
+
+    var traceSuffix = "none"
+    if let category = endpointRow.lastTraceCategory {
+      traceSuffix = SegmentKindLabel(.category(category))
+      if let label = endpointRow.lastTraceLabel, !label.isEmpty {
+        traceSuffix += " · \(Truncate(label, limit: 36))"
+      }
+    }
+    metadataParts.append("Trace: \(traceSuffix)")
+
+    let threadPart = endpointRow.threadId.map { String($0.prefix(8)) } ?? "n/a"
+    let turnPart = endpointRow.turnId ?? "n/a"
+    metadataParts.append("IDs: \(threadPart)/\(turnPart)")
+
+    if let lastEventAt = endpointRow.lastEventAt {
+      metadataParts.append("Updated: \(FormatClockTime(lastEventAt))")
+    }
+
+    metadataLabel.stringValue = metadataParts.joined(separator: "\n")
   }
 
   private func UpdateHoverText(segment: TimelineSegment?) {
@@ -191,6 +342,14 @@ final class TurnMenuRowView: NSView {
     case .failed:
       return "Failed"
     }
+  }
+
+  private func Truncate(_ value: String, limit: Int) -> String {
+    if value.count <= limit {
+      return value
+    }
+    let truncated = value.prefix(max(0, limit - 1))
+    return "\(truncated)…"
   }
 }
 
