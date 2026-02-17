@@ -2344,6 +2344,7 @@ async fn unified_exec_end_after_task_complete_is_suppressed() {
     drain_insert_history(&mut rx);
 
     chat.on_task_complete(None, false);
+    let _ = drain_insert_history(&mut rx);
     end_exec(&mut chat, begin, "", "", 0);
 
     let cells = drain_insert_history(&mut rx);
@@ -2358,6 +2359,7 @@ async fn unified_exec_interaction_after_task_complete_is_suppressed() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.on_task_started();
     chat.on_task_complete(None, false);
+    let _ = drain_insert_history(&mut rx);
 
     chat.handle_codex_event(Event {
         id: "call-1".to_string(),
@@ -5249,6 +5251,28 @@ async fn status_line_branch_refreshes_after_turn_complete() {
     });
 
     assert!(chat.status_line_branch_pending);
+}
+
+#[tokio::test]
+async fn turn_complete_emits_chat_log_entry() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
+
+    chat.handle_codex_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::TurnComplete(TurnCompleteEvent {
+            last_agent_message: None,
+        }),
+    });
+
+    let cells = drain_insert_history(&mut rx);
+    let combined = cells
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<String>();
+    assert!(
+        combined.contains("Turn complete"),
+        "expected turn completion log in chat history: {combined}"
+    );
 }
 
 #[tokio::test]
