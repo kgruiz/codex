@@ -184,11 +184,12 @@ private final class EndpointConnection {
 
   private func RequestThreadSnapshotOnQueue() {
     lastSnapshotRequestAt = Date()
-    SendRequestOnQueue(method: "thread/loaded/list", params: nil) { [weak self] result in
+    SendRequestOnQueue(method: "thread/loaded/list", params: [:]) { [weak self] result in
       guard let self else {
         return
       }
       guard let threadIds = result["data"] as? [String] else {
+        self.EmitSnapshotSummaryOnQueue(activeTurnKeys: [])
         return
       }
 
