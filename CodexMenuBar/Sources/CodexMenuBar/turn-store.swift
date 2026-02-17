@@ -5,14 +5,15 @@ final class TurnStore {
   private var metadataByEndpoint: [String: EndpointMetadata] = [:]
   private let completionRetentionSeconds: TimeInterval = 10
 
-  private func TurnKey(endpointId: String, threadId: String, turnId: String) -> String {
-    "\(endpointId):\(threadId):\(turnId)"
+  private func TurnKey(endpointId: String, turnId: String) -> String {
+    "\(endpointId):\(turnId)"
   }
 
-  func UpsertTurnStarted(endpointId: String, threadId: String, turnId: String, at now: Date) {
-    let key = TurnKey(endpointId: endpointId, threadId: threadId, turnId: turnId)
+  func UpsertTurnStarted(endpointId: String, threadId: String?, turnId: String, at now: Date) {
+    let key = TurnKey(endpointId: endpointId, turnId: turnId)
     if let existing = turnsByKey[key] {
       existing.ApplyStatus(.inProgress, at: now)
+      existing.UpdateThreadId(threadId)
       UpdateTurnMetadata(
         endpointId: endpointId, threadId: threadId, turnId: turnId, turn: nil, at: now)
       return
@@ -25,14 +26,15 @@ final class TurnStore {
 
   func MarkTurnCompleted(
     endpointId: String,
-    threadId: String,
+    threadId: String?,
     turnId: String,
     status: TurnExecutionStatus,
     at now: Date
   ) {
-    let key = TurnKey(endpointId: endpointId, threadId: threadId, turnId: turnId)
+    let key = TurnKey(endpointId: endpointId, turnId: turnId)
     if let existing = turnsByKey[key] {
       existing.ApplyStatus(status, at: now)
+      existing.UpdateThreadId(threadId)
       UpdateTurnMetadata(
         endpointId: endpointId, threadId: threadId, turnId: turnId, turn: nil, at: now)
       return
@@ -47,38 +49,57 @@ final class TurnStore {
 
   func MarkTurnCompletedIfPresent(
     endpointId: String,
-    threadId: String,
+    threadId: String?,
     turnId: String,
     status: TurnExecutionStatus,
     at now: Date
   ) {
-    let key = TurnKey(endpointId: endpointId, threadId: threadId, turnId: turnId)
+    let key = TurnKey(endpointId: endpointId, turnId: turnId)
     guard let existing = turnsByKey[key] else {
       return
     }
     existing.ApplyStatus(status, at: now)
+    existing.UpdateThreadId(threadId)
     UpdateTurnMetadata(
       endpointId: endpointId, threadId: threadId, turnId: turnId, turn: nil, at: now)
   }
 
   func RecordProgress(
     endpointId: String,
-    threadId: String,
+    threadId: String?,
     turnId: String,
     category: ProgressCategory,
     state: ProgressState,
     label: String?,
     at now: Date
   ) {
-    let key = TurnKey(endpointId: endpointId, threadId: threadId, turnId: turnId)
-    let turn =
-      turnsByKey[key]
-      ?? ActiveTurn(endpointId: endpointId, threadId: threadId, turnId: turnId, startedAt: now)
-    turnsByKey[key] = turn
-    turn.ApplyProgress(category: category, state: state, label: label, at: now)
+    let key = TurnKey(endpointId: endpointId, turnId: turnId)
+    let turn = turnsByKey[key]
+    if turn == nil && state == .completed {
+      var metadata = metadataByEndpoint[endpointId] ?? EndpointMetadata()
+      if let threadId {
+        metadata.threadId = threadId
+      }
+      metadata.turnId = turnId
+      metadata.lastTraceCategory = category
+      if let label, !label.isEmpty {
+        metadata.lastTraceLabel = label
+      }
+      metadata.lastEventAt = now
+      metadataByEndpoint[endpointId] = metadata
+      return
+    }
+
+    let activeTurn =
+      turn ?? ActiveTurn(endpointId: endpointId, threadId: threadId, turnId: turnId, startedAt: now)
+    turnsByKey[key] = activeTurn
+    activeTurn.UpdateThreadId(threadId)
+    activeTurn.ApplyProgress(category: category, state: state, label: label, at: now)
 
     var metadata = metadataByEndpoint[endpointId] ?? EndpointMetadata()
-    metadata.threadId = threadId
+    if let threadId {
+      metadata.threadId = threadId
+    }
     metadata.turnId = turnId
     metadata.lastTraceCategory = category
     if let label, !label.isEmpty {
@@ -100,6 +121,13 @@ final class TurnStore {
 
     if let turns = thread["turns"] as? [[String: Any]], let latestTurn = turns.last {
       metadata.turnId = NonEmptyString(latestTurn["id"]) ?? metadata.turnId
+      if
+        let threadId = metadata.threadId,
+        let turnId = metadata.turnId
+      {
+        let key = TurnKey(endpointId: endpointId, turnId: turnId)
+        turnsByKey[key]?.UpdateThreadId(threadId)
+      }
       if let promptPreview = ExtractPromptPreview(from: latestTurn) {
         metadata.promptPreview = promptPreview
       } else if let fallbackPreview = NonEmptyString(thread["preview"]) {
@@ -115,13 +143,15 @@ final class TurnStore {
 
   func UpdateTurnMetadata(
     endpointId: String,
-    threadId: String,
+    threadId: String?,
     turnId: String,
     turn: [String: Any]?,
     at now: Date
   ) {
     var metadata = metadataByEndpoint[endpointId] ?? EndpointMetadata()
-    metadata.threadId = threadId
+    if let threadId {
+      metadata.threadId = threadId
+    }
     metadata.turnId = turnId
     if let turn, let promptPreview = ExtractPromptPreview(from: turn) {
       metadata.promptPreview = promptPreview
@@ -132,13 +162,15 @@ final class TurnStore {
 
   func ApplyItemMetadata(
     endpointId: String,
-    threadId: String,
+    threadId: String?,
     turnId: String,
     item: [String: Any],
     at now: Date
   ) {
     var metadata = metadataByEndpoint[endpointId] ?? EndpointMetadata()
-    metadata.threadId = threadId
+    if let threadId {
+      metadata.threadId = threadId
+    }
     metadata.turnId = turnId
 
     if (item["type"] as? String) == "userMessage" {
@@ -169,23 +201,20 @@ final class TurnStore {
       guard turn.status == .inProgress else {
         continue
       }
-      let key = "\(turn.threadId):\(turn.turnId)"
-      if activeSet.contains(key) {
-        continue
+      let isActive: Bool
+      if let threadId = turn.threadId {
+        isActive = activeSet.contains("\(threadId):\(turn.turnId)")
+      } else {
+        isActive = activeSet.contains { $0.hasSuffix(":\(turn.turnId)") }
       }
+      if isActive { continue }
       turn.ApplyStatus(.completed, at: now)
     }
   }
 
   func ResolveThreadId(endpointId: String, turnId: String) -> String? {
-    let matchingTurn = turnsByKey.values.first { turn in
-      turn.endpointId == endpointId && turn.turnId == turnId
-    }
-    if let matchingTurn {
-      return matchingTurn.threadId
-    }
-
-    return metadataByEndpoint[endpointId]?.threadId
+    let key = TurnKey(endpointId: endpointId, turnId: turnId)
+    return turnsByKey[key]?.threadId ?? metadataByEndpoint[endpointId]?.threadId
   }
 
   func Tick(now: Date) {
@@ -214,8 +243,10 @@ final class TurnStore {
       if lhs.startedAt != rhs.startedAt {
         return lhs.startedAt > rhs.startedAt
       }
-      if lhs.threadId != rhs.threadId {
-        return lhs.threadId < rhs.threadId
+      let lhsThreadId = lhs.threadId ?? ""
+      let rhsThreadId = rhs.threadId ?? ""
+      if lhsThreadId != rhsThreadId {
+        return lhsThreadId < rhsThreadId
       }
       if lhs.endpointId != rhs.endpointId {
         return lhs.endpointId < rhs.endpointId
@@ -242,8 +273,10 @@ final class TurnStore {
           if lhs.startedAt != rhs.startedAt {
             return lhs.startedAt > rhs.startedAt
           }
-          if lhs.threadId != rhs.threadId {
-            return lhs.threadId < rhs.threadId
+          let lhsThreadId = lhs.threadId ?? ""
+          let rhsThreadId = rhs.threadId ?? ""
+          if lhsThreadId != rhsThreadId {
+            return lhsThreadId < rhsThreadId
           }
           return lhs.turnId < rhs.turnId
         }

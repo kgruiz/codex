@@ -119,10 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     else {
       return
     }
-    guard let threadId = ResolveThreadId(params: params, endpointId: endpointId, turnId: turnId)
-    else {
-      return
-    }
+    let threadId = ResolveThreadId(params: params, endpointId: endpointId, turnId: turnId)
     turnStore.UpsertTurnStarted(
       endpointId: endpointId, threadId: threadId, turnId: turnId, at: Date())
     turnStore.UpdateTurnMetadata(
@@ -137,10 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     else {
       return
     }
-    guard let threadId = ResolveThreadId(params: params, endpointId: endpointId, turnId: turnId)
-    else {
-      return
-    }
+    let threadId = ResolveThreadId(params: params, endpointId: endpointId, turnId: turnId)
     let status = CompletedStatusFromServerValue(turn["status"] as? String)
     let fromSnapshot = params["fromSnapshot"] as? Bool ?? false
     if fromSnapshot {
@@ -201,11 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     else {
       return
     }
-
-    guard let threadId = ResolveThreadId(params: params, endpointId: endpointId, turnId: turnId)
-    else {
-      return
-    }
+    let threadId = ResolveThreadId(params: params, endpointId: endpointId, turnId: turnId)
 
     let label = params["label"] as? String
     turnStore.RecordProgress(
@@ -229,11 +219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     else {
       return
     }
-
-    guard let threadId = ResolveThreadId(params: params, endpointId: endpointId, turnId: turnId)
-    else {
-      return
-    }
+    let threadId = ResolveThreadId(params: params, endpointId: endpointId, turnId: turnId)
 
     turnStore.ApplyItemMetadata(
       endpointId: endpointId,

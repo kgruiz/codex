@@ -105,7 +105,7 @@ struct EndpointRow {
 
 final class ActiveTurn {
   let endpointId: String
-  let threadId: String
+  private(set) var threadId: String?
   let turnId: String
   let startedAt: Date
   private(set) var status: TurnExecutionStatus
@@ -115,7 +115,7 @@ final class ActiveTurn {
   private var seenCategories: [ProgressCategory]
   private(set) var traceHistory: [ProgressTraceSnapshot]
 
-  init(endpointId: String, threadId: String, turnId: String, startedAt: Date) {
+  init(endpointId: String, threadId: String?, turnId: String, startedAt: Date) {
     self.endpointId = endpointId
     self.threadId = threadId
     self.turnId = turnId
@@ -135,6 +135,13 @@ final class ActiveTurn {
     } else {
       endedAt = now
     }
+  }
+
+  func UpdateThreadId(_ threadId: String?) {
+    guard let threadId, !threadId.isEmpty else {
+      return
+    }
+    self.threadId = threadId
   }
 
   func ApplyProgress(

@@ -247,7 +247,7 @@ final class TurnMenuRowView: NSView {
     }
 
     barVisible = true
-    let shortThreadId = String(turn.threadId.prefix(8))
+    let shortThreadId = String((turn.threadId ?? "n/a").prefix(8))
     topLabel.stringValue =
       "Codex \(shortEndpointId) · \(StatusLabel(turn.status)) \(turn.ElapsedString(now: now)) · [\(shortThreadId)/\(turn.turnId)]"
     defaultDetailText = endpointRow.lastTraceLabel ?? turn.latestLabel ?? "No detail"
