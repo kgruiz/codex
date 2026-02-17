@@ -12,6 +12,7 @@ enum AppServerConnectionState: Equatable {
 private struct RuntimeEndpoint {
   let endpointId: String
   let endpointUrl: URL
+  let pid: Int?
 }
 
 private final class EndpointConnection {
@@ -189,19 +190,39 @@ private final class EndpointConnection {
       guard let threadIds = result["data"] as? [String] else {
         return
       }
+
+      if threadIds.isEmpty {
+        self.EmitSnapshotSummaryOnQueue(activeTurnKeys: [])
+        return
+      }
+
+      var pending = threadIds.count
+      var activeTurnKeys = Set<String>()
+
       for threadId in threadIds {
-        self.RequestThreadReadOnQueue(threadId: threadId)
+        self.RequestThreadReadOnQueue(threadId: threadId) { keys in
+          for key in keys {
+            activeTurnKeys.insert(key)
+          }
+
+          pending -= 1
+          if pending == 0 {
+            self.EmitSnapshotSummaryOnQueue(activeTurnKeys: activeTurnKeys.sorted())
+          }
+        }
       }
     }
   }
 
-  private func RequestThreadReadOnQueue(threadId: String) {
+  private func RequestThreadReadOnQueue(threadId: String, onComplete: @escaping ([String]) -> Void)
+  {
     let params: [String: Any] = [
       "threadId": threadId,
       "includeTurns": true,
     ]
     SendRequestOnQueue(method: "thread/read", params: params) { [weak self] result in
       guard let self else {
+        onComplete([])
         return
       }
       guard
@@ -209,6 +230,7 @@ private final class EndpointConnection {
         let resolvedThreadId = thread["id"] as? String,
         let turns = thread["turns"] as? [[String: Any]]
       else {
+        onComplete([])
         return
       }
 
@@ -218,12 +240,14 @@ private final class EndpointConnection {
       snapshotParams["endpointId"] = self.endpointId
       self.OnNotification?("thread/snapshot", snapshotParams)
 
+      var activeTurnKeys: [String] = []
       for turn in turns {
-        guard turn["id"] is String else {
+        guard let turnId = turn["id"] as? String else {
           continue
         }
         let status = turn["status"] as? String ?? "inProgress"
         if status == "inProgress" || status == "in_progress" {
+          activeTurnKeys.append("\(resolvedThreadId):\(turnId)")
           var params: [String: Any] = [
             "threadId": resolvedThreadId,
             "turn": turn,
@@ -241,7 +265,17 @@ private final class EndpointConnection {
           self.OnNotification?("turn/completed", params)
         }
       }
+
+      onComplete(activeTurnKeys)
     }
+  }
+
+  private func EmitSnapshotSummaryOnQueue(activeTurnKeys: [String]) {
+    var params: [String: Any] = [
+      "activeTurnKeys": activeTurnKeys
+    ]
+    params["endpointId"] = endpointId
+    OnNotification?("thread/snapshotSummary", params)
   }
 
   private func SendRequestOnQueue(
@@ -314,6 +348,7 @@ final class AppServerClient {
   private let session: URLSession
   private var endpointConnections: [String: EndpointConnection] = [:]
   private var endpointResyncTimer: DispatchSourceTimer?
+  private var endpointSnapshotTimer: DispatchSourceTimer?
   private var rootDirectoryWatcher: DispatchSourceFileSystemObject?
   private var endpointDirectoryWatcher: DispatchSourceFileSystemObject?
   private var rootDirectoryWatchPath: String?
@@ -366,6 +401,7 @@ final class AppServerClient {
     shouldRun = true
     EmitState(initialState)
     StartResyncTimerOnQueue()
+    StartSnapshotTimerOnQueue()
     RefreshDirectoryWatchersOnQueue()
     ScanEndpointsOnQueue()
   }
@@ -385,6 +421,8 @@ final class AppServerClient {
 
     endpointResyncTimer?.cancel()
     endpointResyncTimer = nil
+    endpointSnapshotTimer?.cancel()
+    endpointSnapshotTimer = nil
     CancelRootDirectoryWatcherOnQueue()
     CancelEndpointDirectoryWatcherOnQueue()
 
@@ -411,6 +449,27 @@ final class AppServerClient {
     }
     endpointResyncTimer = timer
     timer.resume()
+  }
+
+  private func StartSnapshotTimerOnQueue() {
+    endpointSnapshotTimer?.cancel()
+
+    let timer = DispatchSource.makeTimerSource(queue: workQueue)
+    timer.schedule(deadline: .now() + 1.0, repeating: 1.0)
+    timer.setEventHandler { [weak self] in
+      self?.RefreshSnapshotsOnQueue()
+    }
+    endpointSnapshotTimer = timer
+    timer.resume()
+  }
+
+  private func RefreshSnapshotsOnQueue() {
+    guard shouldRun else {
+      return
+    }
+    for connection in endpointConnections.values {
+      connection.RefreshSnapshotIfNeeded()
+    }
   }
 
   private func ScanEndpointsOnQueue() {
@@ -576,7 +635,15 @@ final class AppServerClient {
       }
 
       let endpointId = fileUrl.deletingPathExtension().lastPathComponent
-      endpoints[endpointId] = RuntimeEndpoint(endpointId: endpointId, endpointUrl: endpointUrl)
+      let pid =
+        (dict["pid"] as? Int)
+        ?? ((dict["pid"] as? String).flatMap { Int($0) })
+        ?? Int(endpointId)
+      if let pid, !IsProcessAlive(pid) {
+        continue
+      }
+      endpoints[endpointId] = RuntimeEndpoint(
+        endpointId: endpointId, endpointUrl: endpointUrl, pid: pid)
     }
 
     return endpoints
@@ -613,20 +680,52 @@ final class AppServerClient {
       }
       connection.OnConnected = { [weak self] in
         self?.workQueue.async { [weak self] in
-          self?.RefreshStateOnQueue()
+          guard let self else {
+            return
+          }
+          self.RefreshStateOnQueue()
+          self.DispatchEndpointIds(self.ConnectedEndpointIdsOnQueue())
         }
       }
       connection.OnDisconnected = { [weak self] in
         self?.workQueue.async { [weak self] in
-          self?.RefreshStateOnQueue()
+          guard let self else {
+            return
+          }
+          self.RefreshStateOnQueue()
+          self.DispatchEndpointIds(self.ConnectedEndpointIdsOnQueue())
         }
       }
       endpointConnections[endpoint.endpointId] = connection
       connection.Start()
     }
 
-    let endpointIds = endpointConnections.keys.sorted()
+    let endpointIds = ConnectedEndpointIdsOnQueue()
     DispatchEndpointIds(endpointIds)
+  }
+
+  private func ConnectedEndpointIdsOnQueue() -> [String] {
+    endpointConnections
+      .filter { _, connection in connection.IsConnected }
+      .map(\.key)
+      .sorted()
+  }
+
+  private func IsProcessAlive(_ pid: Int) -> Bool {
+    if pid <= 0 {
+      return false
+    }
+
+    let result = kill(pid_t(pid), 0)
+    if result == 0 {
+      return true
+    }
+
+    if errno == EPERM {
+      return true
+    }
+
+    return false
   }
 
   private func DispatchNotification(method: String, params: [String: Any]) {

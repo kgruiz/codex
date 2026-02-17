@@ -149,7 +149,7 @@ final class TurnMenuRowView: NSView {
         x: innerInset,
         y: 22,
         width: availableWidth,
-        height: 36
+        height: 54
       )
       reconnectButton.frame = NSRect(
         x: max(innerInset, availableWidth - 170 + innerInset),
@@ -204,7 +204,7 @@ final class TurnMenuRowView: NSView {
     metadataLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
     metadataLabel.textColor = .secondaryLabelColor
     metadataLabel.lineBreakMode = .byTruncatingTail
-    metadataLabel.maximumNumberOfLines = 3
+    metadataLabel.maximumNumberOfLines = 6
 
     reconnectButton.target = self
     reconnectButton.action = #selector(OnReconnectPressed)

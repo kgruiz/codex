@@ -94,6 +94,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     switch method {
     case "thread/snapshot":
       HandleThreadSnapshot(params: params)
+    case "thread/snapshotSummary":
+      HandleThreadSnapshotSummary(params: params)
     case "turn/started":
       HandleTurnStarted(params: params)
     case "turn/completed":
@@ -132,7 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     else {
       return
     }
-    let status = TurnExecutionStatus(serverValue: turn["status"] as? String ?? "failed")
+    let status = CompletedStatusFromServerValue(turn["status"] as? String)
     let endpointId = params["endpointId"] as? String ?? "unknown"
     let fromSnapshot = params["fromSnapshot"] as? Bool ?? false
     if fromSnapshot {
@@ -166,6 +168,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       return
     }
     turnStore.ApplyThreadSnapshot(endpointId: endpointId, thread: thread, at: Date())
+  }
+
+  private func HandleThreadSnapshotSummary(params: [String: Any]) {
+    guard let endpointId = params["endpointId"] as? String else {
+      return
+    }
+
+    let activeTurnKeys = params["activeTurnKeys"] as? [String] ?? []
+    turnStore.ReconcileSnapshotActiveTurns(
+      endpointId: endpointId,
+      activeTurnKeys: activeTurnKeys,
+      at: Date()
+    )
   }
 
   private func HandleTurnProgressTrace(params: [String: Any]) {
@@ -242,5 +257,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     default:
       return nil
     }
+  }
+
+  private func CompletedStatusFromServerValue(_ serverValue: String?) -> TurnExecutionStatus {
+    guard let serverValue else {
+      return .completed
+    }
+    let parsed = TurnExecutionStatus(serverValue: serverValue)
+    if parsed == .inProgress {
+      return .completed
+    }
+    return parsed
   }
 }

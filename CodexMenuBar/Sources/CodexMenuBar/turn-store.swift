@@ -102,6 +102,11 @@ final class TurnStore {
       metadata.turnId = NonEmptyString(latestTurn["id"]) ?? metadata.turnId
       if let promptPreview = ExtractPromptPreview(from: latestTurn) {
         metadata.promptPreview = promptPreview
+      } else if let fallbackPreview = NonEmptyString(thread["preview"]) {
+        metadata.promptPreview = fallbackPreview
+      }
+      if let cwd = ExtractLatestCwd(from: latestTurn) {
+        metadata.cwd = cwd
       }
     }
     metadata.lastEventAt = now
@@ -145,8 +150,31 @@ final class TurnStore {
       }
     }
 
+    if (item["type"] as? String) == "commandExecution" {
+      if let cwd = NonEmptyString(item["cwd"]) {
+        metadata.cwd = cwd
+      }
+    }
+
     metadata.lastEventAt = now
     metadataByEndpoint[endpointId] = metadata
+  }
+
+  func ReconcileSnapshotActiveTurns(endpointId: String, activeTurnKeys: [String], at now: Date) {
+    let activeSet = Set(activeTurnKeys)
+    for turn in turnsByKey.values {
+      guard turn.endpointId == endpointId else {
+        continue
+      }
+      guard turn.status == .inProgress else {
+        continue
+      }
+      let key = "\(turn.threadId):\(turn.turnId)"
+      if activeSet.contains(key) {
+        continue
+      }
+      turn.ApplyStatus(.completed, at: now)
+    }
   }
 
   func Tick(now: Date) {
@@ -235,12 +263,19 @@ final class TurnStore {
       guard (item["type"] as? String) == "userMessage" else {
         continue
       }
+
+      if let contentValue = NonEmptyString(item["content"]) {
+        return contentValue
+      }
+
       guard let content = item["content"] as? [[String: Any]] else {
         continue
       }
       let textParts = content.compactMap { input -> String? in
-        guard (input["type"] as? String) == "text" else {
-          return nil
+        if let type = input["type"] as? String {
+          if type == "text" || type == "input_text" {
+            return NonEmptyString(input["text"])
+          }
         }
         return NonEmptyString(input["text"])
       }
@@ -248,6 +283,23 @@ final class TurnStore {
         in: .whitespacesAndNewlines)
       if !combined.isEmpty {
         return combined
+      }
+    }
+
+    return nil
+  }
+
+  private func ExtractLatestCwd(from turn: [String: Any]) -> String? {
+    guard let items = turn["items"] as? [[String: Any]] else {
+      return nil
+    }
+
+    for item in items.reversed() {
+      guard (item["type"] as? String) == "commandExecution" else {
+        continue
+      }
+      if let cwd = NonEmptyString(item["cwd"]) {
+        return cwd
       }
     }
 
