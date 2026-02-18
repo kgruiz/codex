@@ -41,26 +41,33 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     let endpointIds = Set(endpointRows.map(\.endpointId))
     expandedEndpointIds = expandedEndpointIds.intersection(endpointIds)
 
-    _ = animationFrame
     let runningCount = endpointRows.filter { $0.activeTurn != nil }.count
-    UpdateButton(
-      connectionState: connectionState,
-      runningCount: runningCount)
+    UpdateButton(connectionState: connectionState, runningCount: runningCount)
 
     menu.removeAllItems()
-    let status = NSMenuItem(
-      title: HeaderTitle(
-        connectionState: connectionState,
-        runningCount: runningCount), action: nil,
-      keyEquivalent: "")
-    status.isEnabled = false
-    menu.addItem(status)
+
+    // Header
+    let headerItem = NSMenuItem(
+      title: HeaderTitle(connectionState: connectionState, runningCount: runningCount),
+      action: nil, keyEquivalent: "")
+    headerItem.isEnabled = false
+    menu.addItem(headerItem)
     menu.addItem(.separator())
 
+    // Endpoint rows
     if endpointRows.isEmpty {
-      let empty = NSMenuItem(title: "No active Codex sessions", action: nil, keyEquivalent: "")
-      empty.isEnabled = false
-      menu.addItem(empty)
+      let emptyItem = NSMenuItem(
+        title: "No active Codex sessions", action: nil, keyEquivalent: "")
+      emptyItem.isEnabled = false
+      menu.addItem(emptyItem)
+
+      if connectionState == .connected || connectionState == .connecting {
+        let hintItem = NSMenuItem(
+          title: "Run codex in a terminal to start a session",
+          action: nil, keyEquivalent: "")
+        hintItem.isEnabled = false
+        menu.addItem(hintItem)
+      }
     } else {
       for endpointRow in endpointRows {
         let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -69,9 +76,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
           now: now,
           isExpanded: expandedEndpointIds.contains(endpointRow.endpointId),
           onToggle: { [weak self] endpointId in
-            guard let self else {
-              return
-            }
+            guard let self else { return }
             if self.expandedEndpointIds.contains(endpointId) {
               self.expandedEndpointIds.remove(endpointId)
             } else {
@@ -81,8 +86,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
               endpointRows: self.cachedEndpointRows,
               connectionState: self.cachedConnectionState,
               animationFrame: self.cachedAnimationFrame,
-              now: Date()
-            )
+              now: Date())
           },
           onReconnectEndpoint: { [weak self] endpointId in
             self?.ReconnectEndpointHandler?(endpointId)
@@ -94,12 +98,38 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     menu.addItem(.separator())
 
+    // Rate limits footer
+    if let rateLimits = endpointRows.first(where: { $0.rateLimits != nil })?.rateLimits {
+      if let remaining = rateLimits.remaining, let limit = rateLimits.limit {
+        var rateLimitText = "Rate: \(remaining)/\(limit) remaining"
+        if let resetsAt = rateLimits.resetsAt {
+          let seconds = max(0, Int(resetsAt.timeIntervalSince(now)))
+          if seconds > 0 {
+            let minutes = seconds / 60
+            let secs = seconds % 60
+            if minutes > 0 {
+              rateLimitText += ", resets in \(minutes)m \(secs)s"
+            } else {
+              rateLimitText += ", resets in \(secs)s"
+            }
+          }
+        }
+        let rateLimitItem = NSMenuItem(
+          title: rateLimitText, action: nil, keyEquivalent: "")
+        rateLimitItem.isEnabled = false
+        menu.addItem(rateLimitItem)
+        menu.addItem(.separator())
+      }
+    }
+
+    // Actions
     let reconnect = NSMenuItem(
       title: "Reconnect endpoints", action: #selector(OnReconnect), keyEquivalent: "r")
     reconnect.target = self
     menu.addItem(reconnect)
 
-    let quit = NSMenuItem(title: "Quit CodexMenuBar", action: #selector(OnQuit), keyEquivalent: "q")
+    let quit = NSMenuItem(
+      title: "Quit CodexMenuBar", action: #selector(OnQuit), keyEquivalent: "q")
     quit.target = self
     menu.addItem(quit)
   }
@@ -119,9 +149,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
   }
 
   private func UpdateButton(connectionState: AppServerConnectionState, runningCount: Int) {
-    guard let button = statusItem.button else {
-      return
-    }
+    guard let button = statusItem.button else { return }
 
     if let statusIcon {
       button.image = statusIcon
@@ -141,11 +169,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     switch connectionState {
     case .connected:
-      if runningCount > 0 {
-        button.title = "◉\(runningCount)"
-      } else {
-        button.title = "◎"
-      }
+      button.title = runningCount > 0 ? "◉\(runningCount)" : "◎"
     case .connecting, .reconnecting:
       button.title = "◌"
     case .failed:
@@ -173,15 +197,18 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
   private func HeaderTitle(connectionState: AppServerConnectionState, runningCount: Int) -> String {
     switch connectionState {
     case .connected:
-      return "CodexMenuBar - \(runningCount) active"
+      if runningCount == 0 {
+        return "Codex — connected"
+      }
+      return "Codex — \(runningCount) active"
     case .connecting:
-      return "CodexMenuBar - connecting"
+      return "Codex — connecting…"
     case .reconnecting:
-      return "CodexMenuBar - reconnecting"
+      return "Codex — reconnecting…"
     case .failed(let message):
-      return "CodexMenuBar - error: \(message)"
+      return "Codex — error: \(message)"
     case .disconnected:
-      return "CodexMenuBar - disconnected"
+      return "Codex — disconnected"
     }
   }
 }
