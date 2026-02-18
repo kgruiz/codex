@@ -8,6 +8,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
   private let statusItem: NSStatusItem
   private let menu: NSMenu
+  private let statusIcon: NSImage?
   private var expandedEndpointIds: Set<String> = []
   private var cachedEndpointRows: [EndpointRow] = []
   private var cachedConnectionState: AppServerConnectionState = .disconnected
@@ -16,11 +17,14 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
   override init() {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     menu = NSMenu(title: "CodexMenuBar")
+    statusIcon = Self.LoadStatusIcon()
     super.init()
     menu.delegate = self
     statusItem.menu = menu
     if let button = statusItem.button {
-      button.title = "◎"
+      button.title = ""
+      button.image = statusIcon
+      button.imagePosition = .imageLeading
     }
   }
 
@@ -118,6 +122,23 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     guard let button = statusItem.button else {
       return
     }
+
+    if let statusIcon {
+      button.image = statusIcon
+      button.imagePosition = .imageLeading
+      switch connectionState {
+      case .connected:
+        button.title = runningCount > 0 ? "\(runningCount)" : ""
+      case .connecting, .reconnecting:
+        button.title = "…"
+      case .failed:
+        button.title = "!"
+      case .disconnected:
+        button.title = ""
+      }
+      return
+    }
+
     switch connectionState {
     case .connected:
       if runningCount > 0 {
@@ -132,6 +153,22 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     case .disconnected:
       button.title = "○"
     }
+  }
+
+  private static func LoadStatusIcon() -> NSImage? {
+    let bundle = Bundle.module
+    let candidates = ["codex-app", "codex"]
+    for name in candidates {
+      guard let url = bundle.url(forResource: name, withExtension: "svg"),
+        let image = NSImage(contentsOf: url)
+      else {
+        continue
+      }
+      image.isTemplate = true
+      image.size = NSSize(width: 18, height: 18)
+      return image
+    }
+    return nil
   }
 
   private func HeaderTitle(connectionState: AppServerConnectionState, runningCount: Int) -> String {

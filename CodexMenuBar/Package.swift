@@ -14,7 +14,11 @@ let package = Package(
   ],
   targets: [
     .executableTarget(
-      name: "CodexMenuBar"
+      name: "CodexMenuBar",
+      resources: [
+        .copy("Resources/codex-app.svg"),
+        .copy("Resources/codex.svg"),
+      ]
     ),
     .testTarget(
       name: "CodexMenuBarTests",
