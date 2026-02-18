@@ -10,6 +10,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
   private let menu: NSMenu
   private let statusIcon: NSImage?
   private var expandedEndpointIds: Set<String> = []
+  private var expandedRunKeysByEndpoint: [String: Set<String>] = [:]
   private var cachedEndpointRows: [EndpointRow] = []
   private var cachedConnectionState: AppServerConnectionState = .disconnected
   private var cachedAnimationFrame = 0
@@ -40,6 +41,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     let endpointIds = Set(endpointRows.map(\.endpointId))
     expandedEndpointIds = expandedEndpointIds.intersection(endpointIds)
+    expandedRunKeysByEndpoint = expandedRunKeysByEndpoint.filter { endpointIds.contains($0.key) }
 
     let runningCount = endpointRows.filter { $0.activeTurn != nil }.count
     UpdateButton(connectionState: connectionState, runningCount: runningCount)
@@ -75,6 +77,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
           endpointRow: endpointRow,
           now: now,
           isExpanded: expandedEndpointIds.contains(endpointRow.endpointId),
+          expandedRunKeys: expandedRunKeysByEndpoint[endpointRow.endpointId] ?? [],
           onToggle: { [weak self] endpointId in
             guard let self else { return }
             if self.expandedEndpointIds.contains(endpointId) {
@@ -82,6 +85,21 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             } else {
               self.expandedEndpointIds.insert(endpointId)
             }
+            self.Render(
+              endpointRows: self.cachedEndpointRows,
+              connectionState: self.cachedConnectionState,
+              animationFrame: self.cachedAnimationFrame,
+              now: Date())
+          },
+          onToggleHistoryRun: { [weak self] endpointId, runKey in
+            guard let self else { return }
+            var expandedRunKeys = self.expandedRunKeysByEndpoint[endpointId] ?? []
+            if expandedRunKeys.contains(runKey) {
+              expandedRunKeys.remove(runKey)
+            } else {
+              expandedRunKeys.insert(runKey)
+            }
+            self.expandedRunKeysByEndpoint[endpointId] = expandedRunKeys
             self.Render(
               endpointRows: self.cachedEndpointRows,
               connectionState: self.cachedConnectionState,
@@ -146,6 +164,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
   func menuDidClose(_ menu: NSMenu) {
     expandedEndpointIds.removeAll()
+    expandedRunKeysByEndpoint.removeAll()
   }
 
   private func UpdateButton(connectionState: AppServerConnectionState, runningCount: Int) {

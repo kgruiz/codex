@@ -193,6 +193,7 @@ struct EndpointMetadata {
   var promptPreview: String?
   var cwd: String?
   var model: String?
+  var modelProvider: String?
   var threadId: String?
   var turnId: String?
   var lastTraceCategory: ProgressCategory?
@@ -213,6 +214,7 @@ struct EndpointRow {
   let promptPreview: String?
   let cwd: String?
   let model: String?
+  let modelProvider: String?
   let threadId: String?
   let turnId: String?
   let lastTraceCategory: ProgressCategory?
@@ -247,11 +249,32 @@ struct CompletedRun: Equatable {
   let endedAt: Date
   let status: TurnExecutionStatus
   let latestLabel: String?
+  let promptPreview: String?
+  let model: String?
+  let modelProvider: String?
+  let tokenUsage: TokenUsageInfo?
   let traceHistory: [ProgressTraceSnapshot]
+
+  var runKey: String {
+    let threadPart = threadId ?? "no-thread"
+    let startedAtSeconds = Int(startedAt.timeIntervalSince1970)
+    return "\(threadPart):\(turnId):\(startedAtSeconds)"
+  }
 
   func ElapsedString() -> String {
     let elapsed = max(0, endedAt.timeIntervalSince(startedAt))
     return FormatElapsedDuration(elapsed)
+  }
+
+  func RanAtString() -> String {
+    let calendar = Calendar.current
+    if calendar.isDateInToday(endedAt) {
+      return "Today \(FormatRunClockTime(endedAt))"
+    }
+    if calendar.isDateInYesterday(endedAt) {
+      return "Yesterday \(FormatRunClockTime(endedAt))"
+    }
+    return FormatRunDateAndClockTime(endedAt)
   }
 
   func TimelineSegments() -> [TimelineSegment] {
@@ -472,6 +495,28 @@ private func FormatElapsedDuration(_ elapsed: TimeInterval) -> String {
   let minutes = (totalSeconds % 3600) / 60
   let seconds = totalSeconds % 60
   return "\(hours)h \(String(format: "%02d", minutes))m \(String(format: "%02d", seconds))s"
+}
+
+private let runClockTimeFormatter: DateFormatter = {
+  let formatter = DateFormatter()
+  formatter.timeStyle = .short
+  formatter.dateStyle = .none
+  return formatter
+}()
+
+private let runDateAndTimeFormatter: DateFormatter = {
+  let formatter = DateFormatter()
+  formatter.timeStyle = .short
+  formatter.dateStyle = .medium
+  return formatter
+}()
+
+private func FormatRunClockTime(_ date: Date) -> String {
+  runClockTimeFormatter.string(from: date)
+}
+
+private func FormatRunDateAndClockTime(_ date: Date) -> String {
+  runDateAndTimeFormatter.string(from: date)
 }
 
 private func BuildTimelineSegments(

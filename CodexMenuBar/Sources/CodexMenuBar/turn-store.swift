@@ -119,10 +119,9 @@ final class TurnStore {
     metadata.threadId = NonEmptyString(thread["id"]) ?? metadata.threadId
     metadata.chatTitle = NonEmptyString(thread["preview"]) ?? metadata.chatTitle
     metadata.cwd = NonEmptyString(thread["cwd"]) ?? metadata.cwd
-    metadata.model =
-      NonEmptyString(thread["model"])
-      ?? NonEmptyString(thread["modelProvider"])
-      ?? metadata.model
+    metadata.model = NonEmptyString(thread["model"]) ?? metadata.model
+    metadata.modelProvider =
+      NonEmptyString(thread["modelProvider"]) ?? metadata.modelProvider
 
     if let turns = thread["turns"] as? [[String: Any]], let latestTurn = turns.last {
       metadata.turnId = NonEmptyString(latestTurn["id"]) ?? metadata.turnId
@@ -349,6 +348,7 @@ final class TurnStore {
         promptPreview: metadata?.promptPreview,
         cwd: metadata?.cwd,
         model: metadata?.model,
+        modelProvider: metadata?.modelProvider,
         threadId: activeTurn?.threadId ?? metadata?.threadId,
         turnId: activeTurn?.turnId ?? metadata?.turnId,
         lastTraceCategory: metadata?.lastTraceCategory,
@@ -380,6 +380,7 @@ final class TurnStore {
       return
     }
 
+    let metadata = metadataByEndpoint[turn.endpointId]
     runs.insert(
       CompletedRun(
         endpointId: turn.endpointId,
@@ -389,6 +390,10 @@ final class TurnStore {
         endedAt: endedAt,
         status: turn.status,
         latestLabel: turn.latestLabel,
+        promptPreview: metadata?.promptPreview,
+        model: metadata?.model,
+        modelProvider: metadata?.modelProvider,
+        tokenUsage: metadata?.tokenUsage,
         traceHistory: turn.traceHistory
       ),
       at: 0

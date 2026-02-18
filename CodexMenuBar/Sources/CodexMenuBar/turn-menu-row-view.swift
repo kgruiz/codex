@@ -11,7 +11,9 @@ final class TurnMenuRowView: NSView {
 
   private let endpointRow: EndpointRow
   private let isExpanded: Bool
+  private let expandedRunKeys: Set<String>
   private let onToggle: ((String) -> Void)?
+  private let onToggleHistoryRun: ((String, String) -> Void)?
   private let onReconnectEndpoint: ((String) -> Void)?
   private let onOpenWorkspace: ((String) -> Void)?
 
@@ -28,6 +30,7 @@ final class TurnMenuRowView: NSView {
   private let expandedDocView = NSView()
 
   // Expanded section views
+  private let promptLabel = NSTextField(labelWithString: "")
   private let gitModelLabel = NSTextField(labelWithString: "")
   private let tokenTitleLabel = NSTextField(labelWithString: "")
   private let tokenBarView = TokenUsageBarView()
@@ -62,13 +65,17 @@ final class TurnMenuRowView: NSView {
     endpointRow: EndpointRow,
     now: Date,
     isExpanded: Bool,
+    expandedRunKeys: Set<String>,
     onToggle: ((String) -> Void)?,
+    onToggleHistoryRun: ((String, String) -> Void)?,
     onReconnectEndpoint: ((String) -> Void)?,
     onOpenWorkspace: ((String) -> Void)? = nil
   ) {
     self.endpointRow = endpointRow
     self.isExpanded = isExpanded
+    self.expandedRunKeys = expandedRunKeys
     self.onToggle = onToggle
+    self.onToggleHistoryRun = onToggleHistoryRun
     self.onReconnectEndpoint = onReconnectEndpoint
     self.onOpenWorkspace = onOpenWorkspace
     self.collapsedHeight =
@@ -237,8 +244,7 @@ final class TurnMenuRowView: NSView {
     if hasHistory {
       let historyInner: CGFloat = 6
       let titleH: CGFloat = 14
-      let runH: CGFloat = min(
-        CGFloat(historyRunViews.count) * (RunHistoryRowView.preferredHeight + 4) + 4, 130)
+      let runH = HistoryScrollHeight()
       let sectionH = titleH + 4 + runH + historyInner * 2
 
       historySectionCard.frame = NSRect(x: pad, y: y, width: w, height: sectionH)
@@ -319,7 +325,7 @@ final class TurnMenuRowView: NSView {
     }
 
     // Token usage
-    if let usage = endpointRow.tokenUsage, usage.totalTokens > 0 {
+    if EffectiveTokenUsage() != nil {
       tokenTitleLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
       tokenTitleLabel.isHidden = false
       y += 15
@@ -335,8 +341,18 @@ final class TurnMenuRowView: NSView {
       tokenDetailLabel.isHidden = true
     }
 
+    // Prompt preview
+    if let promptText = PromptLabelText() {
+      promptLabel.frame = NSRect(x: pad, y: y, width: w, height: 24)
+      promptLabel.stringValue = promptText
+      promptLabel.isHidden = false
+      y += 28
+    } else {
+      promptLabel.isHidden = true
+    }
+
     // Git + model line
-    if endpointRow.gitInfo?.branch != nil || endpointRow.model != nil {
+    if HasGitOrModelInfo() {
       gitModelLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
       gitModelLabel.isHidden = false
       y += 16
@@ -391,6 +407,12 @@ final class TurnMenuRowView: NSView {
     expandedDocView.layer?.cornerRadius = 6
     expandedDocView.layer?.backgroundColor =
       NSColor.controlBackgroundColor.withAlphaComponent(0.35).cgColor
+
+    // Prompt line
+    promptLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+    promptLabel.textColor = .secondaryLabelColor
+    promptLabel.lineBreakMode = .byTruncatingTail
+    promptLabel.maximumNumberOfLines = 2
 
     // Git/model line
     gitModelLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
@@ -512,6 +534,7 @@ final class TurnMenuRowView: NSView {
     addSubview(barView)
     addSubview(detailLabel)
     addSubview(expandedScroll)
+    expandedDocView.addSubview(promptLabel)
     expandedDocView.addSubview(gitModelLabel)
     expandedDocView.addSubview(tokenTitleLabel)
     expandedDocView.addSubview(tokenBarView)
@@ -561,7 +584,7 @@ final class TurnMenuRowView: NSView {
       defaultDetailText = endpointRow.lastTraceLabel ?? "No active run"
       barView.Configure(segments: [])
       detailLabel.stringValue = defaultDetailText
-      UpdateExpandedFields(now: now)
+      UpdateExpandedFields()
       ComputeExpandedHeight()
       needsLayout = true
       return
@@ -590,12 +613,12 @@ final class TurnMenuRowView: NSView {
 
     barView.Configure(segments: turn.TimelineSegments(now: now))
     detailLabel.stringValue = defaultDetailText
-    UpdateExpandedFields(now: now)
+    UpdateExpandedFields()
     ComputeExpandedHeight()
     needsLayout = true
   }
 
-  private func UpdateExpandedFields(now: Date) {
+  private func UpdateExpandedFields() {
     // Git + Model line
     var gitModelParts: [String] = []
     if let branch = endpointRow.gitInfo?.branch {
@@ -605,18 +628,13 @@ final class TurnMenuRowView: NSView {
       }
       gitModelParts.append(part)
     }
-    if let model = endpointRow.model {
-      if gitModelParts.isEmpty {
-        gitModelParts.append(model)
-      } else {
-        let padding = String(repeating: " ", count: max(1, 48 - gitModelParts.joined().count))
-        gitModelParts.append("\(padding)\(model)")
-      }
+    if let modelInfo = ModelSummary() {
+      gitModelParts.append(modelInfo)
     }
-    gitModelLabel.stringValue = gitModelParts.joined()
+    gitModelLabel.stringValue = gitModelParts.joined(separator: "   ")
 
     // Token usage
-    if let usage = endpointRow.tokenUsage, usage.totalTokens > 0 {
+    if let usage = EffectiveTokenUsage() {
       if let cw = usage.contextWindow {
         tokenTitleLabel.stringValue =
           "Token Usage — \(FormatTokenCount(usage.totalTokens)) / \(FormatTokenCount(cw))"
@@ -635,6 +653,12 @@ final class TurnMenuRowView: NSView {
       }
       defaultTokenDetailText = parts.joined(separator: " · ")
       tokenDetailLabel.stringValue = defaultTokenDetailText
+    } else {
+      defaultTokenDetailText = ""
+    }
+
+    if let promptText = PromptLabelText() {
+      promptLabel.stringValue = promptText
     }
 
     // Error
@@ -697,7 +721,7 @@ final class TurnMenuRowView: NSView {
     // History
     let runCount = endpointRow.recentRuns.count
     historyTitleLabel.stringValue = "Past Runs (\(runCount))"
-    RebuildHistoryRows(now: now)
+    RebuildHistoryRows()
   }
 
   private func ComputeExpandedHeight() {
@@ -709,9 +733,11 @@ final class TurnMenuRowView: NSView {
     let spc: CGFloat = 10
 
     // Git/model
-    if endpointRow.gitInfo?.branch != nil || endpointRow.model != nil { h += 16 }
+    if HasGitOrModelInfo() { h += 16 }
     // Token usage
-    if let usage = endpointRow.tokenUsage, usage.totalTokens > 0 { h += 15 + 18 + 16 }
+    if EffectiveTokenUsage() != nil { h += 15 + 18 + 16 }
+    // Prompt
+    if PromptLabelText() != nil { h += 28 }
     // Error
     if endpointRow.latestError != nil { h += 34 + spc }
     // Plan
@@ -730,8 +756,7 @@ final class TurnMenuRowView: NSView {
     if endpointRow.cwd != nil { h += 16 }
     // History
     if !historyRunViews.isEmpty {
-      let runH: CGFloat = min(
-        CGFloat(historyRunViews.count) * (RunHistoryRowView.preferredHeight + 4) + 4, 130)
+      let runH = HistoryScrollHeight()
       h += 14 + 4 + runH + 12 + spc
     }
     // Separator + buttons
@@ -741,12 +766,20 @@ final class TurnMenuRowView: NSView {
     computedExpandedHeight = min(h, Self.maxExpandedHeight - collapsedHeight)
   }
 
-  private func RebuildHistoryRows(now: Date) {
+  private func RebuildHistoryRows() {
     for row in historyRunViews { row.removeFromSuperview() }
     historyRunViews.removeAll(keepingCapacity: true)
     for (index, run) in endpointRow.recentRuns.enumerated() {
       let historyRow = RunHistoryRowView(frame: .zero)
-      historyRow.Configure(run: run, isLastRun: index == 0)
+      let runKey = run.runKey
+      historyRow.Configure(
+        run: run,
+        isLastRun: index == 0,
+        isExpanded: expandedRunKeys.contains(runKey),
+        onToggle: { [weak self] in
+          guard let self else { return }
+          self.onToggleHistoryRun?(self.endpointRow.endpointId, runKey)
+        })
       historyDocumentView.addSubview(historyRow)
       historyRunViews.append(historyRow)
     }
@@ -754,16 +787,67 @@ final class TurnMenuRowView: NSView {
   }
 
   private func LayoutHistoryRows() {
-    let rowHeight: CGFloat = RunHistoryRowView.preferredHeight
     let rowSpacing: CGFloat = 4
     let contentWidth = max(0, historyScrollView.bounds.width)
     var y: CGFloat = rowSpacing
     for row in historyRunViews.reversed() {
-      row.frame = NSRect(x: 0, y: y, width: contentWidth, height: rowHeight)
-      y += rowHeight + rowSpacing
+      row.frame = NSRect(x: 0, y: y, width: contentWidth, height: row.preferredHeight)
+      y += row.preferredHeight + rowSpacing
     }
     let contentHeight = max(historyScrollView.bounds.height, y)
     historyDocumentView.frame = NSRect(x: 0, y: 0, width: contentWidth, height: contentHeight)
+  }
+
+  private func HistoryContentHeight() -> CGFloat {
+    let rowSpacing: CGFloat = 4
+    var height = rowSpacing
+    for row in historyRunViews {
+      height += row.preferredHeight + rowSpacing
+    }
+    return max(0, height)
+  }
+
+  private func HistoryScrollHeight() -> CGFloat {
+    min(220, HistoryContentHeight())
+  }
+
+  private func EffectiveTokenUsage() -> TokenUsageInfo? {
+    if let usage = endpointRow.tokenUsage, usage.totalTokens > 0 {
+      return usage
+    }
+    if endpointRow.activeTurn != nil {
+      return TokenUsageInfo()
+    }
+    return nil
+  }
+
+  private func PromptLabelText() -> String? {
+    if let promptPreview = endpointRow.promptPreview, !promptPreview.isEmpty {
+      return "Prompt: \(Truncate(promptPreview, limit: 130))"
+    }
+    if endpointRow.activeTurn != nil {
+      return "Prompt: waiting for first user message"
+    }
+    return nil
+  }
+
+  private func ModelSummary() -> String? {
+    let model = endpointRow.model?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let provider = endpointRow.modelProvider?.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let model, !model.isEmpty, let provider, !provider.isEmpty {
+      return "Model: \(model) (\(provider))"
+    }
+    if let model, !model.isEmpty {
+      return "Model: \(model)"
+    }
+    if let provider, !provider.isEmpty {
+      return "Provider: \(provider)"
+    }
+    return nil
+  }
+
+  private func HasGitOrModelInfo() -> Bool {
+    endpointRow.gitInfo?.branch != nil || ModelSummary() != nil
   }
 
   // MARK: - Hover handlers
@@ -860,16 +944,31 @@ final class TurnMenuRowView: NSView {
 // MARK: - RunHistoryRowView
 
 final class RunHistoryRowView: NSView {
-  static let preferredHeight: CGFloat = 36
+  static let collapsedHeight: CGFloat = 20
+  static let expandedHeightWithoutTokens: CGFloat = 78
+  static let expandedHeightWithTokens: CGFloat = 98
+
+  private(set) var preferredHeight: CGFloat = collapsedHeight
 
   private let statusDot = NSView()
   private let titleLabel = NSTextField(labelWithString: "")
+  private let chevronLabel = NSTextField(labelWithString: "")
+  private let promptLabel = NSTextField(labelWithString: "")
+  private let modelLabel = NSTextField(labelWithString: "")
   private let timelineBarView = TimelineBarView()
+  private let tokenBarView = TokenUsageBarView()
+  private let tokenDetailLabel = NSTextField(labelWithString: "")
   private var defaultTitleText = ""
+  private var defaultTokenDetailText = ""
+  private var isExpandedRow = false
+  private var hasTokenUsage = false
+  private var onToggle: (() -> Void)?
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     wantsLayer = true
+    layer?.cornerRadius = 4
+    layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.35).cgColor
 
     statusDot.wantsLayer = true
     statusDot.layer?.cornerRadius = 3
@@ -879,13 +978,42 @@ final class RunHistoryRowView: NSView {
     titleLabel.lineBreakMode = .byTruncatingTail
     titleLabel.maximumNumberOfLines = 1
 
+    chevronLabel.font = NSFont.systemFont(ofSize: 9, weight: .medium)
+    chevronLabel.textColor = .tertiaryLabelColor
+    chevronLabel.alignment = .center
+    chevronLabel.maximumNumberOfLines = 1
+
+    promptLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+    promptLabel.textColor = .secondaryLabelColor
+    promptLabel.lineBreakMode = .byTruncatingTail
+    promptLabel.maximumNumberOfLines = 2
+
+    modelLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+    modelLabel.textColor = .tertiaryLabelColor
+    modelLabel.lineBreakMode = .byTruncatingTail
+    modelLabel.maximumNumberOfLines = 1
+
     timelineBarView.OnHoveredSegmentChanged = { [weak self] segment in
       self?.HandleTimelineHover(segment: segment)
     }
 
+    tokenBarView.OnHoveredSegmentChanged = { [weak self] segmentLabel in
+      self?.HandleTokenBarHover(segmentLabel: segmentLabel)
+    }
+
+    tokenDetailLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+    tokenDetailLabel.textColor = .tertiaryLabelColor
+    tokenDetailLabel.lineBreakMode = .byTruncatingTail
+    tokenDetailLabel.maximumNumberOfLines = 1
+
     addSubview(statusDot)
     addSubview(titleLabel)
+    addSubview(chevronLabel)
+    addSubview(promptLabel)
+    addSubview(modelLabel)
     addSubview(timelineBarView)
+    addSubview(tokenBarView)
+    addSubview(tokenDetailLabel)
   }
 
   @available(*, unavailable)
@@ -893,28 +1021,123 @@ final class RunHistoryRowView: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  override func layout() {
-    super.layout()
-    let dotSize: CGFloat = 6
-    statusDot.frame = NSRect(x: 2, y: bounds.height - 11, width: dotSize, height: dotSize)
-    titleLabel.frame = NSRect(
-      x: dotSize + 6, y: bounds.height - 14,
-      width: max(0, bounds.width - dotSize - 6), height: 12)
-    timelineBarView.frame = NSRect(x: 0, y: 2, width: bounds.width, height: 6)
+  override func mouseDown(with event: NSEvent) {
+    _ = event
+    onToggle?()
   }
 
-  func Configure(run: CompletedRun, isLastRun: Bool) {
+  override func layout() {
+    super.layout()
+
+    let dotSize: CGFloat = 6
+    statusDot.frame = NSRect(x: 2, y: bounds.height - 12, width: dotSize, height: dotSize)
+
+    let chevronWidth: CGFloat = 12
+    chevronLabel.frame = NSRect(
+      x: bounds.width - chevronWidth - 2,
+      y: bounds.height - 15,
+      width: chevronWidth,
+      height: 12
+    )
+
+    titleLabel.frame = NSRect(
+      x: dotSize + 6,
+      y: bounds.height - 15,
+      width: max(0, bounds.width - dotSize - chevronWidth - 10),
+      height: 12
+    )
+
+    guard isExpandedRow else {
+      promptLabel.isHidden = true
+      modelLabel.isHidden = true
+      timelineBarView.isHidden = true
+      tokenBarView.isHidden = true
+      tokenDetailLabel.isHidden = true
+      return
+    }
+
+    let inset: CGFloat = 2
+    let contentWidth = max(0, bounds.width - inset * 2)
+    var y = bounds.height - 19
+
+    promptLabel.isHidden = false
+    promptLabel.frame = NSRect(x: inset, y: y - 24, width: contentWidth, height: 24)
+    y -= 28
+
+    modelLabel.isHidden = false
+    modelLabel.frame = NSRect(x: inset, y: y - 12, width: contentWidth, height: 12)
+    y -= 16
+
+    timelineBarView.isHidden = false
+    timelineBarView.frame = NSRect(x: inset, y: y - 8, width: contentWidth, height: 8)
+    y -= 12
+
+    if hasTokenUsage {
+      tokenBarView.isHidden = false
+      tokenDetailLabel.isHidden = false
+      tokenBarView.frame = NSRect(x: inset, y: y - 10, width: contentWidth, height: 10)
+      y -= 13
+      tokenDetailLabel.frame = NSRect(x: inset, y: y - 12, width: contentWidth, height: 12)
+    } else {
+      tokenBarView.isHidden = true
+      tokenDetailLabel.isHidden = true
+    }
+  }
+
+  func Configure(
+    run: CompletedRun,
+    isLastRun: Bool,
+    isExpanded: Bool,
+    onToggle: (() -> Void)?
+  ) {
+    self.onToggle = onToggle
+    isExpandedRow = isExpanded
+    hasTokenUsage = run.tokenUsage?.totalTokens ?? 0 > 0
+    preferredHeight =
+      isExpanded
+      ? (hasTokenUsage ? Self.expandedHeightWithTokens : Self.expandedHeightWithoutTokens)
+      : Self.collapsedHeight
+    chevronLabel.stringValue = isExpanded ? "▾" : "▸"
+
     let elapsed = run.ElapsedString()
     let status = StatusText(run.status)
+    let ranAt = run.RanAtString()
     let suffix = isLastRun ? " · latest" : ""
-    defaultTitleText = "\(status) in \(elapsed)\(suffix)"
+    defaultTitleText = "\(status) · \(elapsed) · \(ranAt)\(suffix)"
     titleLabel.stringValue = defaultTitleText
     statusDot.layer?.backgroundColor = StatusColor(run.status).cgColor
+
+    let promptText: String
+    if let promptPreview = run.promptPreview, !promptPreview.isEmpty {
+      promptText = promptPreview
+    } else {
+      promptText = "Prompt unavailable"
+    }
+    promptLabel.stringValue = "Prompt: \(promptText)"
+    modelLabel.stringValue = ModelText(run: run)
+
     timelineBarView.Configure(segments: run.TimelineSegments())
+
+    if let usage = run.tokenUsage, usage.totalTokens > 0 {
+      tokenBarView.Configure(usage: usage)
+      var tokenParts = ["In: \(FormatTokenCount(usage.inputTokens))"]
+      tokenParts.append("Out: \(FormatTokenCount(usage.outputTokens))")
+      if usage.reasoningTokens > 0 {
+        tokenParts.append("Reasoning: \(FormatTokenCount(usage.reasoningTokens))")
+      }
+      defaultTokenDetailText = tokenParts.joined(separator: " · ")
+      tokenDetailLabel.stringValue = defaultTokenDetailText
+    } else {
+      defaultTokenDetailText = ""
+      tokenDetailLabel.stringValue = defaultTokenDetailText
+    }
+
     needsLayout = true
+    invalidateIntrinsicContentSize()
   }
 
   private func HandleTimelineHover(segment: TimelineSegment?) {
+    guard isExpandedRow else { return }
     guard let segment else {
       titleLabel.stringValue = defaultTitleText
       titleLabel.textColor = .secondaryLabelColor
@@ -934,6 +1157,23 @@ final class RunHistoryRowView: NSView {
     return "\(category) · \(duration)"
   }
 
+  private func HandleTokenBarHover(segmentLabel: String?) {
+    guard isExpandedRow, hasTokenUsage else {
+      tokenDetailLabel.stringValue = defaultTokenDetailText
+      tokenDetailLabel.textColor = .tertiaryLabelColor
+      return
+    }
+
+    guard let segmentLabel else {
+      tokenDetailLabel.stringValue = defaultTokenDetailText
+      tokenDetailLabel.textColor = .tertiaryLabelColor
+      return
+    }
+
+    tokenDetailLabel.stringValue = segmentLabel
+    tokenDetailLabel.textColor = .secondaryLabelColor
+  }
+
   private func StatusText(_ status: TurnExecutionStatus) -> String {
     switch status {
     case .inProgress: return "Working"
@@ -950,6 +1190,21 @@ final class RunHistoryRowView: NSView {
     case .interrupted: return .systemOrange
     case .failed: return .systemRed
     }
+  }
+
+  private func ModelText(run: CompletedRun) -> String {
+    let model = run.model?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let provider = run.modelProvider?.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let model, !model.isEmpty, let provider, !provider.isEmpty {
+      return "Model: \(model) (\(provider))"
+    }
+    if let model, !model.isEmpty {
+      return "Model: \(model)"
+    }
+    if let provider, !provider.isEmpty {
+      return "Provider: \(provider)"
+    }
+    return "Model: unavailable"
   }
 }
 
