@@ -77,6 +77,117 @@ struct TimelineSegment: Equatable {
   }
 }
 
+struct TokenUsageInfo: Equatable {
+  var inputTokens: Int = 0
+  var cachedInputTokens: Int = 0
+  var outputTokens: Int = 0
+  var reasoningTokens: Int = 0
+  var totalTokens: Int = 0
+  var contextWindow: Int?
+
+  var contextUsageFraction: Double? {
+    guard let contextWindow, contextWindow > 0 else { return nil }
+    return min(1.0, Double(totalTokens) / Double(contextWindow))
+  }
+}
+
+struct ErrorInfo: Equatable {
+  let message: String
+  let details: String?
+  let willRetry: Bool
+  let occurredAt: Date
+}
+
+struct FileChangeSummary: Equatable {
+  let path: String
+  let kind: FileChangeKind
+}
+
+enum FileChangeKind: String, Equatable {
+  case add = "Add"
+  case delete = "Delete"
+  case update = "Update"
+
+  init(serverValue: String) {
+    switch serverValue.lowercased() {
+    case "add":
+      self = .add
+    case "delete":
+      self = .delete
+    default:
+      self = .update
+    }
+  }
+
+  var label: String {
+    switch self {
+    case .add: return "A"
+    case .delete: return "D"
+    case .update: return "M"
+    }
+  }
+}
+
+struct CommandSummary: Equatable {
+  let command: String
+  let status: CommandExecutionState
+  let exitCode: Int?
+  let durationMs: Int?
+}
+
+enum CommandExecutionState: String, Equatable {
+  case inProgress
+  case completed
+  case failed
+  case declined
+
+  init(serverValue: String) {
+    switch serverValue.lowercased() {
+    case "completed":
+      self = .completed
+    case "failed":
+      self = .failed
+    case "declined":
+      self = .declined
+    default:
+      self = .inProgress
+    }
+  }
+}
+
+struct PlanStepInfo: Equatable {
+  let description: String
+  let status: PlanStepStatus
+}
+
+enum PlanStepStatus: String, Equatable {
+  case pending
+  case inProgress
+  case completed
+
+  init(serverValue: String) {
+    switch serverValue.lowercased() {
+    case "completed":
+      self = .completed
+    case "in_progress", "inprogress":
+      self = .inProgress
+    default:
+      self = .pending
+    }
+  }
+}
+
+struct GitInfo: Equatable {
+  var branch: String?
+  var sha: String?
+}
+
+struct RateLimitInfo: Equatable {
+  var remaining: Int?
+  var limit: Int?
+  var resetsAt: Date?
+}
+
 struct EndpointMetadata {
   var chatTitle: String?
   var promptPreview: String?
@@ -87,6 +198,11 @@ struct EndpointMetadata {
   var lastTraceCategory: ProgressCategory?
   var lastTraceLabel: String?
   var lastEventAt: Date?
+  var tokenUsage: TokenUsageInfo?
+  var latestError: ErrorInfo?
+  var gitInfo: GitInfo?
+  var rateLimits: RateLimitInfo?
+  var sessionSource: String?
 }
 
 struct EndpointRow {
@@ -102,6 +218,21 @@ struct EndpointRow {
   let lastTraceCategory: ProgressCategory?
   let lastTraceLabel: String?
   let lastEventAt: Date?
+  let tokenUsage: TokenUsageInfo?
+  let latestError: ErrorInfo?
+  let fileChanges: [FileChangeSummary]
+  let commands: [CommandSummary]
+  let planSteps: [PlanStepInfo]
+  let planExplanation: String?
+  let gitInfo: GitInfo?
+  let rateLimits: RateLimitInfo?
+  let sessionSource: String?
+
+  var displayName: String {
+    if let title = chatTitle, !title.isEmpty { return title }
+    if let cwd { return (cwd as NSString).lastPathComponent }
+    return String(endpointId.prefix(8))
+  }
 }
 
 struct CompletedRun: Equatable {
@@ -139,6 +270,10 @@ final class ActiveTurn {
   private var categoryCounts: [ProgressCategory: Int]
   private var seenCategories: [ProgressCategory]
   private(set) var traceHistory: [ProgressTraceSnapshot]
+  private(set) var fileChanges: [FileChangeSummary] = []
+  private(set) var commands: [CommandSummary] = []
+  private(set) var planSteps: [PlanStepInfo] = []
+  private(set) var planExplanation: String?
 
   init(endpointId: String, threadId: String?, turnId: String, startedAt: Date) {
     self.endpointId = endpointId
@@ -202,6 +337,32 @@ final class ActiveTurn {
     )
     if traceHistory.count > 128 {
       traceHistory.removeFirst(traceHistory.count - 128)
+    }
+  }
+
+  func UpsertFileChange(_ change: FileChangeSummary) {
+    if let index = fileChanges.firstIndex(where: { $0.path == change.path }) {
+      fileChanges[index] = change
+    } else {
+      fileChanges.append(change)
+    }
+  }
+
+  func UpsertCommand(_ command: CommandSummary) {
+    if let index = commands.firstIndex(where: { $0.command == command.command }) {
+      commands[index] = command
+    } else {
+      commands.append(command)
+    }
+    if commands.count > 20 {
+      commands.removeFirst(commands.count - 20)
+    }
+  }
+
+  func UpdatePlan(steps: [PlanStepInfo], explanation: String?) {
+    planSteps = steps
+    if let explanation, !explanation.isEmpty {
+      planExplanation = explanation
     }
   }
 
@@ -279,6 +440,18 @@ final class ActiveTurn {
 
     segments.append(TimelineSegment(kind: kind, startedAt: start, endedAt: end, label: label))
   }
+}
+
+func FormatTokenCount(_ count: Int) -> String {
+  if count >= 1_000_000 {
+    let value = Double(count) / 1_000_000.0
+    return String(format: "%.1fM", value)
+  }
+  if count >= 1_000 {
+    let value = Double(count) / 1_000.0
+    return String(format: "%.1fk", value)
+  }
+  return "\(count)"
 }
 
 private func FormatElapsedDuration(_ elapsed: TimeInterval) -> String {

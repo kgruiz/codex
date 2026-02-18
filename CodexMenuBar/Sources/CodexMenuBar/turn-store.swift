@@ -196,6 +196,60 @@ final class TurnStore {
     metadataByEndpoint[endpointId] = metadata
   }
 
+  func UpdateTokenUsage(endpointId: String, tokenUsage: TokenUsageInfo) {
+    var metadata = metadataByEndpoint[endpointId] ?? EndpointMetadata()
+    metadata.tokenUsage = tokenUsage
+    metadataByEndpoint[endpointId] = metadata
+  }
+
+  func RecordError(endpointId: String, error: ErrorInfo) {
+    var metadata = metadataByEndpoint[endpointId] ?? EndpointMetadata()
+    metadata.latestError = error
+    metadataByEndpoint[endpointId] = metadata
+  }
+
+  func ClearError(endpointId: String) {
+    guard var metadata = metadataByEndpoint[endpointId] else { return }
+    metadata.latestError = nil
+    metadataByEndpoint[endpointId] = metadata
+  }
+
+  func UpdateGitInfo(endpointId: String, gitInfo: GitInfo) {
+    var metadata = metadataByEndpoint[endpointId] ?? EndpointMetadata()
+    metadata.gitInfo = gitInfo
+    metadataByEndpoint[endpointId] = metadata
+  }
+
+  func UpdateRateLimits(rateLimits: RateLimitInfo) {
+    for endpointId in metadataByEndpoint.keys {
+      metadataByEndpoint[endpointId]?.rateLimits = rateLimits
+    }
+    globalRateLimits = rateLimits
+  }
+
+  func UpdateSessionSource(endpointId: String, source: String) {
+    var metadata = metadataByEndpoint[endpointId] ?? EndpointMetadata()
+    metadata.sessionSource = source
+    metadataByEndpoint[endpointId] = metadata
+  }
+
+  func UpdatePlan(endpointId: String, turnId: String, steps: [PlanStepInfo], explanation: String?) {
+    let key = TurnKey(endpointId: endpointId, turnId: turnId)
+    turnsByKey[key]?.UpdatePlan(steps: steps, explanation: explanation)
+  }
+
+  func RecordFileChange(endpointId: String, turnId: String, change: FileChangeSummary) {
+    let key = TurnKey(endpointId: endpointId, turnId: turnId)
+    turnsByKey[key]?.UpsertFileChange(change)
+  }
+
+  func RecordCommand(endpointId: String, turnId: String, command: CommandSummary) {
+    let key = TurnKey(endpointId: endpointId, turnId: turnId)
+    turnsByKey[key]?.UpsertCommand(command)
+  }
+
+  var globalRateLimits: RateLimitInfo?
+
   func ReconcileSnapshotActiveTurns(endpointId: String, activeTurnKeys: [String], at now: Date) {
     let activeSet = Set(activeTurnKeys)
     for turn in turnsByKey.values {
@@ -299,7 +353,16 @@ final class TurnStore {
         turnId: activeTurn?.turnId ?? metadata?.turnId,
         lastTraceCategory: metadata?.lastTraceCategory,
         lastTraceLabel: activeTurn?.latestLabel ?? metadata?.lastTraceLabel,
-        lastEventAt: metadata?.lastEventAt
+        lastEventAt: metadata?.lastEventAt,
+        tokenUsage: metadata?.tokenUsage,
+        latestError: metadata?.latestError,
+        fileChanges: activeTurn?.fileChanges ?? [],
+        commands: activeTurn?.commands ?? [],
+        planSteps: activeTurn?.planSteps ?? [],
+        planExplanation: activeTurn?.planExplanation,
+        gitInfo: metadata?.gitInfo,
+        rateLimits: metadata?.rateLimits ?? globalRateLimits,
+        sessionSource: metadata?.sessionSource
       )
     }
   }
