@@ -155,7 +155,7 @@ final class TurnMenuRowView: NSView {
   override func layout() {
     super.layout()
 
-    let insets = NSEdgeInsets(top: 6, left: 12, bottom: 4, right: 12)
+    let insets = NSEdgeInsets(top: 6, left: 12, bottom: 0, right: 12)
     let contentWidth = max(0, bounds.width - insets.left - insets.right)
 
     let dotSize: CGFloat = 8
@@ -178,29 +178,24 @@ final class TurnMenuRowView: NSView {
     let nameWidth = max(0, elapsedLabel.frame.minX - nameX - 4)
     nameLabel.frame = NSRect(x: nameX, y: topY - 13, width: nameWidth, height: 14)
 
-    if barVisible {
-      let barHeight: CGFloat = 8
-      let barY = insets.bottom
-      barView.frame = NSRect(x: insets.left, y: barY, width: contentWidth, height: barHeight)
-      barView.isHidden = false
+    let detailWidth = max(0, contentWidth - (nameX - insets.left))
+    let collapsedBottom = bounds.height - collapsedHeight
 
-      let detailY = barY + barHeight + 4
-      detailLabel.frame = NSRect(
-        x: nameX, y: detailY, width: max(0, contentWidth - dotSize - 6), height: 13)
+    if barVisible {
+      let detailY = topY - 28
+      detailLabel.frame = NSRect(x: nameX, y: detailY, width: detailWidth, height: 13)
+
+      let barHeight: CGFloat = 8
+      let barY = collapsedBottom + 4
+      barView.frame = NSRect(x: nameX, y: barY, width: detailWidth, height: barHeight)
+      barView.isHidden = false
     } else {
       let detailY = topY - 27
-      detailLabel.frame = NSRect(
-        x: nameX, y: detailY, width: max(0, contentWidth - dotSize - 6), height: 13)
+      detailLabel.frame = NSRect(x: nameX, y: detailY, width: detailWidth, height: 13)
       barView.isHidden = true
     }
 
-    let expandedTop: CGFloat
-    if barVisible {
-      expandedTop = barView.frame.minY - 2
-    } else {
-      expandedTop = detailLabel.frame.minY - 2
-    }
-    let expandedHeight = max(0, expandedTop)
+    let expandedHeight = max(0, collapsedBottom)
     expandedScroll.frame = NSRect(
       x: insets.left, y: 0, width: contentWidth, height: expandedHeight)
     expandedScroll.isHidden = !isExpanded
@@ -460,6 +455,7 @@ final class TurnMenuRowView: NSView {
     cwdLabel.textColor = .tertiaryLabelColor
     cwdLabel.lineBreakMode = .byTruncatingMiddle
     cwdLabel.maximumNumberOfLines = 1
+    cwdLabel.allowsDefaultTighteningForTruncation = true
 
     // History section card
     historySectionCard.wantsLayer = true
@@ -694,7 +690,8 @@ final class TurnMenuRowView: NSView {
 
     // Workspace path
     if let cwd = endpointRow.cwd {
-      cwdLabel.stringValue = cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+      let shortPath = cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+      cwdLabel.stringValue = "Workspace: \(shortPath)"
     }
 
     // History
