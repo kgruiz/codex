@@ -159,7 +159,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     let bundle = Bundle.module
     let candidates = ["codex-app", "codex"]
     for name in candidates {
-      guard let url = bundle.url(forResource: name, withExtension: "svg"),
+      guard let url = bundle.url(forResource: name, withExtension: "svg", subdirectory: "svgs"),
         let image = NSImage(contentsOf: url)
       else {
         continue

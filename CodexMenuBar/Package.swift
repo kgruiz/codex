@@ -16,8 +16,8 @@ let package = Package(
     .executableTarget(
       name: "CodexMenuBar",
       resources: [
-        .copy("Resources/codex-app.svg"),
-        .copy("Resources/codex.svg"),
+        .copy("Resources/svgs/codex-app.svg"),
+        .copy("Resources/svgs/codex.svg"),
       ]
     ),
     .testTarget(
