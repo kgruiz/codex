@@ -103,9 +103,7 @@ use std::convert::TryFrom;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::oneshot;
-use tracing::debug;
 use tracing::error;
-use tracing::info;
 use tracing::warn;
 
 type JsonValue = serde_json::Value;
@@ -130,9 +128,6 @@ pub(crate) async fn apply_bespoke_event_handling(
         EventMsg::TurnStarted(_) => {
             let mut map = turn_summary_store.lock().await;
             map.entry(conversation_id).or_default().active_turn_id = Some(event_turn_id.clone());
-            info!(
-                "turn_summary: set active turn thread_id={conversation_id} turn_id={event_turn_id}"
-            );
         }
         EventMsg::TurnComplete(_ev) => {
             handle_turn_complete(
@@ -1341,12 +1336,7 @@ async fn find_and_remove_turn_summary(
     turn_summary_store: &TurnSummaryStore,
 ) -> TurnSummary {
     let mut map = turn_summary_store.lock().await;
-    let removed = map.remove(&conversation_id).unwrap_or_default();
-    debug!(
-        "turn_summary: removed summary thread_id={conversation_id} had_active_turn_id={}",
-        removed.active_turn_id.as_deref().unwrap_or("<none>")
-    );
-    removed
+    map.remove(&conversation_id).unwrap_or_default()
 }
 
 async fn handle_turn_complete(
@@ -1361,7 +1351,7 @@ async fn handle_turn_complete(
         && active_turn_id != event_turn_id
     {
         warn!(
-            "turn_summary: completing different turn than active summary thread_id={conversation_id} completed_turn_id={event_turn_id} active_turn_id={active_turn_id}"
+            "received completion for non-active turn {event_turn_id} in thread {conversation_id}; active summary turn is {active_turn_id}"
         );
     }
 
@@ -1370,9 +1360,6 @@ async fn handle_turn_complete(
         None => (TurnStatus::Completed, None),
     };
 
-    info!(
-        "turn_summary: emit turn completed thread_id={conversation_id} turn_id={event_turn_id} status={status:?}"
-    );
     emit_turn_completed_with_status(conversation_id, event_turn_id, status, error, outgoing).await;
 }
 
@@ -1387,13 +1374,9 @@ async fn handle_turn_interrupted(
         && active_turn_id != event_turn_id
     {
         warn!(
-            "turn_summary: interrupted different turn than active summary thread_id={conversation_id} interrupted_turn_id={event_turn_id} active_turn_id={active_turn_id}"
+            "received interrupt for non-active turn {event_turn_id} in thread {conversation_id}; active summary turn is {active_turn_id}"
         );
     }
-
-    info!(
-        "turn_summary: emit turn interrupted thread_id={conversation_id} turn_id={event_turn_id}"
-    );
     emit_turn_completed_with_status(
         conversation_id,
         event_turn_id,
@@ -1465,10 +1448,6 @@ async fn handle_error(
     let mut map = turn_summary_store.lock().await;
     let summary = map.entry(conversation_id).or_default();
     summary.last_error = Some(error);
-    info!(
-        "turn_summary: recorded turn error thread_id={conversation_id} active_turn_id={}",
-        summary.active_turn_id.as_deref().unwrap_or("<none>")
-    );
 }
 
 async fn on_patch_approval_response(

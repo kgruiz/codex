@@ -127,7 +127,7 @@ async fn turn_active_lists_and_clears_running_turns() -> Result<()> {
 
 #[tokio::test]
 async fn turn_active_uses_live_turn_state_without_listener() -> Result<()> {
-    let shell_command = vec!["sleep".to_string(), "10".to_string()];
+    let shell_command = vec!["sleep".to_string(), "2".to_string()];
 
     let tmp = TempDir::new()?;
     let codex_home = tmp.path().join("codex_home");
@@ -138,7 +138,7 @@ async fn turn_active_uses_live_turn_state_without_listener() -> Result<()> {
     let server = create_mock_responses_server_sequence(vec![create_shell_command_sse_response(
         shell_command,
         Some(&working_directory),
-        Some(10_000),
+        Some(2_000),
         "call_sleep",
     )?])
     .await;
@@ -202,6 +202,109 @@ async fn turn_active_uses_live_turn_state_without_listener() -> Result<()> {
     }
 
     assert!(saw_active_turn);
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn turn_active_stays_present_while_turn_is_running() -> Result<()> {
+    let shell_command = vec!["sleep".to_string(), "2".to_string()];
+
+    let tmp = TempDir::new()?;
+    let codex_home = tmp.path().join("codex_home");
+    std::fs::create_dir(&codex_home)?;
+    let working_directory = tmp.path().join("workdir");
+    std::fs::create_dir(&working_directory)?;
+
+    let server = create_mock_responses_server_sequence(vec![create_shell_command_sse_response(
+        shell_command,
+        Some(&working_directory),
+        Some(2_000),
+        "call_sleep",
+    )?])
+    .await;
+    create_config_toml(&codex_home, &server.uri())?;
+
+    let mut mcp = McpProcess::new(&codex_home).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let new_conversation_id = mcp
+        .send_new_conversation_request(NewConversationParams {
+            cwd: Some(working_directory.to_string_lossy().into_owned()),
+            ..Default::default()
+        })
+        .await?;
+    let new_conversation_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(new_conversation_id)),
+    )
+    .await??;
+    let NewConversationResponse {
+        conversation_id, ..
+    } = to_response::<NewConversationResponse>(new_conversation_resp)?;
+    let conversation_id_str = conversation_id.to_string();
+
+    let send_user_message_id = mcp
+        .send_send_user_message_request(SendUserMessageParams {
+            conversation_id,
+            items: vec![codex_app_server_protocol::InputItem::Text {
+                text: "run sleep".to_string(),
+                text_elements: Vec::new(),
+            }],
+        })
+        .await?;
+    let send_user_message_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(send_user_message_id)),
+    )
+    .await??;
+    let _response: SendUserMessageResponse =
+        to_response::<SendUserMessageResponse>(send_user_message_resp)?;
+
+    let mut running_turn_id: Option<String> = None;
+    for _ in 0..40 {
+        let active_req = mcp.send_turn_active_request(TurnActiveParams {}).await?;
+        let active_resp: JSONRPCResponse = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_response_message(RequestId::Integer(active_req)),
+        )
+        .await??;
+        let TurnActiveResponse { data } = to_response::<TurnActiveResponse>(active_resp)?;
+
+        if let Some(entry) = data
+            .iter()
+            .find(|entry| entry.thread_id == conversation_id_str)
+        {
+            running_turn_id = Some(entry.turn_id.clone());
+            break;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    let running_turn_id = running_turn_id.expect("expected active turn to appear");
+
+    for _ in 0..8 {
+        let active_req = mcp.send_turn_active_request(TurnActiveParams {}).await?;
+        let active_resp: JSONRPCResponse = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_response_message(RequestId::Integer(active_req)),
+        )
+        .await??;
+        let TurnActiveResponse { data } = to_response::<TurnActiveResponse>(active_resp)?;
+
+        assert!(
+            data.iter()
+                .any(|entry| entry.thread_id == conversation_id_str
+                    && entry.turn_id == running_turn_id),
+            "active turn disappeared while still running"
+        );
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     Ok(())
 }
