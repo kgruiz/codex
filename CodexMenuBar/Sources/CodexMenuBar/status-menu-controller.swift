@@ -157,13 +157,12 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
   private static func LoadStatusIcon() -> NSImage? {
     let bundle = Bundle.module
-    let candidates = ["codex-app"]
-    for name in candidates {
-      guard let url = bundle.url(forResource: name, withExtension: "svg", subdirectory: "svgs"),
-        let image = NSImage(contentsOf: url)
-      else {
-        continue
-      }
+    let iconUrls = [
+      bundle.url(forResource: "codex-app", withExtension: "svg"),
+      bundle.url(forResource: "codex-app", withExtension: "svg", subdirectory: "svgs"),
+    ]
+    for iconUrl in iconUrls {
+      guard let url = iconUrl, let image = NSImage(contentsOf: url) else { continue }
       image.isTemplate = true
       image.size = NSSize(width: 18, height: 18)
       return image
