@@ -4892,57 +4892,15 @@ impl CodexMessageProcessor {
                 continue;
             };
 
-            let status = thread.agent_status().await;
-            debug!("turn_active: summary missing thread_id={thread_id} status={status:?}");
-            if !matches!(status, AgentStatus::Running) {
-                continue;
-            }
-
-            let turn_id = if let Some(rollout_path) = thread.rollout_path() {
-                info!(
-                    "turn_active: summary missing for running thread; falling back to rollout thread_id={thread_id} path={}",
-                    rollout_path.display()
-                );
-                let events = match read_event_msgs_from_rollout(rollout_path.as_path()).await {
-                    Ok(events) => events,
-                    Err(err) => {
-                        self.send_internal_error(
-                            request_id,
-                            format!(
-                                "failed to read rollout `{}` for thread {thread_id}: {err}",
-                                rollout_path.display()
-                            ),
-                        )
-                        .await;
-                        return;
-                    }
-                };
-                let turns = build_turns_from_event_msgs(&events);
-                match turns
-                    .iter()
-                    .rev()
-                    .find(|turn| turn.status == TurnStatus::InProgress)
-                {
-                    Some(turn) => {
-                        info!(
-                            "turn_active: rollout fallback found in-progress turn thread_id={thread_id} turn_id={}",
-                            turn.id
-                        );
-                        turn.id.clone()
-                    }
-                    None => {
-                        warn!(
-                            "turn_active: rollout fallback found no in-progress turn for running thread thread_id={thread_id}"
-                        );
-                        continue;
-                    }
-                }
-            } else {
-                warn!(
-                    "turn_active: running thread has no rollout path and no summary active turn thread_id={thread_id}"
+            let Some(turn_id) = thread.active_turn_id().await else {
+                let status = thread.agent_status().await;
+                debug!(
+                    "turn_active: summary missing and no live active turn thread_id={thread_id} status={status:?}"
                 );
                 continue;
             };
+
+            info!("turn_active: using live active turn thread_id={thread_id} turn_id={turn_id}");
 
             data.push(ActiveTurnSummary {
                 thread_id: thread_id.to_string(),

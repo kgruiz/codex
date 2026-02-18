@@ -462,6 +462,14 @@ impl Codex {
         self.agent_status.borrow().clone()
     }
 
+    pub(crate) async fn active_turn_id(&self) -> Option<String> {
+        let active = self.session.active_turn.lock().await;
+        active
+            .as_ref()
+            .and_then(|turn| turn.tasks.first())
+            .map(|(sub_id, _task)| sub_id.clone())
+    }
+
     pub(crate) async fn thread_config_snapshot(&self) -> ThreadConfigSnapshot {
         let state = self.session.state.lock().await;
         state.session_configuration.thread_config_snapshot()
