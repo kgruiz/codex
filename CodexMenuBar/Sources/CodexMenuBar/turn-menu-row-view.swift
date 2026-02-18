@@ -4,7 +4,7 @@ import Foundation
 final class TurnMenuRowView: NSView {
   private static let rowWidth: CGFloat = 420
   private static let collapsedRowHeight: CGFloat = 64
-  private static let expandedRowHeight: CGFloat = 172
+  private static let expandedRowHeight: CGFloat = 190
 
   private let endpointRow: EndpointRow
   private let isExpanded: Bool
@@ -82,7 +82,7 @@ final class TurnMenuRowView: NSView {
     let barHeight: CGFloat = 12
     let detailHeight: CGFloat = 16
     let verticalSpacing: CGFloat = 4
-    let expandedHeight: CGFloat = isExpanded ? 98 : 0
+    let expandedHeight: CGFloat = isExpanded ? 116 : 0
 
     detailLabel.frame = NSRect(
       x: contentRect.minX,
@@ -147,13 +147,13 @@ final class TurnMenuRowView: NSView {
       )
       metadataLabel.frame = NSRect(
         x: innerInset,
-        y: 22,
+        y: 30,
         width: availableWidth,
-        height: 54
+        height: 62
       )
       reconnectButton.frame = NSRect(
         x: max(innerInset, availableWidth - 170 + innerInset),
-        y: 2,
+        y: 6,
         width: 170,
         height: 18
       )
