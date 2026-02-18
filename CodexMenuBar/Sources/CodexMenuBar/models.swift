@@ -233,6 +233,10 @@ struct EndpointRow {
     if let cwd { return (cwd as NSString).lastPathComponent }
     return String(endpointId.prefix(8))
   }
+
+  var shortId: String {
+    String(endpointId.prefix(5))
+  }
 }
 
 struct CompletedRun: Equatable {

@@ -551,11 +551,11 @@ final class TurnMenuRowView: NSView {
   // MARK: - Update
 
   private func Update(now: Date) {
-    let name = endpointRow.displayName
+    let nameAttrString = BuildNameAttributedString()
     guard let turn = endpointRow.activeTurn else {
       barVisible = false
       collapsedHeight = Self.collapsedIdleHeight
-      nameLabel.stringValue = name
+      nameLabel.attributedStringValue = nameAttrString
       elapsedLabel.stringValue = "Idle"
       statusDot.layer?.backgroundColor = NSColor.systemGray.withAlphaComponent(0.5).cgColor
       defaultDetailText = endpointRow.lastTraceLabel ?? "No active run"
@@ -569,7 +569,7 @@ final class TurnMenuRowView: NSView {
 
     barVisible = true
     collapsedHeight = Self.collapsedActiveHeight
-    nameLabel.stringValue = name
+    nameLabel.attributedStringValue = nameAttrString
     statusDot.layer?.backgroundColor = StatusDotColor(turn.status).cgColor
 
     elapsedLabel.stringValue = "\(StatusLabel(turn.status)) \(turn.ElapsedString(now: now))"
@@ -825,6 +825,32 @@ final class TurnMenuRowView: NSView {
     }
   }
 
+  private func BuildNameAttributedString() -> NSAttributedString {
+    let name = endpointRow.displayName
+    let shortId = endpointRow.shortId
+    let nameFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
+
+    let hasCwd = endpointRow.cwd != nil
+    let hasTitle = endpointRow.chatTitle != nil && !endpointRow.chatTitle!.isEmpty
+    let showIdSuffix = hasCwd || hasTitle
+
+    if showIdSuffix {
+      let result = NSMutableAttributedString(
+        string: name,
+        attributes: [.font: nameFont, .foregroundColor: NSColor.labelColor])
+      let idFont = NSFont.systemFont(ofSize: 11, weight: .regular)
+      let idPart = NSAttributedString(
+        string: " (\(shortId))",
+        attributes: [.font: idFont, .foregroundColor: NSColor.tertiaryLabelColor])
+      result.append(idPart)
+      return result
+    }
+
+    return NSAttributedString(
+      string: name,
+      attributes: [.font: nameFont, .foregroundColor: NSColor.labelColor])
+  }
+
   private func Truncate(_ value: String, limit: Int) -> String {
     if value.count <= limit { return value }
     return "\(value.prefix(max(0, limit - 1)))…"
@@ -839,6 +865,7 @@ final class RunHistoryRowView: NSView {
   private let statusDot = NSView()
   private let titleLabel = NSTextField(labelWithString: "")
   private let timelineBarView = TimelineBarView()
+  private var defaultTitleText = ""
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -852,7 +879,9 @@ final class RunHistoryRowView: NSView {
     titleLabel.lineBreakMode = .byTruncatingTail
     titleLabel.maximumNumberOfLines = 1
 
-    timelineBarView.OnHoveredSegmentChanged = nil
+    timelineBarView.OnHoveredSegmentChanged = { [weak self] segment in
+      self?.HandleTimelineHover(segment: segment)
+    }
 
     addSubview(statusDot)
     addSubview(titleLabel)
@@ -878,10 +907,31 @@ final class RunHistoryRowView: NSView {
     let elapsed = run.ElapsedString()
     let status = StatusText(run.status)
     let suffix = isLastRun ? " · latest" : ""
-    titleLabel.stringValue = "\(status) in \(elapsed)\(suffix)"
+    defaultTitleText = "\(status) in \(elapsed)\(suffix)"
+    titleLabel.stringValue = defaultTitleText
     statusDot.layer?.backgroundColor = StatusColor(run.status).cgColor
     timelineBarView.Configure(segments: run.TimelineSegments())
     needsLayout = true
+  }
+
+  private func HandleTimelineHover(segment: TimelineSegment?) {
+    guard let segment else {
+      titleLabel.stringValue = defaultTitleText
+      titleLabel.textColor = .secondaryLabelColor
+      return
+    }
+    let color = SegmentFillColor(segment.kind)
+    titleLabel.textColor = color
+    titleLabel.stringValue = HoverText(segment: segment)
+  }
+
+  private func HoverText(segment: TimelineSegment) -> String {
+    let category = SegmentKindLabel(segment.kind)
+    let duration = FormatDuration(segment.duration)
+    if let label = segment.label, !label.isEmpty {
+      return "\(category) · \(duration) · \(label)"
+    }
+    return "\(category) · \(duration)"
   }
 
   private func StatusText(_ status: TurnExecutionStatus) -> String {

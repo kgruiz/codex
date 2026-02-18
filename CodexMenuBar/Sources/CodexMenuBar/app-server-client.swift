@@ -193,6 +193,7 @@ private final class EndpointConnection {
       }
 
       var activeTurnKeys: [String] = []
+      var threadIdsToFetch: Set<String> = []
       for activeTurn in activeTurns {
         guard
           let threadId = activeTurn["threadId"] as? String,
@@ -201,6 +202,7 @@ private final class EndpointConnection {
           continue
         }
         activeTurnKeys.append("\(threadId):\(turnId)")
+        threadIdsToFetch.insert(threadId)
 
         var params: [String: Any] = [
           "threadId": threadId,
@@ -215,6 +217,40 @@ private final class EndpointConnection {
       }
 
       self.EmitSnapshotSummaryOnQueue(activeTurnKeys: activeTurnKeys.sorted())
+
+      for threadId in threadIdsToFetch {
+        self.RequestThreadReadOnQueue(threadId: threadId)
+      }
+
+      if threadIdsToFetch.isEmpty {
+        self.RequestLoadedThreadsOnQueue()
+      }
+    }
+  }
+
+  private func RequestThreadReadOnQueue(threadId: String) {
+    let params: [String: Any] = [
+      "threadId": threadId,
+      "includeHistory": false,
+    ]
+    SendRequestOnQueue(method: "thread/read", params: params) { [weak self] result in
+      guard let self else { return }
+      guard let thread = result["thread"] as? [String: Any] else { return }
+      let notifParams: [String: Any] = [
+        "thread": thread,
+        "endpointId": self.endpointId,
+      ]
+      self.OnNotification?("thread/snapshot", notifParams)
+    }
+  }
+
+  private func RequestLoadedThreadsOnQueue() {
+    SendRequestOnQueue(method: "thread/loaded/list", params: [:]) { [weak self] result in
+      guard let self else { return }
+      guard let threadIds = result["data"] as? [String], let firstId = threadIds.first else {
+        return
+      }
+      self.RequestThreadReadOnQueue(threadId: firstId)
     }
   }
 
