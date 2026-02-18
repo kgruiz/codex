@@ -4,7 +4,7 @@ import Foundation
 final class TurnMenuRowView: NSView {
   private static let rowWidth: CGFloat = 420
   private static let collapsedRowHeight: CGFloat = 64
-  private static let expandedRowHeight: CGFloat = 190
+  private static let expandedRowHeight: CGFloat = 300
 
   private let endpointRow: EndpointRow
   private let isExpanded: Bool
@@ -21,7 +21,12 @@ final class TurnMenuRowView: NSView {
   private let chatLabel = NSTextField(labelWithString: "")
   private let promptLabel = NSTextField(labelWithString: "")
   private let metadataLabel = NSTextField(labelWithString: "")
+  private let historyTitleLabel = NSTextField(labelWithString: "Past runs")
+  private let historyScrollView = NSScrollView()
+  private let historyDocumentView = NSView()
+  private let historyEmptyLabel = NSTextField(labelWithString: "No past runs yet")
   private let reconnectButton = NSButton(title: "Reconnect this endpoint", target: nil, action: nil)
+  private var historyRunViews: [RunHistoryRowView] = []
 
   private var defaultDetailText = "No detail"
   private var barVisible = true
@@ -59,7 +64,9 @@ final class TurnMenuRowView: NSView {
     let pointInSelf = convert(event.locationInWindow, from: nil)
     if isExpanded {
       let pointInExpanded = convert(pointInSelf, to: expandedContainer)
-      if reconnectButton.frame.contains(pointInExpanded) {
+      if reconnectButton.frame.contains(pointInExpanded)
+        || historyScrollView.frame.contains(pointInExpanded)
+      {
         super.mouseDown(with: event)
         return
       }
@@ -82,7 +89,7 @@ final class TurnMenuRowView: NSView {
     let barHeight: CGFloat = 12
     let detailHeight: CGFloat = 16
     let verticalSpacing: CGFloat = 4
-    let expandedHeight: CGFloat = isExpanded ? 116 : 0
+    let expandedHeight: CGFloat = isExpanded ? 226 : 0
 
     detailLabel.frame = NSRect(
       x: contentRect.minX,
@@ -147,16 +154,38 @@ final class TurnMenuRowView: NSView {
       )
       metadataLabel.frame = NSRect(
         x: innerInset,
-        y: 30,
+        y: expandedContainer.bounds.height - 90,
         width: availableWidth,
-        height: 62
+        height: 38
       )
       reconnectButton.frame = NSRect(
         x: max(innerInset, availableWidth - 170 + innerInset),
-        y: 6,
+        y: expandedContainer.bounds.height - 112,
         width: 170,
         height: 18
       )
+      historyTitleLabel.frame = NSRect(
+        x: innerInset,
+        y: reconnectButton.frame.minY - 18,
+        width: availableWidth,
+        height: 14
+      )
+
+      let historyBottom: CGFloat = 8
+      let historyTop = historyTitleLabel.frame.minY - 4
+      historyScrollView.frame = NSRect(
+        x: innerInset,
+        y: historyBottom,
+        width: availableWidth,
+        height: max(0, historyTop - historyBottom)
+      )
+      historyEmptyLabel.frame = NSRect(
+        x: 6,
+        y: max(0, (historyScrollView.bounds.height - 14) / 2),
+        width: max(0, historyScrollView.bounds.width - 12),
+        height: 14
+      )
+      LayoutHistoryRows()
     }
   }
 
@@ -204,7 +233,26 @@ final class TurnMenuRowView: NSView {
     metadataLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
     metadataLabel.textColor = .secondaryLabelColor
     metadataLabel.lineBreakMode = .byTruncatingTail
-    metadataLabel.maximumNumberOfLines = 6
+    metadataLabel.maximumNumberOfLines = 4
+
+    historyTitleLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+    historyTitleLabel.textColor = .secondaryLabelColor
+    historyTitleLabel.lineBreakMode = .byTruncatingTail
+    historyTitleLabel.maximumNumberOfLines = 1
+
+    historyScrollView.drawsBackground = false
+    historyScrollView.borderType = .noBorder
+    historyScrollView.hasVerticalScroller = true
+    historyScrollView.autohidesScrollers = true
+    historyScrollView.documentView = historyDocumentView
+
+    historyDocumentView.wantsLayer = false
+
+    historyEmptyLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+    historyEmptyLabel.textColor = .secondaryLabelColor
+    historyEmptyLabel.alignment = .center
+    historyEmptyLabel.lineBreakMode = .byTruncatingTail
+    historyEmptyLabel.maximumNumberOfLines = 1
 
     reconnectButton.target = self
     reconnectButton.action = #selector(OnReconnectPressed)
@@ -225,6 +273,9 @@ final class TurnMenuRowView: NSView {
     expandedContainer.addSubview(chatLabel)
     expandedContainer.addSubview(promptLabel)
     expandedContainer.addSubview(metadataLabel)
+    expandedContainer.addSubview(historyTitleLabel)
+    expandedContainer.addSubview(historyScrollView)
+    historyScrollView.addSubview(historyEmptyLabel)
     expandedContainer.addSubview(reconnectButton)
   }
 
@@ -292,6 +343,49 @@ final class TurnMenuRowView: NSView {
     }
 
     metadataLabel.stringValue = metadataParts.joined(separator: "\n")
+    RebuildHistoryRows(now: now)
+  }
+
+  private func RebuildHistoryRows(now: Date) {
+    for row in historyRunViews {
+      row.removeFromSuperview()
+    }
+    historyRunViews.removeAll(keepingCapacity: true)
+
+    for (index, run) in endpointRow.recentRuns.enumerated() {
+      let historyRow = RunHistoryRowView(frame: .zero)
+      historyRow.Configure(run: run, isLastRun: index == 0)
+      historyDocumentView.addSubview(historyRow)
+      historyRunViews.append(historyRow)
+    }
+
+    historyEmptyLabel.isHidden = !historyRunViews.isEmpty
+    needsLayout = true
+  }
+
+  private func LayoutHistoryRows() {
+    let rowHeight: CGFloat = RunHistoryRowView.preferredHeight
+    let rowSpacing: CGFloat = 6
+    let contentWidth = max(0, historyScrollView.bounds.width)
+
+    var y: CGFloat = rowSpacing
+    for row in historyRunViews.reversed() {
+      row.frame = NSRect(
+        x: 0,
+        y: y,
+        width: contentWidth,
+        height: rowHeight
+      )
+      y += rowHeight + rowSpacing
+    }
+
+    let contentHeight = max(historyScrollView.bounds.height, y)
+    historyDocumentView.frame = NSRect(
+      x: 0,
+      y: 0,
+      width: contentWidth,
+      height: contentHeight
+    )
   }
 
   private func UpdateHoverText(segment: TimelineSegment?) {
@@ -350,6 +444,68 @@ final class TurnMenuRowView: NSView {
     }
     let truncated = value.prefix(max(0, limit - 1))
     return "\(truncated)…"
+  }
+}
+
+final class RunHistoryRowView: NSView {
+  static let preferredHeight: CGFloat = 34
+
+  private let titleLabel = NSTextField(labelWithString: "")
+  private let timelineBarView = TimelineBarView()
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    wantsLayer = true
+    titleLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+    titleLabel.lineBreakMode = .byTruncatingTail
+    titleLabel.maximumNumberOfLines = 1
+    timelineBarView.OnHoveredSegmentChanged = nil
+    addSubview(titleLabel)
+    addSubview(timelineBarView)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func layout() {
+    super.layout()
+    titleLabel.frame = NSRect(
+      x: 0,
+      y: bounds.height - 14,
+      width: bounds.width,
+      height: 12
+    )
+    timelineBarView.frame = NSRect(
+      x: 0,
+      y: 0,
+      width: bounds.width,
+      height: 12
+    )
+  }
+
+  func Configure(run: CompletedRun, isLastRun: Bool) {
+    let threadPart = String((run.threadId ?? "n/a").prefix(8))
+    let elapsed = run.ElapsedString()
+    let status = StatusLabel(run.status)
+    let lastRunSuffix = isLastRun ? " • Last run" : ""
+    titleLabel.stringValue = "\(status) \(elapsed) · [\(threadPart)/\(run.turnId)]\(lastRunSuffix)"
+    timelineBarView.Configure(segments: run.TimelineSegments())
+    needsLayout = true
+  }
+
+  private func StatusLabel(_ status: TurnExecutionStatus) -> String {
+    switch status {
+    case .inProgress:
+      return "Working"
+    case .completed:
+      return "Completed"
+    case .interrupted:
+      return "Interrupted"
+    case .failed:
+      return "Failed"
+    }
   }
 }
 

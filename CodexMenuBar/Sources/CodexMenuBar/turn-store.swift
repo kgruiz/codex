@@ -2,8 +2,10 @@ import Foundation
 
 final class TurnStore {
   private var turnsByKey: [String: ActiveTurn] = [:]
+  private var completedRunsByEndpoint: [String: [CompletedRun]] = [:]
   private var metadataByEndpoint: [String: EndpointMetadata] = [:]
   private let completionRetentionSeconds: TimeInterval = 10
+  private let maxCompletedRunsPerEndpoint = 50
 
   private func TurnKey(endpointId: String, turnId: String) -> String {
     "\(endpointId):\(turnId)"
@@ -35,6 +37,7 @@ final class TurnStore {
     if let existing = turnsByKey[key] {
       existing.ApplyStatus(status, at: now)
       existing.UpdateThreadId(threadId)
+      ArchiveCompletedTurnIfNeeded(existing)
       UpdateTurnMetadata(
         endpointId: endpointId, threadId: threadId, turnId: turnId, turn: nil, at: now)
       return
@@ -43,6 +46,7 @@ final class TurnStore {
       endpointId: endpointId, threadId: threadId, turnId: turnId, startedAt: now)
     turn.ApplyStatus(status, at: now)
     turnsByKey[key] = turn
+    ArchiveCompletedTurnIfNeeded(turn)
     UpdateTurnMetadata(
       endpointId: endpointId, threadId: threadId, turnId: turnId, turn: nil, at: now)
   }
@@ -60,6 +64,7 @@ final class TurnStore {
     }
     existing.ApplyStatus(status, at: now)
     existing.UpdateThreadId(threadId)
+    ArchiveCompletedTurnIfNeeded(existing)
     UpdateTurnMetadata(
       endpointId: endpointId, threadId: threadId, turnId: turnId, turn: nil, at: now)
   }
@@ -121,8 +126,7 @@ final class TurnStore {
 
     if let turns = thread["turns"] as? [[String: Any]], let latestTurn = turns.last {
       metadata.turnId = NonEmptyString(latestTurn["id"]) ?? metadata.turnId
-      if
-        let threadId = metadata.threadId,
+      if let threadId = metadata.threadId,
         let turnId = metadata.turnId
       {
         let key = TurnKey(endpointId: endpointId, turnId: turnId)
@@ -209,6 +213,7 @@ final class TurnStore {
       }
       if isActive { continue }
       turn.ApplyStatus(.completed, at: now)
+      ArchiveCompletedTurnIfNeeded(turn)
     }
   }
 
@@ -285,6 +290,7 @@ final class TurnStore {
       return EndpointRow(
         endpointId: endpointId,
         activeTurn: activeTurn,
+        recentRuns: completedRunsByEndpoint[endpointId] ?? [],
         chatTitle: metadata?.chatTitle,
         promptPreview: metadata?.promptPreview,
         cwd: metadata?.cwd,
@@ -296,6 +302,39 @@ final class TurnStore {
         lastEventAt: metadata?.lastEventAt
       )
     }
+  }
+
+  private func ArchiveCompletedTurnIfNeeded(_ turn: ActiveTurn) {
+    guard turn.status != .inProgress, let endedAt = turn.endedAt else {
+      return
+    }
+
+    var runs = completedRunsByEndpoint[turn.endpointId] ?? []
+    let alreadyArchived = runs.contains {
+      $0.turnId == turn.turnId && $0.threadId == turn.threadId
+    }
+    if alreadyArchived {
+      return
+    }
+
+    runs.insert(
+      CompletedRun(
+        endpointId: turn.endpointId,
+        threadId: turn.threadId,
+        turnId: turn.turnId,
+        startedAt: turn.startedAt,
+        endedAt: endedAt,
+        status: turn.status,
+        latestLabel: turn.latestLabel,
+        traceHistory: turn.traceHistory
+      ),
+      at: 0
+    )
+
+    if runs.count > maxCompletedRunsPerEndpoint {
+      runs.removeLast(runs.count - maxCompletedRunsPerEndpoint)
+    }
+    completedRunsByEndpoint[turn.endpointId] = runs
   }
 
   private func ExtractPromptPreview(from turn: [String: Any]) -> String? {
