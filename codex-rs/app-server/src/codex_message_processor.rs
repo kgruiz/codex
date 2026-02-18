@@ -240,6 +240,7 @@ use tokio::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 use toml::Value as TomlValue;
+use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
@@ -4864,6 +4865,10 @@ impl CodexMessageProcessor {
     async fn turn_active(&mut self, request_id: ConnectionRequestId, _params: TurnActiveParams) {
         let mut data = Vec::new();
         let thread_ids = self.thread_manager.list_thread_ids().await;
+        info!(
+            "turn_active: begin request_id={request_id:?} loaded_threads={}",
+            thread_ids.len()
+        );
 
         for thread_id in thread_ids {
             let turn_id_from_store = {
@@ -4872,6 +4877,9 @@ impl CodexMessageProcessor {
                     .and_then(|summary| summary.active_turn_id.clone())
             };
             if let Some(turn_id) = turn_id_from_store {
+                info!(
+                    "turn_active: using summary active turn thread_id={thread_id} turn_id={turn_id}"
+                );
                 data.push(ActiveTurnSummary {
                     thread_id: thread_id.to_string(),
                     turn_id,
@@ -4880,14 +4888,21 @@ impl CodexMessageProcessor {
             }
 
             let Ok(thread) = self.thread_manager.get_thread(thread_id).await else {
+                warn!("turn_active: failed to get loaded thread thread_id={thread_id}");
                 continue;
             };
 
-            if !matches!(thread.agent_status().await, AgentStatus::Running) {
+            let status = thread.agent_status().await;
+            debug!("turn_active: summary missing thread_id={thread_id} status={status:?}");
+            if !matches!(status, AgentStatus::Running) {
                 continue;
             }
 
             let turn_id = if let Some(rollout_path) = thread.rollout_path() {
+                info!(
+                    "turn_active: summary missing for running thread; falling back to rollout thread_id={thread_id} path={}",
+                    rollout_path.display()
+                );
                 let events = match read_event_msgs_from_rollout(rollout_path.as_path()).await {
                     Ok(events) => events,
                     Err(err) => {
@@ -4908,10 +4923,24 @@ impl CodexMessageProcessor {
                     .rev()
                     .find(|turn| turn.status == TurnStatus::InProgress)
                 {
-                    Some(turn) => turn.id.clone(),
-                    None => continue,
+                    Some(turn) => {
+                        info!(
+                            "turn_active: rollout fallback found in-progress turn thread_id={thread_id} turn_id={}",
+                            turn.id
+                        );
+                        turn.id.clone()
+                    }
+                    None => {
+                        warn!(
+                            "turn_active: rollout fallback found no in-progress turn for running thread thread_id={thread_id}"
+                        );
+                        continue;
+                    }
                 }
             } else {
+                warn!(
+                    "turn_active: running thread has no rollout path and no summary active turn thread_id={thread_id}"
+                );
                 continue;
             };
 
@@ -4928,6 +4957,7 @@ impl CodexMessageProcessor {
             lhs.turn_id.cmp(&rhs.turn_id)
         });
 
+        info!("turn_active: responding active_turns={}", data.len());
         let response = TurnActiveResponse { data };
         self.outgoing.send_response(request_id, response).await;
     }
