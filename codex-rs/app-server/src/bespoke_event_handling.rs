@@ -124,7 +124,10 @@ pub(crate) async fn apply_bespoke_event_handling(
         msg,
     } = event;
     match msg {
-        EventMsg::TurnStarted(_) => {}
+        EventMsg::TurnStarted(_) => {
+            let mut map = turn_summary_store.lock().await;
+            map.entry(conversation_id).or_default().active_turn_id = Some(event_turn_id);
+        }
         EventMsg::TurnComplete(_ev) => {
             handle_turn_complete(
                 conversation_id,

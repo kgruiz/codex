@@ -13,6 +13,7 @@ use chrono::Utc;
 use codex_app_server_protocol::Account;
 use codex_app_server_protocol::AccountLoginCompletedNotification;
 use codex_app_server_protocol::AccountUpdatedNotification;
+use codex_app_server_protocol::ActiveTurnSummary;
 use codex_app_server_protocol::AddConversationListenerParams;
 use codex_app_server_protocol::AddConversationSubscriptionResponse;
 use codex_app_server_protocol::AppsListParams;
@@ -132,6 +133,8 @@ use codex_app_server_protocol::ThreadStartedNotification;
 use codex_app_server_protocol::ThreadUnarchiveParams;
 use codex_app_server_protocol::ThreadUnarchiveResponse;
 use codex_app_server_protocol::Turn;
+use codex_app_server_protocol::TurnActiveParams;
+use codex_app_server_protocol::TurnActiveResponse;
 use codex_app_server_protocol::TurnError;
 use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnStartParams;
@@ -255,6 +258,7 @@ pub(crate) type PendingRollbacks = Arc<Mutex<HashMap<ThreadId, ConnectionRequest
 pub(crate) struct TurnSummary {
     pub(crate) file_change_started: HashSet<String>,
     pub(crate) last_error: Option<TurnError>,
+    pub(crate) active_turn_id: Option<String>,
 }
 
 pub(crate) type TurnSummaryStore = Arc<Mutex<HashMap<ThreadId, TurnSummary>>>;
@@ -533,6 +537,10 @@ impl CodexMessageProcessor {
             }
             ClientRequest::TurnInterrupt { request_id, params } => {
                 self.turn_interrupt(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::TurnActive { request_id, params } => {
+                self.turn_active(to_connection_request_id(request_id), params)
                     .await;
             }
             ClientRequest::ReviewStart { request_id, params } => {
@@ -4528,7 +4536,7 @@ impl CodexMessageProcessor {
     }
 
     async fn turn_start(&self, request_id: ConnectionRequestId, params: TurnStartParams) {
-        let (_, thread) = match self.load_thread(&params.thread_id).await {
+        let (thread_uuid, thread) = match self.load_thread(&params.thread_id).await {
             Ok(v) => v,
             Err(error) => {
                 self.outgoing.send_error(request_id, error).await;
@@ -4586,6 +4594,11 @@ impl CodexMessageProcessor {
                     status: TurnStatus::InProgress,
                 };
 
+                {
+                    let mut map = self.turn_summary_store.lock().await;
+                    map.entry(thread_uuid).or_default().active_turn_id = Some(turn_id.clone());
+                }
+
                 let response = TurnStartResponse { turn: turn.clone() };
                 self.outgoing.send_response(request_id, response).await;
 
@@ -4635,9 +4648,15 @@ impl CodexMessageProcessor {
         &self,
         request_id: &ConnectionRequestId,
         turn: Turn,
+        parent_thread_uuid: ThreadId,
         parent_thread_id: String,
         review_thread_id: String,
     ) {
+        {
+            let mut map = self.turn_summary_store.lock().await;
+            map.entry(parent_thread_uuid).or_default().active_turn_id = Some(turn.id.clone());
+        }
+
         let response = ReviewStartResponse {
             turn: turn.clone(),
             review_thread_id,
@@ -4661,6 +4680,7 @@ impl CodexMessageProcessor {
         parent_thread: Arc<CodexThread>,
         review_request: ReviewRequest,
         display_text: &str,
+        parent_thread_uuid: ThreadId,
         parent_thread_id: String,
     ) -> std::result::Result<(), JSONRPCErrorError> {
         let turn_id = parent_thread.submit(Op::Review { review_request }).await;
@@ -4671,6 +4691,7 @@ impl CodexMessageProcessor {
                 self.emit_review_started(
                     request_id,
                     turn,
+                    parent_thread_uuid,
                     parent_thread_id.clone(),
                     parent_thread_id,
                 )
@@ -4773,8 +4794,14 @@ impl CodexMessageProcessor {
 
         let turn = Self::build_review_turn(turn_id, display_text);
         let review_thread_id = thread_id.to_string();
-        self.emit_review_started(request_id, turn, review_thread_id.clone(), review_thread_id)
-            .await;
+        self.emit_review_started(
+            request_id,
+            turn,
+            thread_id,
+            review_thread_id.clone(),
+            review_thread_id,
+        )
+        .await;
 
         Ok(())
     }
@@ -4810,6 +4837,7 @@ impl CodexMessageProcessor {
                         parent_thread,
                         review_request,
                         display_text.as_str(),
+                        parent_thread_id,
                         thread_id.clone(),
                     )
                     .await
@@ -4831,6 +4859,71 @@ impl CodexMessageProcessor {
                 }
             }
         }
+    }
+
+    async fn turn_active(&mut self, request_id: ConnectionRequestId, _params: TurnActiveParams) {
+        let mut data = Vec::new();
+        let thread_ids = self.thread_manager.list_thread_ids().await;
+
+        for thread_id in thread_ids {
+            let Ok(thread) = self.thread_manager.get_thread(thread_id).await else {
+                continue;
+            };
+
+            if !matches!(thread.agent_status().await, AgentStatus::Running) {
+                continue;
+            }
+
+            let turn_id_from_store = {
+                let map = self.turn_summary_store.lock().await;
+                map.get(&thread_id)
+                    .and_then(|summary| summary.active_turn_id.clone())
+            };
+            let turn_id = if let Some(turn_id) = turn_id_from_store {
+                turn_id
+            } else if let Some(rollout_path) = thread.rollout_path() {
+                let events = match read_event_msgs_from_rollout(rollout_path.as_path()).await {
+                    Ok(events) => events,
+                    Err(err) => {
+                        self.send_internal_error(
+                            request_id,
+                            format!(
+                                "failed to read rollout `{}` for thread {thread_id}: {err}",
+                                rollout_path.display()
+                            ),
+                        )
+                        .await;
+                        return;
+                    }
+                };
+                let turns = build_turns_from_event_msgs(&events);
+                match turns
+                    .iter()
+                    .rev()
+                    .find(|turn| turn.status == TurnStatus::InProgress)
+                {
+                    Some(turn) => turn.id.clone(),
+                    None => continue,
+                }
+            } else {
+                continue;
+            };
+
+            data.push(ActiveTurnSummary {
+                thread_id: thread_id.to_string(),
+                turn_id,
+            });
+        }
+
+        data.sort_by(|lhs, rhs| {
+            if lhs.thread_id != rhs.thread_id {
+                return lhs.thread_id.cmp(&rhs.thread_id);
+            }
+            lhs.turn_id.cmp(&rhs.turn_id)
+        });
+
+        let response = TurnActiveResponse { data };
+        self.outgoing.send_response(request_id, response).await;
     }
 
     async fn turn_interrupt(
