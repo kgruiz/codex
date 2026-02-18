@@ -31,11 +31,11 @@ private final class EndpointConnection {
   private let session: URLSession
   private var task: URLSessionWebSocketTask?
   private var isConnected = false
+  private var isInitialized = false
   private var nextRequestId = 1
   private var pendingResponses: [Int: ([String: Any]) -> Void] = [:]
   private var lastSnapshotRequestAt = Date.distantPast
   private let snapshotRefreshInterval: TimeInterval = 0.5
-  private let snapshotSummaryTimeout: TimeInterval = 2.0
 
   init(endpointId: String, endpointUrl: URL, queue: DispatchQueue, session: URLSession) {
     self.endpointId = endpointId
@@ -56,9 +56,8 @@ private final class EndpointConnection {
     isConnected = true
     OnConnected?()
 
-    SendInitializeHandshakeOnQueue()
-    RequestThreadSnapshotOnQueue()
     StartReceiveLoopOnQueue()
+    SendInitializeHandshakeOnQueue()
   }
 
   func Stop() {
@@ -69,7 +68,7 @@ private final class EndpointConnection {
   }
 
   func RefreshSnapshotIfNeeded() {
-    guard isConnected else {
+    guard isConnected, isInitialized else {
       return
     }
 
@@ -78,7 +77,7 @@ private final class EndpointConnection {
       return
     }
 
-    RequestThreadSnapshotOnQueue()
+    RequestTurnActiveSnapshotOnQueue()
   }
 
   private func StartReceiveLoopOnQueue() {
@@ -160,135 +159,62 @@ private final class EndpointConnection {
   }
 
   private func SendInitializeHandshakeOnQueue() {
-    let initialize: [String: Any] = [
-      "id": 0,
-      "method": "initialize",
-      "params": [
-        "clientInfo": [
-          "name": "codex_menu_bar",
-          "title": "Codex Menu Bar",
-          "version": "0.1.0",
-        ],
-        "capabilities": [
-          "experimentalApi": true
-        ],
+    let params: [String: Any] = [
+      "clientInfo": [
+        "name": "codex_menu_bar",
+        "title": "Codex Menu Bar",
+        "version": "0.1.0",
+      ],
+      "capabilities": [
+        "experimentalApi": true
       ],
     ]
-    SendObjectOnQueue(initialize)
-
-    let initialized: [String: Any] = [
-      "method": "initialized"
-    ]
-    SendObjectOnQueue(initialized)
-  }
-
-  private func RequestThreadSnapshotOnQueue() {
-    lastSnapshotRequestAt = Date()
-    SendRequestOnQueue(method: "thread/loaded/list", params: [:]) { [weak self] result in
+    SendRequestOnQueue(method: "initialize", params: params) { [weak self] _ in
       guard let self else {
         return
       }
-      guard let threadIds = result["data"] as? [String] else {
-        self.EmitSnapshotSummaryOnQueue(activeTurnKeys: [])
-        return
-      }
-
-      if threadIds.isEmpty {
-        self.EmitSnapshotSummaryOnQueue(activeTurnKeys: [])
-        return
-      }
-
-      var pending = threadIds.count
-      var activeTurnKeys = Set<String>()
-      var didEmitSummary = false
-
-      let emitSummary: () -> Void = { [weak self] in
-        guard let self else {
-          return
-        }
-        if didEmitSummary {
-          return
-        }
-        didEmitSummary = true
-        self.EmitSnapshotSummaryOnQueue(activeTurnKeys: activeTurnKeys.sorted())
-      }
-
-      self.queue.asyncAfter(deadline: .now() + self.snapshotSummaryTimeout) {
-        emitSummary()
-      }
-
-      for threadId in threadIds {
-        self.RequestThreadReadOnQueue(threadId: threadId) { keys in
-          if didEmitSummary {
-            return
-          }
-
-          for key in keys {
-            activeTurnKeys.insert(key)
-          }
-
-          pending -= 1
-          if pending == 0 {
-            emitSummary()
-          }
-        }
-      }
+      self.isInitialized = true
+      let initialized: [String: Any] = [
+        "method": "initialized"
+      ]
+      self.SendObjectOnQueue(initialized)
+      self.RequestTurnActiveSnapshotOnQueue()
     }
   }
 
-  private func RequestThreadReadOnQueue(threadId: String, onComplete: @escaping ([String]) -> Void)
-  {
-    let params: [String: Any] = [
-      "threadId": threadId,
-      "includeTurns": true,
-    ]
-    SendRequestOnQueue(method: "thread/read", params: params) { [weak self] result in
+  private func RequestTurnActiveSnapshotOnQueue() {
+    lastSnapshotRequestAt = Date()
+    SendRequestOnQueue(method: "turn/active", params: [:]) { [weak self] result in
       guard let self else {
-        onComplete([])
         return
       }
-      guard
-        let thread = result["thread"] as? [String: Any],
-        let resolvedThreadId = thread["id"] as? String,
-        let turns = thread["turns"] as? [[String: Any]]
-      else {
-        onComplete([])
+      guard let activeTurns = result["data"] as? [[String: Any]] else {
         return
       }
-
-      var snapshotParams: [String: Any] = [
-        "thread": thread
-      ]
-      snapshotParams["endpointId"] = self.endpointId
-      self.OnNotification?("thread/snapshot", snapshotParams)
 
       var activeTurnKeys: [String] = []
-      for turn in turns {
-        guard let turnId = turn["id"] as? String else {
+      for activeTurn in activeTurns {
+        guard
+          let threadId = activeTurn["threadId"] as? String,
+          let turnId = activeTurn["turnId"] as? String
+        else {
           continue
         }
-        let status = turn["status"] as? String ?? "inProgress"
-        if status == "inProgress" || status == "in_progress" {
-          activeTurnKeys.append("\(resolvedThreadId):\(turnId)")
-          var params: [String: Any] = [
-            "threadId": resolvedThreadId,
-            "turn": turn,
-          ]
-          params["endpointId"] = self.endpointId
-          params["fromSnapshot"] = true
-          self.OnNotification?("turn/started", params)
-        } else {
-          var params: [String: Any] = [
-            "threadId": resolvedThreadId,
-            "turn": turn,
-          ]
-          params["endpointId"] = self.endpointId
-          params["fromSnapshot"] = true
-          self.OnNotification?("turn/completed", params)
-        }
+        activeTurnKeys.append("\(threadId):\(turnId)")
+
+        var params: [String: Any] = [
+          "threadId": threadId,
+          "turn": [
+            "id": turnId,
+            "status": "inProgress",
+          ],
+        ]
+        params["endpointId"] = self.endpointId
+        params["fromSnapshot"] = true
+        self.OnNotification?("turn/started", params)
       }
 
-      onComplete(activeTurnKeys)
+      self.EmitSnapshotSummaryOnQueue(activeTurnKeys: activeTurnKeys.sorted())
     }
   }
 
@@ -354,6 +280,7 @@ private final class EndpointConnection {
 
     let wasConnected = isConnected
     isConnected = false
+    isInitialized = false
 
     if notify && wasConnected {
       OnDisconnected?()
