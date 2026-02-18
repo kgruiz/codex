@@ -4866,6 +4866,19 @@ impl CodexMessageProcessor {
         let thread_ids = self.thread_manager.list_thread_ids().await;
 
         for thread_id in thread_ids {
+            let turn_id_from_store = {
+                let map = self.turn_summary_store.lock().await;
+                map.get(&thread_id)
+                    .and_then(|summary| summary.active_turn_id.clone())
+            };
+            if let Some(turn_id) = turn_id_from_store {
+                data.push(ActiveTurnSummary {
+                    thread_id: thread_id.to_string(),
+                    turn_id,
+                });
+                continue;
+            }
+
             let Ok(thread) = self.thread_manager.get_thread(thread_id).await else {
                 continue;
             };
@@ -4874,14 +4887,7 @@ impl CodexMessageProcessor {
                 continue;
             }
 
-            let turn_id_from_store = {
-                let map = self.turn_summary_store.lock().await;
-                map.get(&thread_id)
-                    .and_then(|summary| summary.active_turn_id.clone())
-            };
-            let turn_id = if let Some(turn_id) = turn_id_from_store {
-                turn_id
-            } else if let Some(rollout_path) = thread.rollout_path() {
+            let turn_id = if let Some(rollout_path) = thread.rollout_path() {
                 let events = match read_event_msgs_from_rollout(rollout_path.as_path()).await {
                     Ok(events) => events,
                     Err(err) => {
