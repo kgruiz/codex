@@ -8,6 +8,10 @@ help:
 # `codex`
 alias c := codex
 codex *args:
+    cargo run --bin codex -- "$@"
+
+# `codex` with app-server debug logs enabled by default.
+codex-debug *args:
     RUST_LOG="${RUST_LOG:-codex_core=info,codex_tui=info,codex_rmcp_client=info,codex_app_server=debug}" cargo run --bin codex -- "$@"
 
 # `codex exec`
