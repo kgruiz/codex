@@ -5,7 +5,8 @@ import Foundation
 
 final class TurnMenuRowView: NSView {
   private static let rowWidth: CGFloat = 420
-  private static let collapsedRowHeight: CGFloat = 70
+  private static let collapsedIdleHeight: CGFloat = 44
+  private static let collapsedActiveHeight: CGFloat = 64
   private static let maxExpandedHeight: CGFloat = 500
 
   private let endpointRow: EndpointRow
@@ -22,17 +23,13 @@ final class TurnMenuRowView: NSView {
   private let detailLabel = NSTextField(labelWithString: "")
   private let barView = TimelineBarView()
 
-  // Hover card for timeline segments
-  private let hoverCard = NSView()
-  private let hoverColorSwatch = NSView()
-  private let hoverLabel = NSTextField(labelWithString: "")
-
   // Expanded content
   private let expandedScroll = NSScrollView()
   private let expandedDocView = NSView()
 
   // Expanded section views
   private let gitModelLabel = NSTextField(labelWithString: "")
+  private let tokenTitleLabel = NSTextField(labelWithString: "")
   private let tokenBarView = TokenUsageBarView()
   private let tokenDetailLabel = NSTextField(labelWithString: "")
   private let errorCard = NSView()
@@ -44,19 +41,21 @@ final class TurnMenuRowView: NSView {
   private let commandsTitleLabel = NSTextField(labelWithString: "")
   private let commandsContentLabel = NSTextField(labelWithString: "")
   private let cwdLabel = NSTextField(labelWithString: "")
-  private let openFinderButton = NSButton(title: "Open in Finder", target: nil, action: nil)
-  private let reconnectButton = NSButton(title: "Reconnect", target: nil, action: nil)
+  private let historySectionCard = NSView()
   private let historyTitleLabel = NSTextField(labelWithString: "")
   private let historyScrollView = NSScrollView()
   private let historyDocumentView = NSView()
-  private let historyEmptyLabel = NSTextField(labelWithString: "No past runs yet")
   private var historyRunViews: [RunHistoryRowView] = []
+  private let buttonBar = NSView()
+  private let openFinderButton = NSButton(title: "Open in Finder", target: nil, action: nil)
+  private let reconnectButton = NSButton(title: "Reconnect", target: nil, action: nil)
 
   private var defaultDetailText = "No detail"
   private var barVisible = true
   private var isHovering = false
   private var rowTrackingArea: NSTrackingArea?
   private var computedExpandedHeight: CGFloat = 0
+  private var collapsedHeight: CGFloat = 0
 
   init(
     endpointRow: EndpointRow,
@@ -71,12 +70,12 @@ final class TurnMenuRowView: NSView {
     self.onToggle = onToggle
     self.onReconnectEndpoint = onReconnectEndpoint
     self.onOpenWorkspace = onOpenWorkspace
-    super.init(frame: NSRect(x: 0, y: 0, width: Self.rowWidth, height: Self.collapsedRowHeight))
+    self.collapsedHeight =
+      endpointRow.activeTurn != nil ? Self.collapsedActiveHeight : Self.collapsedIdleHeight
+    super.init(frame: NSRect(x: 0, y: 0, width: Self.rowWidth, height: collapsedHeight))
     ConfigureViews()
     Update(now: now)
-    let height = isExpanded
-      ? Self.collapsedRowHeight + computedExpandedHeight
-      : Self.collapsedRowHeight
+    let height = isExpanded ? collapsedHeight + computedExpandedHeight : collapsedHeight
     frame.size.height = height
   }
 
@@ -86,9 +85,7 @@ final class TurnMenuRowView: NSView {
   }
 
   override var intrinsicContentSize: NSSize {
-    let height = isExpanded
-      ? Self.collapsedRowHeight + computedExpandedHeight
-      : Self.collapsedRowHeight
+    let height = isExpanded ? collapsedHeight + computedExpandedHeight : collapsedHeight
     return NSSize(width: Self.rowWidth, height: height)
   }
 
@@ -97,18 +94,20 @@ final class TurnMenuRowView: NSView {
   override func mouseDown(with event: NSEvent) {
     if isExpanded {
       let pointInSelf = convert(event.locationInWindow, from: nil)
-      let pointInExpanded = expandedScroll.convert(pointInSelf, from: self)
       if expandedScroll.frame.contains(pointInSelf) {
-        let pointInDoc = expandedDocView.convert(pointInExpanded, from: expandedScroll)
-        if openFinderButton.frame.contains(pointInDoc) {
+        let pointInScroll = expandedScroll.convert(pointInSelf, from: self)
+        let pointInDoc = expandedDocView.convert(pointInScroll, from: expandedScroll)
+        if openFinderButton.isHidden == false,
+          buttonBar.convert(openFinderButton.frame, to: expandedDocView).contains(pointInDoc)
+        {
           OnOpenFinderPressed()
           return
         }
-        if reconnectButton.frame.contains(pointInDoc) {
+        if buttonBar.convert(reconnectButton.frame, to: expandedDocView).contains(pointInDoc) {
           OnReconnectPressed()
           return
         }
-        if historyScrollView.frame.contains(pointInDoc) {
+        if historySectionCard.frame.contains(pointInDoc) {
           super.mouseDown(with: event)
           return
         }
@@ -125,8 +124,7 @@ final class TurnMenuRowView: NSView {
     let area = NSTrackingArea(
       rect: bounds,
       options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
-      owner: self,
-      userInfo: nil)
+      owner: self, userInfo: nil)
     addTrackingArea(area)
     rowTrackingArea = area
   }
@@ -154,63 +152,53 @@ final class TurnMenuRowView: NSView {
   override func layout() {
     super.layout()
 
-    let insets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+    let insets = NSEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
     let contentWidth = max(0, bounds.width - insets.left - insets.right)
 
     let dotSize: CGFloat = 8
     let dotX = insets.left
     let topY = bounds.height - insets.top
 
-    // Status dot
-    statusDot.frame = NSRect(
-      x: dotX, y: topY - 13, width: dotSize, height: dotSize)
+    statusDot.frame = NSRect(x: dotX, y: topY - 12, width: dotSize, height: dotSize)
 
-    // Chevron
     let chevronWidth: CGFloat = 14
     chevronLabel.frame = NSRect(
       x: bounds.width - insets.right - chevronWidth,
-      y: topY - 14, width: chevronWidth, height: 14)
+      y: topY - 13, width: chevronWidth, height: 14)
 
-    // Elapsed time (right-aligned, monospaced)
-    let elapsedWidth: CGFloat = 80
+    let elapsedWidth: CGFloat = 90
     elapsedLabel.frame = NSRect(
       x: bounds.width - insets.right - chevronWidth - elapsedWidth,
-      y: topY - 14, width: elapsedWidth, height: 14)
+      y: topY - 13, width: elapsedWidth, height: 14)
 
-    // Name label
     let nameX = dotX + dotSize + 6
     let nameWidth = max(0, elapsedLabel.frame.minX - nameX - 4)
-    nameLabel.frame = NSRect(x: nameX, y: topY - 14, width: nameWidth, height: 14)
+    nameLabel.frame = NSRect(x: nameX, y: topY - 13, width: nameWidth, height: 14)
 
-    // Detail line
-    let detailY = topY - 30
-    detailLabel.frame = NSRect(
-      x: nameX, y: detailY, width: max(0, contentWidth - dotSize - 6), height: 14)
+    if barVisible {
+      let detailY = topY - 28
+      detailLabel.frame = NSRect(
+        x: nameX, y: detailY, width: max(0, contentWidth - dotSize - 6), height: 13)
+      let barHeight: CGFloat = 8
+      let barY = detailY - barHeight - 3
+      barView.frame = NSRect(x: insets.left, y: barY, width: contentWidth, height: barHeight)
+      barView.isHidden = false
+    } else {
+      let detailY = topY - 27
+      detailLabel.frame = NSRect(
+        x: nameX, y: detailY, width: max(0, contentWidth - dotSize - 6), height: 13)
+      barView.isHidden = true
+    }
 
-    // Hover card (overlays detail)
-    hoverCard.frame = detailLabel.frame
-    let swatchSize: CGFloat = 7
-    hoverColorSwatch.frame = NSRect(
-      x: 6, y: (hoverCard.bounds.height - swatchSize) / 2,
-      width: swatchSize, height: swatchSize)
-    hoverLabel.frame = NSRect(
-      x: hoverColorSwatch.frame.maxX + 6, y: 0,
-      width: max(0, hoverCard.bounds.width - hoverColorSwatch.frame.maxX - 12),
-      height: hoverCard.bounds.height)
-
-    // Timeline bar
-    let barHeight: CGFloat = 8
-    let barY = detailY - barHeight - 4
-    barView.frame = NSRect(
-      x: insets.left, y: barY, width: contentWidth, height: barHeight)
-    barView.isHidden = !barVisible
-
-    // Expanded content
-    let expandedTop = barY - 4
+    let expandedTop: CGFloat
+    if barVisible {
+      expandedTop = barView.frame.minY - 4
+    } else {
+      expandedTop = detailLabel.frame.minY - 4
+    }
     let expandedHeight = max(0, expandedTop - insets.bottom)
     expandedScroll.frame = NSRect(
-      x: insets.left, y: insets.bottom,
-      width: contentWidth, height: expandedHeight)
+      x: insets.left, y: insets.bottom, width: contentWidth, height: expandedHeight)
     expandedScroll.isHidden = !isExpanded
 
     if isExpanded {
@@ -219,71 +207,76 @@ final class TurnMenuRowView: NSView {
   }
 
   private func LayoutExpandedContent(availableWidth: CGFloat) {
-    let innerInset: CGFloat = 4
-    let sectionSpacing: CGFloat = 10
-    let innerWidth = max(0, availableWidth - innerInset * 2)
-    var y: CGFloat = 8
+    let pad: CGFloat = 8
+    let spc: CGFloat = 10
+    let w = max(0, availableWidth - pad * 2)
+    var y: CGFloat = pad
 
-    // History section
-    historyTitleLabel.frame = NSRect(x: innerInset, y: y, width: innerWidth, height: 14)
-    y += 18
-
-    let historyHeight: CGFloat = historyRunViews.isEmpty ? 20 : min(
-      CGFloat(historyRunViews.count) * (RunHistoryRowView.preferredHeight + 4) + 8, 140)
-    historyScrollView.frame = NSRect(
-      x: innerInset, y: y, width: innerWidth, height: historyHeight)
-    historyEmptyLabel.frame = NSRect(
-      x: 4, y: max(0, (historyHeight - 14) / 2),
-      width: max(0, innerWidth - 8), height: 14)
-    LayoutHistoryRows()
-    y += historyHeight + sectionSpacing
-
-    // Action buttons
-    let buttonWidth: CGFloat = 100
-    let buttonHeight: CGFloat = 22
-    let buttonSpacing: CGFloat = 8
-    openFinderButton.frame = NSRect(
-      x: innerInset, y: y, width: buttonWidth, height: buttonHeight)
+    // Button bar at the very bottom
+    let buttonHeight: CGFloat = 24
+    let buttonWidth: CGFloat = 110
+    buttonBar.frame = NSRect(x: pad, y: y, width: w, height: buttonHeight)
+    openFinderButton.frame = NSRect(x: 0, y: 0, width: buttonWidth, height: buttonHeight)
     reconnectButton.frame = NSRect(
-      x: innerInset + buttonWidth + buttonSpacing, y: y,
-      width: buttonWidth, height: buttonHeight)
+      x: buttonWidth + 8, y: 0, width: buttonWidth, height: buttonHeight)
     openFinderButton.isHidden = endpointRow.cwd == nil
-    y += buttonHeight + sectionSpacing
+    y += buttonHeight + spc
+
+    // History section (only if there are runs)
+    let hasHistory = !historyRunViews.isEmpty
+    historySectionCard.isHidden = !hasHistory
+    if hasHistory {
+      let historyInner: CGFloat = 6
+      let titleH: CGFloat = 14
+      let runH: CGFloat = min(
+        CGFloat(historyRunViews.count) * (RunHistoryRowView.preferredHeight + 4) + 4, 130)
+      let sectionH = titleH + 4 + runH + historyInner * 2
+
+      historySectionCard.frame = NSRect(x: pad, y: y, width: w, height: sectionH)
+      historyTitleLabel.frame = NSRect(
+        x: historyInner, y: sectionH - historyInner - titleH,
+        width: w - historyInner * 2, height: titleH)
+      historyScrollView.frame = NSRect(
+        x: historyInner, y: historyInner,
+        width: w - historyInner * 2, height: runH)
+      LayoutHistoryRows()
+      y += sectionH + spc
+    }
 
     // Workspace path
-    cwdLabel.frame = NSRect(x: innerInset, y: y, width: innerWidth, height: 12)
-    cwdLabel.isHidden = endpointRow.cwd == nil
     if endpointRow.cwd != nil {
+      cwdLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
+      cwdLabel.isHidden = false
       y += 16
+    } else {
+      cwdLabel.isHidden = true
     }
 
     // Commands section
     if !endpointRow.commands.isEmpty {
-      commandsTitleLabel.frame = NSRect(x: innerInset, y: y, width: innerWidth, height: 12)
+      commandsTitleLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
       commandsTitleLabel.isHidden = false
-      y += 14
+      y += 15
       let cmdLines = min(endpointRow.commands.count, 5)
-      let cmdHeight = CGFloat(cmdLines) * 13 + 2
-      commandsContentLabel.frame = NSRect(
-        x: innerInset, y: y, width: innerWidth, height: cmdHeight)
+      let cmdHeight = CGFloat(cmdLines) * 14 + 2
+      commandsContentLabel.frame = NSRect(x: pad, y: y, width: w, height: cmdHeight)
       commandsContentLabel.isHidden = false
-      y += cmdHeight + sectionSpacing
+      y += cmdHeight + spc
     } else {
       commandsTitleLabel.isHidden = true
       commandsContentLabel.isHidden = true
     }
 
-    // File changes section
+    // Files section
     if !endpointRow.fileChanges.isEmpty {
-      filesTitleLabel.frame = NSRect(x: innerInset, y: y, width: innerWidth, height: 12)
+      filesTitleLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
       filesTitleLabel.isHidden = false
-      y += 14
+      y += 15
       let fileLines = min(endpointRow.fileChanges.count, 8)
-      let filesHeight = CGFloat(fileLines) * 13 + 2
-      filesContentLabel.frame = NSRect(
-        x: innerInset, y: y, width: innerWidth, height: filesHeight)
+      let filesHeight = CGFloat(fileLines) * 14 + 2
+      filesContentLabel.frame = NSRect(x: pad, y: y, width: w, height: filesHeight)
       filesContentLabel.isHidden = false
-      y += filesHeight + sectionSpacing
+      y += filesHeight + spc
     } else {
       filesTitleLabel.isHidden = true
       filesContentLabel.isHidden = true
@@ -291,15 +284,14 @@ final class TurnMenuRowView: NSView {
 
     // Plan section
     if !endpointRow.planSteps.isEmpty {
-      planTitleLabel.frame = NSRect(x: innerInset, y: y, width: innerWidth, height: 12)
+      planTitleLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
       planTitleLabel.isHidden = false
-      y += 14
+      y += 15
       let planLines = min(endpointRow.planSteps.count, 6)
-      let planHeight = CGFloat(planLines) * 13 + 2
-      planContentLabel.frame = NSRect(
-        x: innerInset, y: y, width: innerWidth, height: planHeight)
+      let planHeight = CGFloat(planLines) * 14 + 2
+      planContentLabel.frame = NSRect(x: pad, y: y, width: w, height: planHeight)
       planContentLabel.isHidden = false
-      y += planHeight + sectionSpacing
+      y += planHeight + spc
     } else {
       planTitleLabel.isHidden = true
       planContentLabel.isHidden = true
@@ -307,44 +299,48 @@ final class TurnMenuRowView: NSView {
 
     // Error card
     if endpointRow.latestError != nil {
-      let errorHeight: CGFloat = 32
-      errorCard.frame = NSRect(x: innerInset, y: y, width: innerWidth, height: errorHeight)
-      errorLabel.frame = NSRect(x: 8, y: 2, width: max(0, innerWidth - 16), height: errorHeight - 4)
+      let errorHeight: CGFloat = 34
+      errorCard.frame = NSRect(x: pad, y: y, width: w, height: errorHeight)
+      errorLabel.frame = NSRect(
+        x: 8, y: 4, width: max(0, w - 16), height: errorHeight - 8)
       errorCard.isHidden = false
-      y += errorHeight + sectionSpacing
+      y += errorHeight + spc
     } else {
       errorCard.isHidden = true
     }
 
     // Token usage
     if let usage = endpointRow.tokenUsage, usage.totalTokens > 0 {
-      tokenBarView.frame = NSRect(x: innerInset, y: y, width: innerWidth, height: 10)
+      tokenTitleLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
+      tokenTitleLabel.isHidden = false
+      y += 15
+      tokenBarView.frame = NSRect(x: pad, y: y, width: w, height: 14)
       tokenBarView.isHidden = false
-      y += 14
-      tokenDetailLabel.frame = NSRect(x: innerInset, y: y, width: innerWidth, height: 12)
+      y += 18
+      tokenDetailLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
       tokenDetailLabel.isHidden = false
       y += 16
     } else {
+      tokenTitleLabel.isHidden = true
       tokenBarView.isHidden = true
       tokenDetailLabel.isHidden = true
     }
 
     // Git + model line
-    let hasGitOrModel =
-      endpointRow.gitInfo?.branch != nil || endpointRow.model != nil
-    if hasGitOrModel {
-      gitModelLabel.frame = NSRect(x: innerInset, y: y, width: innerWidth, height: 12)
+    if endpointRow.gitInfo?.branch != nil || endpointRow.model != nil {
+      gitModelLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
       gitModelLabel.isHidden = false
       y += 16
     } else {
       gitModelLabel.isHidden = true
     }
 
-    y += 4
+    y += pad
 
     let docHeight = max(y, expandedScroll.bounds.height)
     expandedDocView.frame = NSRect(x: 0, y: 0, width: availableWidth, height: docHeight)
-    expandedScroll.documentView?.scroll(NSPoint(x: 0, y: max(0, docHeight - expandedScroll.bounds.height)))
+    expandedScroll.documentView?.scroll(
+      NSPoint(x: 0, y: max(0, docHeight - expandedScroll.bounds.height)))
   }
 
   // MARK: - Configuration
@@ -352,50 +348,29 @@ final class TurnMenuRowView: NSView {
   private func ConfigureViews() {
     wantsLayer = true
 
-    // Status dot
     statusDot.wantsLayer = true
     statusDot.layer?.cornerRadius = 4
 
-    // Name
     nameLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
     nameLabel.lineBreakMode = .byTruncatingTail
     nameLabel.maximumNumberOfLines = 1
 
-    // Elapsed time
     elapsedLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
     elapsedLabel.textColor = .secondaryLabelColor
     elapsedLabel.alignment = .right
     elapsedLabel.lineBreakMode = .byTruncatingTail
     elapsedLabel.maximumNumberOfLines = 1
 
-    // Chevron
     chevronLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
     chevronLabel.textColor = .tertiaryLabelColor
     chevronLabel.alignment = .center
     chevronLabel.maximumNumberOfLines = 1
     chevronLabel.stringValue = isExpanded ? "▾" : "▸"
 
-    // Detail
     detailLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
     detailLabel.textColor = .secondaryLabelColor
     detailLabel.lineBreakMode = .byTruncatingTail
     detailLabel.maximumNumberOfLines = 1
-
-    // Hover card
-    hoverCard.wantsLayer = true
-    hoverCard.layer?.cornerRadius = 4
-    hoverCard.layer?.backgroundColor =
-      NSColor.controlBackgroundColor.withAlphaComponent(0.85).cgColor
-    hoverCard.layer?.borderWidth = 1
-    hoverCard.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.55).cgColor
-    hoverCard.isHidden = true
-
-    hoverColorSwatch.wantsLayer = true
-    hoverColorSwatch.layer?.cornerRadius = 3.5
-
-    hoverLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-    hoverLabel.lineBreakMode = .byTruncatingTail
-    hoverLabel.maximumNumberOfLines = 1
 
     // Expanded scroll container
     expandedScroll.drawsBackground = false
@@ -404,9 +379,9 @@ final class TurnMenuRowView: NSView {
     expandedScroll.autohidesScrollers = true
     expandedScroll.documentView = expandedDocView
     expandedDocView.wantsLayer = true
-    expandedDocView.layer?.cornerRadius = 4
+    expandedDocView.layer?.cornerRadius = 6
     expandedDocView.layer?.backgroundColor =
-      NSColor.controlBackgroundColor.withAlphaComponent(0.4).cgColor
+      NSColor.controlBackgroundColor.withAlphaComponent(0.35).cgColor
 
     // Git/model line
     gitModelLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
@@ -415,17 +390,21 @@ final class TurnMenuRowView: NSView {
     gitModelLabel.maximumNumberOfLines = 1
 
     // Token usage
+    tokenTitleLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+    tokenTitleLabel.textColor = .secondaryLabelColor
+    tokenTitleLabel.maximumNumberOfLines = 1
+
     tokenDetailLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
-    tokenDetailLabel.textColor = .secondaryLabelColor
+    tokenDetailLabel.textColor = .tertiaryLabelColor
     tokenDetailLabel.lineBreakMode = .byTruncatingTail
     tokenDetailLabel.maximumNumberOfLines = 1
 
     // Error card
     errorCard.wantsLayer = true
-    errorCard.layer?.cornerRadius = 4
-    errorCard.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.1).cgColor
-    errorCard.layer?.borderWidth = 1
-    errorCard.layer?.borderColor = NSColor.systemRed.withAlphaComponent(0.3).cgColor
+    errorCard.layer?.cornerRadius = 6
+    errorCard.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.08).cgColor
+    errorCard.layer?.borderWidth = 0.5
+    errorCard.layer?.borderColor = NSColor.systemRed.withAlphaComponent(0.25).cgColor
 
     errorLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
     errorLabel.textColor = NSColor.systemRed
@@ -447,7 +426,7 @@ final class TurnMenuRowView: NSView {
     filesTitleLabel.textColor = .secondaryLabelColor
     filesTitleLabel.maximumNumberOfLines = 1
 
-    filesContentLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+    filesContentLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
     filesContentLabel.textColor = .secondaryLabelColor
     filesContentLabel.lineBreakMode = .byTruncatingTail
     filesContentLabel.maximumNumberOfLines = 8
@@ -457,29 +436,26 @@ final class TurnMenuRowView: NSView {
     commandsTitleLabel.textColor = .secondaryLabelColor
     commandsTitleLabel.maximumNumberOfLines = 1
 
-    commandsContentLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+    commandsContentLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
     commandsContentLabel.textColor = .secondaryLabelColor
     commandsContentLabel.lineBreakMode = .byTruncatingTail
     commandsContentLabel.maximumNumberOfLines = 5
 
     // Workspace path
-    cwdLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+    cwdLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
     cwdLabel.textColor = .tertiaryLabelColor
     cwdLabel.lineBreakMode = .byTruncatingMiddle
     cwdLabel.maximumNumberOfLines = 1
 
-    // Action buttons
-    openFinderButton.target = self
-    openFinderButton.action = #selector(OnOpenFinderPressed)
-    openFinderButton.bezelStyle = .rounded
-    openFinderButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+    // History section card
+    historySectionCard.wantsLayer = true
+    historySectionCard.layer?.cornerRadius = 6
+    historySectionCard.layer?.backgroundColor =
+      NSColor.controlBackgroundColor.withAlphaComponent(0.5).cgColor
+    historySectionCard.layer?.borderWidth = 0.5
+    historySectionCard.layer?.borderColor =
+      NSColor.separatorColor.withAlphaComponent(0.3).cgColor
 
-    reconnectButton.target = self
-    reconnectButton.action = #selector(OnReconnectPressed)
-    reconnectButton.bezelStyle = .rounded
-    reconnectButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
-
-    // History
     historyTitleLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
     historyTitleLabel.textColor = .secondaryLabelColor
     historyTitleLabel.maximumNumberOfLines = 1
@@ -491,14 +467,24 @@ final class TurnMenuRowView: NSView {
     historyScrollView.documentView = historyDocumentView
     historyDocumentView.wantsLayer = false
 
-    historyEmptyLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
-    historyEmptyLabel.textColor = .tertiaryLabelColor
-    historyEmptyLabel.alignment = .center
-    historyEmptyLabel.maximumNumberOfLines = 1
+    // Button bar
+    buttonBar.wantsLayer = false
 
-    // Timeline bar hover callback
+    openFinderButton.target = self
+    openFinderButton.action = #selector(OnOpenFinderPressed)
+    openFinderButton.bezelStyle = .rounded
+    openFinderButton.controlSize = .small
+    openFinderButton.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+
+    reconnectButton.target = self
+    reconnectButton.action = #selector(OnReconnectPressed)
+    reconnectButton.bezelStyle = .rounded
+    reconnectButton.controlSize = .small
+    reconnectButton.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+
+    // Timeline bar hover: update the detail label text directly
     barView.OnHoveredSegmentChanged = { [weak self] segment in
-      self?.UpdateHoverText(segment: segment)
+      self?.HandleBarHover(segment: segment)
     }
 
     // View hierarchy
@@ -508,11 +494,9 @@ final class TurnMenuRowView: NSView {
     addSubview(chevronLabel)
     addSubview(barView)
     addSubview(detailLabel)
-    addSubview(hoverCard)
-    hoverCard.addSubview(hoverColorSwatch)
-    hoverCard.addSubview(hoverLabel)
     addSubview(expandedScroll)
     expandedDocView.addSubview(gitModelLabel)
+    expandedDocView.addSubview(tokenTitleLabel)
     expandedDocView.addSubview(tokenBarView)
     expandedDocView.addSubview(tokenDetailLabel)
     expandedDocView.addSubview(errorCard)
@@ -524,11 +508,12 @@ final class TurnMenuRowView: NSView {
     expandedDocView.addSubview(commandsTitleLabel)
     expandedDocView.addSubview(commandsContentLabel)
     expandedDocView.addSubview(cwdLabel)
-    expandedDocView.addSubview(openFinderButton)
-    expandedDocView.addSubview(reconnectButton)
-    expandedDocView.addSubview(historyTitleLabel)
-    expandedDocView.addSubview(historyScrollView)
-    historyScrollView.addSubview(historyEmptyLabel)
+    expandedDocView.addSubview(historySectionCard)
+    historySectionCard.addSubview(historyTitleLabel)
+    historySectionCard.addSubview(historyScrollView)
+    expandedDocView.addSubview(buttonBar)
+    buttonBar.addSubview(openFinderButton)
+    buttonBar.addSubview(reconnectButton)
   }
 
   // MARK: - Actions
@@ -552,24 +537,25 @@ final class TurnMenuRowView: NSView {
     let name = endpointRow.displayName
     guard let turn = endpointRow.activeTurn else {
       barVisible = false
+      collapsedHeight = Self.collapsedIdleHeight
       nameLabel.stringValue = name
       elapsedLabel.stringValue = "Idle"
-      statusDot.layer?.backgroundColor = NSColor.systemGray.withAlphaComponent(0.6).cgColor
+      statusDot.layer?.backgroundColor = NSColor.systemGray.withAlphaComponent(0.5).cgColor
       defaultDetailText = endpointRow.lastTraceLabel ?? "No active run"
       barView.Configure(segments: [])
-      ShowDefaultDetail()
+      detailLabel.stringValue = defaultDetailText
       UpdateExpandedFields(now: now)
-      ComputeExpandedHeight(now: now)
+      ComputeExpandedHeight()
       needsLayout = true
       return
     }
 
     barVisible = true
+    collapsedHeight = Self.collapsedActiveHeight
     nameLabel.stringValue = name
     statusDot.layer?.backgroundColor = StatusDotColor(turn.status).cgColor
 
-    let statusText = StatusLabel(turn.status)
-    elapsedLabel.stringValue = "\(statusText) \(turn.ElapsedString(now: now))"
+    elapsedLabel.stringValue = "\(StatusLabel(turn.status)) \(turn.ElapsedString(now: now))"
 
     var summaryParts: [String] = []
     if let traceLabel = endpointRow.lastTraceLabel ?? turn.latestLabel {
@@ -586,9 +572,9 @@ final class TurnMenuRowView: NSView {
     defaultDetailText = summaryParts.isEmpty ? "Working…" : summaryParts.joined(separator: " · ")
 
     barView.Configure(segments: turn.TimelineSegments(now: now))
-    ShowDefaultDetail()
+    detailLabel.stringValue = defaultDetailText
     UpdateExpandedFields(now: now)
-    ComputeExpandedHeight(now: now)
+    ComputeExpandedHeight()
     needsLayout = true
   }
 
@@ -606,9 +592,7 @@ final class TurnMenuRowView: NSView {
       if gitModelParts.isEmpty {
         gitModelParts.append(model)
       } else {
-        let padding = String(
-          repeating: " ",
-          count: max(1, 50 - gitModelParts.joined().count))
+        let padding = String(repeating: " ", count: max(1, 48 - gitModelParts.joined().count))
         gitModelParts.append("\(padding)\(model)")
       }
     }
@@ -616,6 +600,12 @@ final class TurnMenuRowView: NSView {
 
     // Token usage
     if let usage = endpointRow.tokenUsage, usage.totalTokens > 0 {
+      if let cw = usage.contextWindow {
+        tokenTitleLabel.stringValue =
+          "Token Usage — \(FormatTokenCount(usage.totalTokens)) / \(FormatTokenCount(cw))"
+      } else {
+        tokenTitleLabel.stringValue = "Token Usage — \(FormatTokenCount(usage.totalTokens))"
+      }
       tokenBarView.Configure(usage: usage)
       var parts: [String] = []
       parts.append("In: \(FormatTokenCount(usage.inputTokens))")
@@ -632,18 +622,14 @@ final class TurnMenuRowView: NSView {
     // Error
     if let error = endpointRow.latestError {
       var errorText = error.message
-      if error.willRetry {
-        errorText += " (retrying…)"
-      }
+      if error.willRetry { errorText += " (retrying…)" }
       errorLabel.stringValue = errorText
     }
 
     // Plan
     if !endpointRow.planSteps.isEmpty {
       let completed = endpointRow.planSteps.filter { $0.status == .completed }.count
-      let total = endpointRow.planSteps.count
-      planTitleLabel.stringValue = "Plan (\(completed)/\(total) complete)"
-
+      planTitleLabel.stringValue = "Plan (\(completed)/\(endpointRow.planSteps.count))"
       let lines = endpointRow.planSteps.prefix(6).map { step -> String in
         let icon: String
         switch step.status {
@@ -651,19 +637,19 @@ final class TurnMenuRowView: NSView {
         case .inProgress: icon = "●"
         case .pending: icon = "○"
         }
-        return "  \(icon) \(Truncate(step.description, limit: 55))"
+        return " \(icon)  \(Truncate(step.description, limit: 52))"
       }
       planContentLabel.stringValue = lines.joined(separator: "\n")
     }
 
     // File changes
     if !endpointRow.fileChanges.isEmpty {
-      filesTitleLabel.stringValue = "Files Changed (\(endpointRow.fileChanges.count))"
+      filesTitleLabel.stringValue = "Files (\(endpointRow.fileChanges.count))"
       let lines = endpointRow.fileChanges.prefix(8).map { change -> String in
-        let lastComponent = (change.path as NSString).lastPathComponent
-        let parentDir = (change.path as NSString).deletingLastPathComponent
-        let shortParent = parentDir.isEmpty ? "" : "\(parentDir)/"
-        return "  \(change.kind.label) \(shortParent)\(lastComponent)"
+        let filename = (change.path as NSString).lastPathComponent
+        let dir = (change.path as NSString).deletingLastPathComponent
+        let shortDir = dir.isEmpty ? "" : "\(dir)/"
+        return " \(change.kind.label)  \(shortDir)\(filename)"
       }
       filesContentLabel.stringValue = lines.joined(separator: "\n")
     }
@@ -672,16 +658,14 @@ final class TurnMenuRowView: NSView {
     if !endpointRow.commands.isEmpty {
       commandsTitleLabel.stringValue = "Commands (\(endpointRow.commands.count))"
       let lines = endpointRow.commands.suffix(5).map { cmd -> String in
-        let shortCmd = Truncate(cmd.command, limit: 40)
-        var suffix = ""
-        if let exitCode = cmd.exitCode {
-          suffix += "  exit \(exitCode)"
-        }
+        let shortCmd = Truncate(cmd.command, limit: 38)
+        var meta: [String] = []
+        if let exitCode = cmd.exitCode { meta.append("exit \(exitCode)") }
         if let ms = cmd.durationMs {
-          let sec = Double(ms) / 1000.0
-          suffix += "  \(String(format: "%.1fs", sec))"
+          meta.append(String(format: "%.1fs", Double(ms) / 1000.0))
         }
-        return "  > \(shortCmd)\(suffix)"
+        let suffix = meta.isEmpty ? "" : "  \(meta.joined(separator: "  "))"
+        return " \(shortCmd)\(suffix)"
       }
       commandsContentLabel.stringValue = lines.joined(separator: "\n")
     }
@@ -693,74 +677,60 @@ final class TurnMenuRowView: NSView {
 
     // History
     let runCount = endpointRow.recentRuns.count
-    historyTitleLabel.stringValue =
-      runCount > 0 ? "Past runs (\(runCount))" : "Past runs"
+    historyTitleLabel.stringValue = "Past Runs (\(runCount))"
     RebuildHistoryRows(now: now)
   }
 
-  private func ComputeExpandedHeight(now: Date) {
+  private func ComputeExpandedHeight() {
     guard isExpanded else {
       computedExpandedHeight = 0
       return
     }
     var h: CGFloat = 8
-    let sectionSpacing: CGFloat = 10
+    let spc: CGFloat = 10
 
     // Git/model
-    if endpointRow.gitInfo?.branch != nil || endpointRow.model != nil {
-      h += 16
-    }
+    if endpointRow.gitInfo?.branch != nil || endpointRow.model != nil { h += 16 }
     // Token usage
-    if let usage = endpointRow.tokenUsage, usage.totalTokens > 0 {
-      h += 30
-    }
+    if let usage = endpointRow.tokenUsage, usage.totalTokens > 0 { h += 15 + 18 + 16 }
     // Error
-    if endpointRow.latestError != nil {
-      h += 32 + sectionSpacing
-    }
+    if endpointRow.latestError != nil { h += 34 + spc }
     // Plan
     if !endpointRow.planSteps.isEmpty {
-      h += 14 + CGFloat(min(endpointRow.planSteps.count, 6)) * 13 + 2 + sectionSpacing
+      h += 15 + CGFloat(min(endpointRow.planSteps.count, 6)) * 14 + 2 + spc
     }
     // Files
     if !endpointRow.fileChanges.isEmpty {
-      h += 14 + CGFloat(min(endpointRow.fileChanges.count, 8)) * 13 + 2 + sectionSpacing
+      h += 15 + CGFloat(min(endpointRow.fileChanges.count, 8)) * 14 + 2 + spc
     }
     // Commands
     if !endpointRow.commands.isEmpty {
-      h += 14 + CGFloat(min(endpointRow.commands.count, 5)) * 13 + 2 + sectionSpacing
+      h += 15 + CGFloat(min(endpointRow.commands.count, 5)) * 14 + 2 + spc
     }
     // CWD
-    if endpointRow.cwd != nil {
-      h += 16
+    if endpointRow.cwd != nil { h += 16 }
+    // History
+    if !historyRunViews.isEmpty {
+      let runH: CGFloat = min(
+        CGFloat(historyRunViews.count) * (RunHistoryRowView.preferredHeight + 4) + 4, 130)
+      h += 14 + 4 + runH + 12 + spc
     }
     // Buttons
-    h += 22 + sectionSpacing
-    // History title
-    h += 18
-    // History scroll
-    let historyH: CGFloat = historyRunViews.isEmpty ? 20 : min(
-      CGFloat(historyRunViews.count) * (RunHistoryRowView.preferredHeight + 4) + 8, 140)
-    h += historyH + sectionSpacing
-    h += 4
+    h += 24 + spc
+    h += 8
 
-    computedExpandedHeight = min(h, Self.maxExpandedHeight - Self.collapsedRowHeight)
+    computedExpandedHeight = min(h, Self.maxExpandedHeight - collapsedHeight)
   }
 
   private func RebuildHistoryRows(now: Date) {
-    for row in historyRunViews {
-      row.removeFromSuperview()
-    }
+    for row in historyRunViews { row.removeFromSuperview() }
     historyRunViews.removeAll(keepingCapacity: true)
-
     for (index, run) in endpointRow.recentRuns.enumerated() {
       let historyRow = RunHistoryRowView(frame: .zero)
       historyRow.Configure(run: run, isLastRun: index == 0)
       historyDocumentView.addSubview(historyRow)
       historyRunViews.append(historyRow)
     }
-
-    historyEmptyLabel.isHidden = !historyRunViews.isEmpty
     needsLayout = true
   }
 
@@ -768,42 +738,31 @@ final class TurnMenuRowView: NSView {
     let rowHeight: CGFloat = RunHistoryRowView.preferredHeight
     let rowSpacing: CGFloat = 4
     let contentWidth = max(0, historyScrollView.bounds.width)
-
     var y: CGFloat = rowSpacing
     for row in historyRunViews.reversed() {
       row.frame = NSRect(x: 0, y: y, width: contentWidth, height: rowHeight)
       y += rowHeight + rowSpacing
     }
-
     let contentHeight = max(historyScrollView.bounds.height, y)
-    historyDocumentView.frame = NSRect(
-      x: 0, y: 0, width: contentWidth, height: contentHeight)
+    historyDocumentView.frame = NSRect(x: 0, y: 0, width: contentWidth, height: contentHeight)
   }
 
-  // MARK: - Hover
+  // MARK: - Bar Hover
 
-  private func UpdateHoverText(segment: TimelineSegment?) {
+  private func HandleBarHover(segment: TimelineSegment?) {
     guard barVisible else {
-      ShowDefaultDetail()
+      detailLabel.stringValue = defaultDetailText
+      detailLabel.textColor = .secondaryLabelColor
       return
     }
     guard let segment else {
-      ShowDefaultDetail()
+      detailLabel.stringValue = defaultDetailText
+      detailLabel.textColor = .secondaryLabelColor
       return
     }
-
-    let segmentColor = SegmentFillColor(segment.kind)
-    hoverCard.layer?.borderColor = segmentColor.withAlphaComponent(0.8).cgColor
-    hoverColorSwatch.layer?.backgroundColor = segmentColor.cgColor
-    hoverLabel.stringValue = HoverText(segment: segment)
-    detailLabel.isHidden = true
-    hoverCard.isHidden = false
-  }
-
-  private func ShowDefaultDetail() {
-    detailLabel.stringValue = defaultDetailText
-    detailLabel.isHidden = false
-    hoverCard.isHidden = true
+    let color = SegmentFillColor(segment.kind)
+    detailLabel.textColor = color
+    detailLabel.stringValue = HoverText(segment: segment)
   }
 
   // MARK: - Formatting helpers
@@ -814,9 +773,9 @@ final class TurnMenuRowView: NSView {
     let start = FormatClockTime(segment.startedAt)
     let end = FormatClockTime(segment.endedAt)
     if let label = segment.label, !label.isEmpty {
-      return "\(category) · \(duration) · \(start)-\(end) · \(label)"
+      return "\(category) · \(duration) · \(start)–\(end) · \(label)"
     }
-    return "\(category) · \(duration) · \(start)-\(end)"
+    return "\(category) · \(duration) · \(start)–\(end)"
   }
 
   private func StatusLabel(_ status: TurnExecutionStatus) -> String {
@@ -830,10 +789,10 @@ final class TurnMenuRowView: NSView {
 
   private func StatusDotColor(_ status: TurnExecutionStatus) -> NSColor {
     switch status {
-    case .inProgress: return NSColor.systemGreen
-    case .completed: return NSColor.systemGray
-    case .interrupted: return NSColor.systemOrange
-    case .failed: return NSColor.systemRed
+    case .inProgress: return .systemGreen
+    case .completed: return .systemGray
+    case .interrupted: return .systemOrange
+    case .failed: return .systemRed
     }
   }
 
@@ -846,7 +805,7 @@ final class TurnMenuRowView: NSView {
 // MARK: - RunHistoryRowView
 
 final class RunHistoryRowView: NSView {
-  static let preferredHeight: CGFloat = 40
+  static let preferredHeight: CGFloat = 36
 
   private let statusDot = NSView()
   private let titleLabel = NSTextField(labelWithString: "")
@@ -860,6 +819,7 @@ final class RunHistoryRowView: NSView {
     statusDot.layer?.cornerRadius = 3
 
     titleLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+    titleLabel.textColor = .secondaryLabelColor
     titleLabel.lineBreakMode = .byTruncatingTail
     titleLabel.maximumNumberOfLines = 1
 
@@ -878,13 +838,11 @@ final class RunHistoryRowView: NSView {
   override func layout() {
     super.layout()
     let dotSize: CGFloat = 6
-    statusDot.frame = NSRect(
-      x: 2, y: bounds.height - 11, width: dotSize, height: dotSize)
+    statusDot.frame = NSRect(x: 2, y: bounds.height - 11, width: dotSize, height: dotSize)
     titleLabel.frame = NSRect(
       x: dotSize + 6, y: bounds.height - 14,
       width: max(0, bounds.width - dotSize - 6), height: 12)
-    timelineBarView.frame = NSRect(
-      x: 0, y: 0, width: bounds.width, height: 8)
+    timelineBarView.frame = NSRect(x: 0, y: 2, width: bounds.width, height: 6)
   }
 
   func Configure(run: CompletedRun, isLastRun: Bool) {
@@ -919,8 +877,9 @@ final class RunHistoryRowView: NSView {
 // MARK: - TokenUsageBarView
 
 final class TokenUsageBarView: NSView {
-  private var fraction: Double = 0
-  private var usageText = ""
+  private var usage: TokenUsageInfo?
+  private var hoverText: String?
+  private var trackingArea: NSTrackingArea?
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -933,17 +892,58 @@ final class TokenUsageBarView: NSView {
   }
 
   func Configure(usage: TokenUsageInfo) {
-    fraction = usage.contextUsageFraction ?? 0
-    if let cw = usage.contextWindow {
-      usageText = "\(FormatTokenCount(usage.totalTokens)) / \(FormatTokenCount(cw))"
-    } else {
-      usageText = FormatTokenCount(usage.totalTokens)
+    self.usage = usage
+    hoverText = nil
+    needsDisplay = true
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let trackingArea { removeTrackingArea(trackingArea) }
+    let area = NSTrackingArea(
+      rect: bounds,
+      options: [.activeAlways, .mouseEnteredAndExited, .mouseMoved, .inVisibleRect],
+      owner: self, userInfo: nil)
+    addTrackingArea(area)
+    trackingArea = area
+  }
+
+  override func mouseMoved(with event: NSEvent) {
+    guard let usage else { return }
+    let loc = convert(event.locationInWindow, from: nil)
+    let trackRect = bounds.insetBy(dx: 0.5, dy: 0.5)
+    guard trackRect.width > 0 else { return }
+
+    let fraction = max(0, min(1, (loc.x - trackRect.minX) / trackRect.width))
+
+    let segments: [(String, Double, NSColor)] = BuildUsageSegments(usage)
+    let total = segments.reduce(0) { $0 + $1.1 }
+    guard total > 0 else { return }
+
+    var cumulative: Double = 0
+    for (label, value, _) in segments {
+      cumulative += value / total
+      if fraction <= cumulative {
+        let newText = "\(label): \(FormatTokenCount(Int(value)))"
+        if newText != hoverText {
+          hoverText = newText
+          toolTip = newText
+          needsDisplay = true
+        }
+        return
+      }
     }
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    hoverText = nil
+    toolTip = nil
     needsDisplay = true
   }
 
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)
+    guard let usage else { return }
     let trackRect = bounds.insetBy(dx: 0.5, dy: 0.5)
     guard trackRect.width > 0, trackRect.height > 0 else { return }
 
@@ -951,35 +951,61 @@ final class TokenUsageBarView: NSView {
     NSColor.controlBackgroundColor.withAlphaComponent(0.8).setFill()
     trackPath.fill()
 
-    if fraction > 0 {
+    let segments = BuildUsageSegments(usage)
+    let total = segments.reduce(0) { $0 + $1.1 }
+
+    if total > 0 {
       NSGraphicsContext.saveGraphicsState()
       trackPath.addClip()
-      let fillWidth = trackRect.width * CGFloat(min(1.0, fraction))
-      let fillRect = NSRect(
-        x: trackRect.minX, y: trackRect.minY,
-        width: fillWidth, height: trackRect.height)
-      let fillColor =
-        fraction > 0.85
-        ? NSColor.systemOrange.withAlphaComponent(0.7)
-        : NSColor.controlAccentColor.withAlphaComponent(0.5)
-      fillColor.setFill()
-      NSBezierPath(rect: fillRect).fill()
+
+      let maxWidth: CGFloat
+      if let cw = usage.contextWindow, cw > 0 {
+        maxWidth = trackRect.width * CGFloat(min(1.0, Double(usage.totalTokens) / Double(cw)))
+      } else {
+        maxWidth = trackRect.width
+      }
+
+      var x = trackRect.minX
+      for (_, value, color) in segments {
+        let w = maxWidth * CGFloat(value / total)
+        if w > 0.5 {
+          color.setFill()
+          NSBezierPath(rect: NSRect(
+            x: x, y: trackRect.minY, width: w, height: trackRect.height
+          )).fill()
+        }
+        x += w
+      }
+
       NSGraphicsContext.restoreGraphicsState()
     }
 
-    NSColor.separatorColor.withAlphaComponent(0.6).setStroke()
+    NSColor.separatorColor.withAlphaComponent(0.5).setStroke()
     trackPath.lineWidth = 0.5
     trackPath.stroke()
+  }
 
-    let textAttrs: [NSAttributedString.Key: Any] = [
-      .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium),
-      .foregroundColor: NSColor.secondaryLabelColor,
-    ]
-    let textSize = usageText.size(withAttributes: textAttrs)
-    let textPoint = NSPoint(
-      x: trackRect.maxX - textSize.width - 4,
-      y: (trackRect.height - textSize.height) / 2 + trackRect.minY)
-    usageText.draw(at: textPoint, withAttributes: textAttrs)
+  private func BuildUsageSegments(_ usage: TokenUsageInfo) -> [(String, Double, NSColor)] {
+    var segments: [(String, Double, NSColor)] = []
+    let cached = usage.cachedInputTokens
+    let freshInput = max(0, usage.inputTokens - cached)
+    if cached > 0 {
+      segments.append(("Cached Input", Double(cached), NSColor.systemGray.withAlphaComponent(0.5)))
+    }
+    if freshInput > 0 {
+      segments.append(
+        ("Input", Double(freshInput), NSColor.controlAccentColor.withAlphaComponent(0.45)))
+    }
+    if usage.reasoningTokens > 0 {
+      segments.append(
+        ("Reasoning", Double(usage.reasoningTokens), NSColor.systemPink.withAlphaComponent(0.55)))
+    }
+    let regularOutput = max(0, usage.outputTokens - usage.reasoningTokens)
+    if regularOutput > 0 {
+      segments.append(
+        ("Output", Double(regularOutput), NSColor.systemGreen.withAlphaComponent(0.55)))
+    }
+    return segments
   }
 }
 
@@ -1013,13 +1039,11 @@ final class TimelineBarView: NSView {
 
   override func updateTrackingAreas() {
     super.updateTrackingAreas()
-    if let trackingArea {
-      removeTrackingArea(trackingArea)
-    }
-    let options: NSTrackingArea.Options = [
-      .activeAlways, .mouseEnteredAndExited, .mouseMoved, .inVisibleRect,
-    ]
-    let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+    if let trackingArea { removeTrackingArea(trackingArea) }
+    let area = NSTrackingArea(
+      rect: bounds,
+      options: [.activeAlways, .mouseEnteredAndExited, .mouseMoved, .inVisibleRect],
+      owner: self, userInfo: nil)
     addTrackingArea(area)
     trackingArea = area
   }
@@ -1072,34 +1096,33 @@ final class TimelineBarView: NSView {
     }
 
     if widths.count >= 2 {
-      NSColor.separatorColor.withAlphaComponent(0.5).setStroke()
+      NSColor.separatorColor.withAlphaComponent(0.4).setStroke()
       for index in 1..<widths.count {
-        let previousRect = segmentRects[index - 1]
-        let currentRect = segmentRects[index]
-        if previousRect.isNull || currentRect.isNull { continue }
-        let boundaryX = currentRect.minX
-        let separator = NSBezierPath()
-        separator.move(to: CGPoint(x: boundaryX, y: trackRect.minY))
-        separator.line(to: CGPoint(x: boundaryX, y: trackRect.maxY))
-        separator.lineWidth = 0.5
-        separator.stroke()
+        let prev = segmentRects[index - 1]
+        let curr = segmentRects[index]
+        if prev.isNull || curr.isNull { continue }
+        let sep = NSBezierPath()
+        sep.move(to: CGPoint(x: curr.minX, y: trackRect.minY))
+        sep.line(to: CGPoint(x: curr.minX, y: trackRect.maxY))
+        sep.lineWidth = 0.5
+        sep.stroke()
       }
     }
 
     NSGraphicsContext.restoreGraphicsState()
 
-    NSColor.separatorColor.withAlphaComponent(0.6).setStroke()
+    NSColor.separatorColor.withAlphaComponent(0.5).setStroke()
     trackPath.lineWidth = 0.5
     trackPath.stroke()
 
     if let hoverIndex, hoverIndex < segmentRects.count {
       let rect = segmentRects[hoverIndex]
       if !rect.isNull {
-        NSColor.controlAccentColor.withAlphaComponent(0.95).setStroke()
-        let highlightPath = NSBezierPath(
-          roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3)
-        highlightPath.lineWidth = 1.2
-        highlightPath.stroke()
+        NSColor.labelColor.withAlphaComponent(0.4).setStroke()
+        let hl = NSBezierPath(
+          roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 2, yRadius: 2)
+        hl.lineWidth = 1.0
+        hl.stroke()
       }
     }
   }
@@ -1120,7 +1143,6 @@ final class TimelineBarView: NSView {
     if segments.isEmpty || totalWidth <= 0 {
       return Array(repeating: 0, count: segments.count)
     }
-
     let durations = segments.map { max(0, $0.duration) }
     let totalDuration = durations.reduce(0, +)
     if totalDuration <= 0 {
@@ -1128,57 +1150,43 @@ final class TimelineBarView: NSView {
       let remainder = totalWidth % segments.count
       return durations.indices.map { base + ($0 < remainder ? 1 : 0) }
     }
-
     let exactWidths = durations.map { ($0 / totalDuration) * Double(totalWidth) }
     var widths = exactWidths.map { Int($0.rounded(.down)) }
     let remainders = exactWidths.map { $0 - Double(Int($0.rounded(.down))) }
     let minimumWidths = exactWidths.map { $0 > 0 ? 1 : 0 }
-
-    for index in widths.indices where widths[index] < minimumWidths[index] {
-      widths[index] = minimumWidths[index]
-    }
-
+    for i in widths.indices where widths[i] < minimumWidths[i] { widths[i] = minimumWidths[i] }
     var assigned = widths.reduce(0, +)
-
     if assigned > totalWidth {
       var reducible = widths.indices.filter { widths[$0] > minimumWidths[$0] }
       while assigned > totalWidth && !reducible.isEmpty {
-        reducible.sort { lhs, rhs in
-          if remainders[lhs] != remainders[rhs] { return remainders[lhs] < remainders[rhs] }
-          return widths[lhs] > widths[rhs]
+        reducible.sort {
+          remainders[$0] != remainders[$1] ? remainders[$0] < remainders[$1] : widths[$0] > widths[$1]
         }
-        guard let index = reducible.first else { break }
-        widths[index] -= 1
-        assigned -= 1
+        guard let i = reducible.first else { break }
+        widths[i] -= 1; assigned -= 1
         reducible = widths.indices.filter { widths[$0] > minimumWidths[$0] }
       }
       if assigned > totalWidth {
         var positive = widths.indices.filter { widths[$0] > 0 }
         while assigned > totalWidth && !positive.isEmpty {
           positive.sort { widths[$0] > widths[$1] }
-          guard let index = positive.first else { break }
-          widths[index] -= 1
-          assigned -= 1
+          guard let i = positive.first else { break }
+          widths[i] -= 1; assigned -= 1
           positive = widths.indices.filter { widths[$0] > 0 }
         }
       }
     }
-
     if assigned < totalWidth {
-      let order = widths.indices.sorted { lhs, rhs in
-        if remainders[lhs] != remainders[rhs] { return remainders[lhs] > remainders[rhs] }
-        return durations[lhs] > durations[rhs]
+      let order = widths.indices.sorted {
+        remainders[$0] != remainders[$1] ? remainders[$0] > remainders[$1] : durations[$0] > durations[$1]
       }
       if !order.isEmpty {
-        var cursor = 0
+        var c = 0
         while assigned < totalWidth {
-          widths[order[cursor % order.count]] += 1
-          assigned += 1
-          cursor += 1
+          widths[order[c % order.count]] += 1; assigned += 1; c += 1
         }
       }
     }
-
     return widths
   }
 }
@@ -1186,42 +1194,42 @@ final class TimelineBarView: NSView {
 // MARK: - Shared formatting
 
 private let durationFormatter: DateComponentsFormatter = {
-  let formatter = DateComponentsFormatter()
-  formatter.allowedUnits = [.hour, .minute, .second]
-  formatter.unitsStyle = .abbreviated
-  formatter.maximumUnitCount = 2
-  formatter.zeroFormattingBehavior = [.dropLeading]
-  return formatter
+  let f = DateComponentsFormatter()
+  f.allowedUnits = [.hour, .minute, .second]
+  f.unitsStyle = .abbreviated
+  f.maximumUnitCount = 2
+  f.zeroFormattingBehavior = [.dropLeading]
+  return f
 }()
 
 private let clockTimeFormatter: DateFormatter = {
-  let formatter = DateFormatter()
-  formatter.timeStyle = .medium
-  formatter.dateStyle = .none
-  return formatter
+  let f = DateFormatter()
+  f.timeStyle = .medium
+  f.dateStyle = .none
+  return f
 }()
 
 private func SegmentFillColor(_ kind: TimelineSegmentKind) -> NSColor {
   switch kind {
-  case .category(let category):
-    switch category {
-    case .tool: return NSColor.systemIndigo.withAlphaComponent(0.9)
-    case .edit: return NSColor.systemPurple.withAlphaComponent(0.9)
-    case .waiting: return NSColor.systemRed.withAlphaComponent(0.9)
-    case .network: return NSColor.systemBlue.withAlphaComponent(0.9)
-    case .prefill: return NSColor.systemOrange.withAlphaComponent(0.9)
-    case .reasoning: return NSColor.systemPink.withAlphaComponent(0.9)
-    case .gen: return NSColor.systemGreen.withAlphaComponent(0.9)
+  case .category(let c):
+    switch c {
+    case .tool: return NSColor.systemIndigo.withAlphaComponent(0.85)
+    case .edit: return NSColor.systemPurple.withAlphaComponent(0.85)
+    case .waiting: return NSColor.systemRed.withAlphaComponent(0.85)
+    case .network: return NSColor.systemBlue.withAlphaComponent(0.85)
+    case .prefill: return NSColor.systemOrange.withAlphaComponent(0.85)
+    case .reasoning: return NSColor.systemPink.withAlphaComponent(0.85)
+    case .gen: return NSColor.systemGreen.withAlphaComponent(0.85)
     }
   case .idle:
-    return NSColor.systemGray.withAlphaComponent(0.35)
+    return NSColor.systemGray.withAlphaComponent(0.3)
   }
 }
 
 private func SegmentKindLabel(_ kind: TimelineSegmentKind) -> String {
   switch kind {
-  case .category(let category):
-    switch category {
+  case .category(let c):
+    switch c {
     case .tool: return "Tool"
     case .edit: return "Edit"
     case .waiting: return "Waiting"
