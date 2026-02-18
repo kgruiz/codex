@@ -256,6 +256,10 @@ client_request_definitions! {
         params: v2::TurnInterruptParams,
         response: v2::TurnInterruptResponse,
     },
+    TurnActive => "turn/active" {
+        params: v2::TurnActiveParams,
+        response: v2::TurnActiveResponse,
+    },
     ReviewStart => "review/start" {
         params: v2::ReviewStartParams,
         response: v2::ReviewStartResponse,

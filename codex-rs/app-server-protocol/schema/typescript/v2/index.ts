@@ -4,6 +4,7 @@ export type { Account } from "./Account";
 export type { AccountLoginCompletedNotification } from "./AccountLoginCompletedNotification";
 export type { AccountRateLimitsUpdatedNotification } from "./AccountRateLimitsUpdatedNotification";
 export type { AccountUpdatedNotification } from "./AccountUpdatedNotification";
+export type { ActiveTurnSummary } from "./ActiveTurnSummary";
 export type { AgentMessageDeltaNotification } from "./AgentMessageDeltaNotification";
 export type { AnalyticsConfig } from "./AnalyticsConfig";
 export type { AppInfo } from "./AppInfo";
@@ -169,6 +170,8 @@ export type { ToolRequestUserInputQuestion } from "./ToolRequestUserInputQuestio
 export type { ToolRequestUserInputResponse } from "./ToolRequestUserInputResponse";
 export type { ToolsV2 } from "./ToolsV2";
 export type { Turn } from "./Turn";
+export type { TurnActiveParams } from "./TurnActiveParams";
+export type { TurnActiveResponse } from "./TurnActiveResponse";
 export type { TurnCompletedNotification } from "./TurnCompletedNotification";
 export type { TurnDiffUpdatedNotification } from "./TurnDiffUpdatedNotification";
 export type { TurnError } from "./TurnError";

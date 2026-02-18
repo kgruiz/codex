@@ -893,6 +893,30 @@
             },
             "method": {
               "enum": [
+                "turn/active"
+              ],
+              "title": "Turn/activeRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/TurnActiveParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Turn/activeRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
                 "review/start"
               ],
               "title": "Review/startRequestMethod",
@@ -9847,6 +9871,21 @@
         "title": "AccountUpdatedNotification",
         "type": "object"
       },
+      "ActiveTurnSummary": {
+        "properties": {
+          "threadId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId",
+          "turnId"
+        ],
+        "type": "object"
+      },
       "AgentMessageDeltaNotification": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -15491,6 +15530,27 @@
           "items",
           "status"
         ],
+        "type": "object"
+      },
+      "TurnActiveParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "title": "TurnActiveParams",
+        "type": "object"
+      },
+      "TurnActiveResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/definitions/v2/ActiveTurnSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "TurnActiveResponse",
         "type": "object"
       },
       "TurnCompletedNotification": {
