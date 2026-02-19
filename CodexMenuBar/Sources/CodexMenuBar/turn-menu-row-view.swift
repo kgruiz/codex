@@ -219,6 +219,7 @@ final class TurnMenuRowView: NSView {
     let spc: CGFloat = 10
     let w = max(0, availableWidth - pad * 2)
     let sectionInner: CGFloat = 6
+    let hasActiveRun = endpointRow.activeTurn != nil
     var y: CGFloat = pad
 
     // Buttons at the very bottom with separator
@@ -262,7 +263,7 @@ final class TurnMenuRowView: NSView {
     }
 
     // Commands/tools section
-    if !endpointRow.commands.isEmpty {
+    if hasActiveRun && !endpointRow.commands.isEmpty {
       let cmdLines = min(endpointRow.commands.count, 5)
       let cmdHeight = CGFloat(cmdLines) * 14 + 2
       let sectionHeight = sectionInner * 2 + 12 + 4 + cmdHeight
@@ -288,7 +289,7 @@ final class TurnMenuRowView: NSView {
     }
 
     // Files section
-    if !endpointRow.fileChanges.isEmpty {
+    if hasActiveRun && !endpointRow.fileChanges.isEmpty {
       filesTitleLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
       filesTitleLabel.isHidden = false
       y += 15
@@ -303,7 +304,7 @@ final class TurnMenuRowView: NSView {
     }
 
     // Plan section
-    if !endpointRow.planSteps.isEmpty {
+    if hasActiveRun && !endpointRow.planSteps.isEmpty {
       planTitleLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
       planTitleLabel.isHidden = false
       y += 15
@@ -318,7 +319,7 @@ final class TurnMenuRowView: NSView {
     }
 
     // Error card
-    if endpointRow.latestError != nil {
+    if hasActiveRun && endpointRow.latestError != nil {
       let errorHeight: CGFloat = 34
       errorCard.frame = NSRect(x: pad, y: y, width: w, height: errorHeight)
       errorLabel.frame = NSRect(
@@ -330,7 +331,7 @@ final class TurnMenuRowView: NSView {
     }
 
     // Token usage section
-    if EffectiveTokenUsage() != nil {
+    if hasActiveRun && EffectiveTokenUsage() != nil {
       let sectionHeight = sectionInner * 2 + 12 + 6 + 14 + 4 + 12
       tokenSectionCard.frame = NSRect(x: pad, y: y, width: w, height: sectionHeight)
       tokenSectionCard.isHidden = false
@@ -361,7 +362,7 @@ final class TurnMenuRowView: NSView {
     }
 
     // Prompt preview
-    if let promptText = PromptLabelText() {
+    if hasActiveRun, let promptText = PromptLabelText() {
       promptLabel.frame = NSRect(x: pad, y: y, width: w, height: 24)
       promptLabel.stringValue = promptText
       promptLabel.isHidden = false
@@ -371,7 +372,7 @@ final class TurnMenuRowView: NSView {
     }
 
     // Git + model line
-    if HasGitOrModelInfo() {
+    if hasActiveRun && HasGitOrModelInfo() {
       gitModelLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
       gitModelLabel.isHidden = false
       y += 16
@@ -666,22 +667,26 @@ final class TurnMenuRowView: NSView {
   }
 
   private func UpdateExpandedFields() {
+    let hasActiveRun = endpointRow.activeTurn != nil
+
     // Git + Model line
     var gitModelParts: [String] = []
-    if let branch = endpointRow.gitInfo?.branch {
-      var part = branch
-      if let sha = endpointRow.gitInfo?.sha {
-        part += " · \(String(sha.prefix(7)))"
+    if hasActiveRun {
+      if let branch = endpointRow.gitInfo?.branch {
+        var part = branch
+        if let sha = endpointRow.gitInfo?.sha {
+          part += " · \(String(sha.prefix(7)))"
+        }
+        gitModelParts.append(part)
       }
-      gitModelParts.append(part)
-    }
-    if let modelInfo = ModelSummary() {
-      gitModelParts.append(modelInfo)
+      if let modelInfo = ModelSummary() {
+        gitModelParts.append(modelInfo)
+      }
     }
     gitModelLabel.stringValue = gitModelParts.joined(separator: "   ")
 
     // Token usage
-    if let usage = EffectiveTokenUsage() {
+    if hasActiveRun, let usage = EffectiveTokenUsage() {
       if let cw = usage.contextWindow {
         tokenTitleLabel.stringValue =
           "Token Usage — \(FormatTokenCount(usage.totalTokens)) / \(FormatTokenCount(cw))"
@@ -702,17 +707,22 @@ final class TurnMenuRowView: NSView {
       tokenDetailLabel.stringValue = defaultTokenDetailText
     } else {
       defaultTokenDetailText = ""
+      tokenDetailLabel.stringValue = ""
     }
 
-    if let promptText = PromptLabelText() {
+    if hasActiveRun, let promptText = PromptLabelText() {
       promptLabel.stringValue = promptText
+    } else {
+      promptLabel.stringValue = ""
     }
 
     // Error
-    if let error = endpointRow.latestError {
+    if hasActiveRun, let error = endpointRow.latestError {
       var errorText = error.message
       if error.willRetry { errorText += " (retrying…)" }
       errorLabel.stringValue = errorText
+    } else {
+      errorLabel.stringValue = ""
     }
 
     // Plan
@@ -780,28 +790,31 @@ final class TurnMenuRowView: NSView {
       computedExpandedHeight = 0
       return
     }
+    let hasActiveRun = endpointRow.activeTurn != nil
     var h: CGFloat = 8
     let spc: CGFloat = 10
 
-    // Git/model
-    if HasGitOrModelInfo() { h += 16 }
-    // Token usage
-    if EffectiveTokenUsage() != nil { h += 6 + 6 + 12 + 6 + 14 + 4 + 12 + spc }
-    // Prompt
-    if PromptLabelText() != nil { h += 28 }
-    // Error
-    if endpointRow.latestError != nil { h += 34 + spc }
-    // Plan
-    if !endpointRow.planSteps.isEmpty {
-      h += 15 + CGFloat(min(endpointRow.planSteps.count, 6)) * 14 + 2 + spc
-    }
-    // Files
-    if !endpointRow.fileChanges.isEmpty {
-      h += 15 + CGFloat(min(endpointRow.fileChanges.count, 8)) * 14 + 2 + spc
-    }
-    // Commands
-    if !endpointRow.commands.isEmpty {
-      h += 6 + 6 + 12 + 4 + CGFloat(min(endpointRow.commands.count, 5)) * 14 + 2 + spc
+    if hasActiveRun {
+      // Git/model
+      if HasGitOrModelInfo() { h += 16 }
+      // Token usage
+      if EffectiveTokenUsage() != nil { h += 6 + 6 + 12 + 6 + 14 + 4 + 12 + spc }
+      // Prompt
+      if PromptLabelText() != nil { h += 28 }
+      // Error
+      if endpointRow.latestError != nil { h += 34 + spc }
+      // Plan
+      if !endpointRow.planSteps.isEmpty {
+        h += 15 + CGFloat(min(endpointRow.planSteps.count, 6)) * 14 + 2 + spc
+      }
+      // Files
+      if !endpointRow.fileChanges.isEmpty {
+        h += 15 + CGFloat(min(endpointRow.fileChanges.count, 8)) * 14 + 2 + spc
+      }
+      // Commands
+      if !endpointRow.commands.isEmpty {
+        h += 6 + 6 + 12 + 4 + CGFloat(min(endpointRow.commands.count, 5)) * 14 + 2 + spc
+      }
     }
     // CWD
     if endpointRow.cwd != nil { h += 16 }
@@ -863,26 +876,23 @@ final class TurnMenuRowView: NSView {
   }
 
   private func EffectiveTokenUsage() -> TokenUsageInfo? {
+    guard endpointRow.activeTurn != nil else { return nil }
     if let usage = endpointRow.tokenUsage, usage.totalTokens > 0 {
       return usage
     }
-    if endpointRow.activeTurn != nil {
-      return TokenUsageInfo()
-    }
-    return nil
+    return TokenUsageInfo()
   }
 
   private func PromptLabelText() -> String? {
+    guard endpointRow.activeTurn != nil else { return nil }
     if let promptPreview = endpointRow.promptPreview, !promptPreview.isEmpty {
       return "Prompt: \(Truncate(promptPreview, limit: 130))"
     }
-    if endpointRow.activeTurn != nil {
-      return "Prompt: waiting for first user message"
-    }
-    return nil
+    return "Prompt: waiting for first user message"
   }
 
   private func ModelSummary() -> String? {
+    guard endpointRow.activeTurn != nil else { return nil }
     let model = endpointRow.model?.trimmingCharacters(in: .whitespacesAndNewlines)
     if let model, !model.isEmpty {
       return "Model: \(model)"
@@ -891,7 +901,7 @@ final class TurnMenuRowView: NSView {
   }
 
   private func HasGitOrModelInfo() -> Bool {
-    endpointRow.gitInfo?.branch != nil || ModelSummary() != nil
+    endpointRow.activeTurn != nil && (endpointRow.gitInfo?.branch != nil || ModelSummary() != nil)
   }
 
   // MARK: - Hover handlers
@@ -1004,6 +1014,7 @@ final class RunHistoryRowView: NSView {
   private let tokenDetailLabel = NSTextField(labelWithString: "")
   private var defaultTitleText = ""
   private var defaultTokenDetailText = ""
+  private var modelText: String?
   private var isExpandedRow = false
   private var hasTokenUsage = false
   private var onToggle: (() -> Void)?
@@ -1108,9 +1119,14 @@ final class RunHistoryRowView: NSView {
     promptLabel.frame = NSRect(x: inset, y: y - 24, width: contentWidth, height: 24)
     y -= 28
 
-    modelLabel.isHidden = false
-    modelLabel.frame = NSRect(x: inset, y: y - 12, width: contentWidth, height: 12)
-    y -= 16
+    if let modelText {
+      modelLabel.isHidden = false
+      modelLabel.stringValue = modelText
+      modelLabel.frame = NSRect(x: inset, y: y - 12, width: contentWidth, height: 12)
+      y -= 16
+    } else {
+      modelLabel.isHidden = true
+    }
 
     timelineBarView.isHidden = false
     timelineBarView.frame = NSRect(x: inset, y: y - 8, width: contentWidth, height: 8)
@@ -1137,10 +1153,14 @@ final class RunHistoryRowView: NSView {
     self.onToggle = onToggle
     isExpandedRow = isExpanded
     hasTokenUsage = run.tokenUsage?.totalTokens ?? 0 > 0
-    preferredHeight =
-      isExpanded
-      ? (hasTokenUsage ? Self.expandedHeightWithTokens : Self.expandedHeightWithoutTokens)
-      : Self.collapsedHeight
+    modelText = ModelText(run: run)
+    if isExpanded {
+      let expandedHeight =
+        hasTokenUsage ? Self.expandedHeightWithTokens : Self.expandedHeightWithoutTokens
+      preferredHeight = expandedHeight - (modelText == nil ? 16 : 0)
+    } else {
+      preferredHeight = Self.collapsedHeight
+    }
     chevronLabel.stringValue = isExpanded ? "▾" : "▸"
 
     let elapsed = run.ElapsedString()
@@ -1158,7 +1178,9 @@ final class RunHistoryRowView: NSView {
       promptText = "Prompt unavailable"
     }
     promptLabel.stringValue = "Prompt: \(promptText)"
-    modelLabel.stringValue = ModelText(run: run)
+    if let modelText {
+      modelLabel.stringValue = modelText
+    }
 
     timelineBarView.Configure(segments: run.TimelineSegments())
 
@@ -1236,12 +1258,12 @@ final class RunHistoryRowView: NSView {
     }
   }
 
-  private func ModelText(run: CompletedRun) -> String {
+  private func ModelText(run: CompletedRun) -> String? {
     let model = run.model?.trimmingCharacters(in: .whitespacesAndNewlines)
     if let model, !model.isEmpty {
       return "Model: \(model)"
     }
-    return "Model: unavailable"
+    return nil
   }
 }
 
@@ -1542,7 +1564,8 @@ final class TimelineBarView: NSView {
             ? remainders[$0] < remainders[$1] : widths[$0] > widths[$1]
         }
         guard let i = reducible.first else { break }
-        widths[i] -= 1; assigned -= 1
+        widths[i] -= 1
+        assigned -= 1
         reducible = widths.indices.filter { widths[$0] > minimumWidths[$0] }
       }
       if assigned > totalWidth {
@@ -1550,7 +1573,8 @@ final class TimelineBarView: NSView {
         while assigned > totalWidth && !positive.isEmpty {
           positive.sort { widths[$0] > widths[$1] }
           guard let i = positive.first else { break }
-          widths[i] -= 1; assigned -= 1
+          widths[i] -= 1
+          assigned -= 1
           positive = widths.indices.filter { widths[$0] > 0 }
         }
       }
@@ -1563,7 +1587,9 @@ final class TimelineBarView: NSView {
       if !order.isEmpty {
         var c = 0
         while assigned < totalWidth {
-          widths[order[c % order.count]] += 1; assigned += 1; c += 1
+          widths[order[c % order.count]] += 1
+          assigned += 1
+          c += 1
         }
       }
     }
