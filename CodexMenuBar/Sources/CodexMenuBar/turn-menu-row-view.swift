@@ -5,7 +5,8 @@ import Foundation
 
 final class TurnMenuRowView: NSView {
   private static let rowWidth: CGFloat = 420
-  private static let collapsedIdleHeight: CGFloat = 58
+  private static let collapsedIdleHeight: CGFloat = 44
+  private static let expandedIdleHeaderHeight: CGFloat = 58
   private static let collapsedActiveHeight: CGFloat = 56
   private static let maxExpandedHeight: CGFloat = 500
 
@@ -81,7 +82,9 @@ final class TurnMenuRowView: NSView {
     self.onReconnectEndpoint = onReconnectEndpoint
     self.onOpenWorkspace = onOpenWorkspace
     self.collapsedHeight =
-      endpointRow.activeTurn != nil ? Self.collapsedActiveHeight : Self.collapsedIdleHeight
+      endpointRow.activeTurn != nil
+      ? Self.collapsedActiveHeight
+      : (isExpanded ? Self.expandedIdleHeaderHeight : Self.collapsedIdleHeight)
     super.init(frame: NSRect(x: 0, y: 0, width: Self.rowWidth, height: collapsedHeight))
     ConfigureViews()
     Update(now: now)
@@ -192,6 +195,7 @@ final class TurnMenuRowView: NSView {
 
     if barVisible {
       cwdLabel.isHidden = true
+      detailLabel.isHidden = false
       let detailY = topY - 28
       detailLabel.frame = NSRect(x: nameX, y: detailY, width: detailWidth, height: 13)
 
@@ -200,17 +204,22 @@ final class TurnMenuRowView: NSView {
       barView.frame = NSRect(x: nameX, y: barY, width: detailWidth, height: barHeight)
       barView.isHidden = false
     } else {
-      if let cwd = endpointRow.cwd {
-        let shortPath = cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~")
-        cwdLabel.stringValue = "Workspace: \(shortPath)"
-        cwdLabel.frame = NSRect(x: nameX, y: topY - 28, width: detailWidth, height: 13)
-        cwdLabel.isHidden = false
+      if isExpanded {
+        if let cwd = endpointRow.cwd {
+          let shortPath = cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+          cwdLabel.stringValue = "Workspace: \(shortPath)"
+          cwdLabel.frame = NSRect(x: nameX, y: topY - 28, width: detailWidth, height: 13)
+          cwdLabel.isHidden = false
+        } else {
+          cwdLabel.isHidden = true
+        }
+        detailLabel.isHidden = false
+        let detailY = endpointRow.cwd != nil ? topY - 42 : topY - 27
+        detailLabel.frame = NSRect(x: nameX, y: detailY, width: detailWidth, height: 13)
       } else {
         cwdLabel.isHidden = true
+        detailLabel.isHidden = true
       }
-
-      let detailY = endpointRow.cwd != nil ? topY - 42 : topY - 27
-      detailLabel.frame = NSRect(x: nameX, y: detailY, width: detailWidth, height: 13)
       barView.isHidden = true
     }
 
@@ -435,8 +444,7 @@ final class TurnMenuRowView: NSView {
     expandedScroll.documentView = expandedDocView
     expandedDocView.wantsLayer = true
     expandedDocView.layer?.cornerRadius = 6
-    expandedDocView.layer?.backgroundColor =
-      NSColor.controlBackgroundColor.withAlphaComponent(0.35).cgColor
+    expandedDocView.layer?.backgroundColor = NSColor.clear.cgColor
 
     // Prompt line
     promptLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
@@ -626,7 +634,7 @@ final class TurnMenuRowView: NSView {
     let nameAttrString = BuildNameAttributedString()
     guard let turn = endpointRow.activeTurn else {
       barVisible = false
-      collapsedHeight = Self.collapsedIdleHeight
+      collapsedHeight = HeaderHeight()
       nameLabel.attributedStringValue = nameAttrString
       elapsedLabel.stringValue = "Idle"
       statusDot.layer?.backgroundColor = NSColor.systemGray.withAlphaComponent(0.5).cgColor
@@ -640,7 +648,7 @@ final class TurnMenuRowView: NSView {
     }
 
     barVisible = true
-    collapsedHeight = Self.collapsedActiveHeight
+    collapsedHeight = HeaderHeight()
     nameLabel.attributedStringValue = nameAttrString
     statusDot.layer?.backgroundColor = StatusDotColor(turn.status).cgColor
 
@@ -976,6 +984,13 @@ final class TurnMenuRowView: NSView {
     return NSAttributedString(
       string: name,
       attributes: [.font: nameFont, .foregroundColor: NSColor.labelColor])
+  }
+
+  private func HeaderHeight() -> CGFloat {
+    if endpointRow.activeTurn != nil {
+      return Self.collapsedActiveHeight
+    }
+    return isExpanded ? Self.expandedIdleHeaderHeight : Self.collapsedIdleHeight
   }
 
   private func Truncate(_ value: String, limit: Int) -> String {
