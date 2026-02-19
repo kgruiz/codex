@@ -1312,16 +1312,12 @@ final class TokenUsageBarView: NSView {
 
   override func mouseMoved(with event: NSEvent) {
     let loc = convert(event.locationInWindow, from: nil)
-    let nextIndex = segmentRects.firstIndex(where: { $0.rect.contains(loc) })
-    if nextIndex == hoverIndex { return }
-    hoverIndex = nextIndex
-    if let nextIndex {
-      let seg = segmentRects[nextIndex]
-      OnHoveredSegmentChanged?("\(seg.label): \(FormatTokenCount(seg.count))")
-    } else {
-      OnHoveredSegmentChanged?(nil)
-    }
-    needsDisplay = true
+    UpdateHoverIndex(location: loc)
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    let loc = convert(event.locationInWindow, from: nil)
+    UpdateHoverIndex(location: loc)
   }
 
   override func mouseExited(with event: NSEvent) {
@@ -1387,6 +1383,8 @@ final class TokenUsageBarView: NSView {
         hl.stroke()
       }
     }
+
+    RefreshHoverFromCurrentMouseLocation()
   }
 
   private func BuildUsageSegments(_ usage: TokenUsageInfo) -> [(String, Double, NSColor)] {
@@ -1410,6 +1408,33 @@ final class TokenUsageBarView: NSView {
         ("Output", Double(regularOutput), NSColor.systemGreen.withAlphaComponent(0.55)))
     }
     return segments
+  }
+
+  private func UpdateHoverIndex(location: CGPoint) {
+    let nextIndex = segmentRects.firstIndex(where: { $0.rect.contains(location) })
+    if nextIndex == hoverIndex { return }
+    hoverIndex = nextIndex
+    if let nextIndex {
+      let seg = segmentRects[nextIndex]
+      OnHoveredSegmentChanged?("\(seg.label): \(FormatTokenCount(seg.count))")
+    } else {
+      OnHoveredSegmentChanged?(nil)
+    }
+    needsDisplay = true
+  }
+
+  private func RefreshHoverFromCurrentMouseLocation() {
+    guard let window else { return }
+    let mouseLocation = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+    guard bounds.contains(mouseLocation) else {
+      if hoverIndex != nil {
+        hoverIndex = nil
+        OnHoveredSegmentChanged?(nil)
+        needsDisplay = true
+      }
+      return
+    }
+    UpdateHoverIndex(location: mouseLocation)
   }
 }
 
@@ -1529,6 +1554,8 @@ final class TimelineBarView: NSView {
         hl.stroke()
       }
     }
+
+    RefreshHoverFromCurrentMouseLocation()
   }
 
   private func UpdateHoverIndex(location: CGPoint) {
@@ -1541,6 +1568,20 @@ final class TimelineBarView: NSView {
       OnHoveredSegmentChanged?(nil)
     }
     needsDisplay = true
+  }
+
+  private func RefreshHoverFromCurrentMouseLocation() {
+    guard let window else { return }
+    let mouseLocation = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+    guard bounds.contains(mouseLocation) else {
+      if hoverIndex != nil {
+        hoverIndex = nil
+        OnHoveredSegmentChanged?(nil)
+        needsDisplay = true
+      }
+      return
+    }
+    UpdateHoverIndex(location: mouseLocation)
   }
 
   private func AllocatePixelWidths(totalWidth: Int) -> [Int] {
