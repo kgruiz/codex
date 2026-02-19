@@ -231,8 +231,8 @@ struct EndpointRow {
   let sessionSource: String?
 
   var displayName: String {
-    if let title = chatTitle, !title.isEmpty { return title }
     if let cwd { return (cwd as NSString).lastPathComponent }
+    if let title = chatTitle, !title.isEmpty { return title }
     return String(endpointId.prefix(8))
   }
 

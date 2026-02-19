@@ -30,6 +30,8 @@ final class TurnMenuRowView: NSView {
   private let expandedDocView = NSView()
 
   // Expanded section views
+  private let tokenSectionCard = NSView()
+  private let commandsSectionCard = NSView()
   private let promptLabel = NSTextField(labelWithString: "")
   private let gitModelLabel = NSTextField(labelWithString: "")
   private let tokenTitleLabel = NSTextField(labelWithString: "")
@@ -216,6 +218,7 @@ final class TurnMenuRowView: NSView {
     let pad: CGFloat = 8
     let spc: CGFloat = 10
     let w = max(0, availableWidth - pad * 2)
+    let sectionInner: CGFloat = 6
     var y: CGFloat = pad
 
     // Buttons at the very bottom with separator
@@ -258,26 +261,28 @@ final class TurnMenuRowView: NSView {
       y += sectionH + spc
     }
 
-    // Workspace path
-    if endpointRow.cwd != nil {
-      cwdLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
-      cwdLabel.isHidden = false
-      y += 16
-    } else {
-      cwdLabel.isHidden = true
-    }
-
-    // Commands section
+    // Commands/tools section
     if !endpointRow.commands.isEmpty {
-      commandsTitleLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
-      commandsTitleLabel.isHidden = false
-      y += 15
       let cmdLines = min(endpointRow.commands.count, 5)
       let cmdHeight = CGFloat(cmdLines) * 14 + 2
-      commandsContentLabel.frame = NSRect(x: pad, y: y, width: w, height: cmdHeight)
+      let sectionHeight = sectionInner * 2 + 12 + 4 + cmdHeight
+      commandsSectionCard.frame = NSRect(x: pad, y: y, width: w, height: sectionHeight)
+      commandsSectionCard.isHidden = false
+      commandsTitleLabel.frame = NSRect(
+        x: pad + sectionInner,
+        y: y + sectionHeight - sectionInner - 12,
+        width: max(0, w - sectionInner * 2),
+        height: 12)
+      commandsTitleLabel.isHidden = false
+      commandsContentLabel.frame = NSRect(
+        x: pad + sectionInner,
+        y: y + sectionInner,
+        width: max(0, w - sectionInner * 2),
+        height: cmdHeight)
       commandsContentLabel.isHidden = false
-      y += cmdHeight + spc
+      y += sectionHeight + spc
     } else {
+      commandsSectionCard.isHidden = true
       commandsTitleLabel.isHidden = true
       commandsContentLabel.isHidden = true
     }
@@ -324,18 +329,32 @@ final class TurnMenuRowView: NSView {
       errorCard.isHidden = true
     }
 
-    // Token usage
+    // Token usage section
     if EffectiveTokenUsage() != nil {
-      tokenTitleLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
+      let sectionHeight = sectionInner * 2 + 12 + 6 + 14 + 4 + 12
+      tokenSectionCard.frame = NSRect(x: pad, y: y, width: w, height: sectionHeight)
+      tokenSectionCard.isHidden = false
+      tokenTitleLabel.frame = NSRect(
+        x: pad + sectionInner,
+        y: y + sectionHeight - sectionInner - 12,
+        width: max(0, w - sectionInner * 2),
+        height: 12)
       tokenTitleLabel.isHidden = false
-      y += 15
-      tokenBarView.frame = NSRect(x: pad, y: y, width: w, height: 14)
+      tokenBarView.frame = NSRect(
+        x: pad + sectionInner,
+        y: y + sectionInner + 12 + 4,
+        width: max(0, w - sectionInner * 2),
+        height: 14)
       tokenBarView.isHidden = false
-      y += 18
-      tokenDetailLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
+      tokenDetailLabel.frame = NSRect(
+        x: pad + sectionInner,
+        y: y + sectionInner,
+        width: max(0, w - sectionInner * 2),
+        height: 12)
       tokenDetailLabel.isHidden = false
-      y += 16
+      y += sectionHeight + spc
     } else {
+      tokenSectionCard.isHidden = true
       tokenTitleLabel.isHidden = true
       tokenBarView.isHidden = true
       tokenDetailLabel.isHidden = true
@@ -358,6 +377,15 @@ final class TurnMenuRowView: NSView {
       y += 16
     } else {
       gitModelLabel.isHidden = true
+    }
+
+    // Workspace path near the top for quick context.
+    if endpointRow.cwd != nil {
+      cwdLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
+      cwdLabel.isHidden = false
+      y += 16
+    } else {
+      cwdLabel.isHidden = true
     }
 
     y += pad
@@ -413,6 +441,23 @@ final class TurnMenuRowView: NSView {
     promptLabel.textColor = .secondaryLabelColor
     promptLabel.lineBreakMode = .byTruncatingTail
     promptLabel.maximumNumberOfLines = 2
+
+    // Section cards
+    tokenSectionCard.wantsLayer = true
+    tokenSectionCard.layer?.cornerRadius = 6
+    tokenSectionCard.layer?.backgroundColor =
+      NSColor.controlBackgroundColor.withAlphaComponent(0.5).cgColor
+    tokenSectionCard.layer?.borderWidth = 0.5
+    tokenSectionCard.layer?.borderColor =
+      NSColor.separatorColor.withAlphaComponent(0.3).cgColor
+
+    commandsSectionCard.wantsLayer = true
+    commandsSectionCard.layer?.cornerRadius = 6
+    commandsSectionCard.layer?.backgroundColor =
+      NSColor.controlBackgroundColor.withAlphaComponent(0.5).cgColor
+    commandsSectionCard.layer?.borderWidth = 0.5
+    commandsSectionCard.layer?.borderColor =
+      NSColor.separatorColor.withAlphaComponent(0.3).cgColor
 
     // Git/model line
     gitModelLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
@@ -534,6 +579,8 @@ final class TurnMenuRowView: NSView {
     addSubview(barView)
     addSubview(detailLabel)
     addSubview(expandedScroll)
+    expandedDocView.addSubview(tokenSectionCard)
+    expandedDocView.addSubview(commandsSectionCard)
     expandedDocView.addSubview(promptLabel)
     expandedDocView.addSubview(gitModelLabel)
     expandedDocView.addSubview(tokenTitleLabel)
@@ -698,7 +745,7 @@ final class TurnMenuRowView: NSView {
 
     // Commands
     if !endpointRow.commands.isEmpty {
-      commandsTitleLabel.stringValue = "Commands (\(endpointRow.commands.count))"
+      commandsTitleLabel.stringValue = "Commands / Tools Run (\(endpointRow.commands.count))"
       let lines = endpointRow.commands.suffix(5).map { cmd -> String in
         let shortCmd = Truncate(cmd.command, limit: 38)
         var meta: [String] = []
@@ -707,7 +754,7 @@ final class TurnMenuRowView: NSView {
           meta.append(String(format: "%.1fs", Double(ms) / 1000.0))
         }
         let suffix = meta.isEmpty ? "" : "  \(meta.joined(separator: "  "))"
-        return " \(shortCmd)\(suffix)"
+        return " • \(shortCmd)\(suffix)"
       }
       commandsContentLabel.stringValue = lines.joined(separator: "\n")
     }
@@ -735,7 +782,7 @@ final class TurnMenuRowView: NSView {
     // Git/model
     if HasGitOrModelInfo() { h += 16 }
     // Token usage
-    if EffectiveTokenUsage() != nil { h += 15 + 18 + 16 }
+    if EffectiveTokenUsage() != nil { h += 6 + 6 + 12 + 6 + 14 + 4 + 12 + spc }
     // Prompt
     if PromptLabelText() != nil { h += 28 }
     // Error
@@ -750,7 +797,7 @@ final class TurnMenuRowView: NSView {
     }
     // Commands
     if !endpointRow.commands.isEmpty {
-      h += 15 + CGFloat(min(endpointRow.commands.count, 5)) * 14 + 2 + spc
+      h += 6 + 6 + 12 + 4 + CGFloat(min(endpointRow.commands.count, 5)) * 14 + 2 + spc
     }
     // CWD
     if endpointRow.cwd != nil { h += 16 }
@@ -833,15 +880,8 @@ final class TurnMenuRowView: NSView {
 
   private func ModelSummary() -> String? {
     let model = endpointRow.model?.trimmingCharacters(in: .whitespacesAndNewlines)
-    let provider = endpointRow.modelProvider?.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let model, !model.isEmpty, let provider, !provider.isEmpty {
-      return "Model: \(model) (\(provider))"
-    }
     if let model, !model.isEmpty {
       return "Model: \(model)"
-    }
-    if let provider, !provider.isEmpty {
-      return "Provider: \(provider)"
     }
     return nil
   }
@@ -1194,15 +1234,8 @@ final class RunHistoryRowView: NSView {
 
   private func ModelText(run: CompletedRun) -> String {
     let model = run.model?.trimmingCharacters(in: .whitespacesAndNewlines)
-    let provider = run.modelProvider?.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let model, !model.isEmpty, let provider, !provider.isEmpty {
-      return "Model: \(model) (\(provider))"
-    }
     if let model, !model.isEmpty {
       return "Model: \(model)"
-    }
-    if let provider, !provider.isEmpty {
-      return "Provider: \(provider)"
     }
     return "Model: unavailable"
   }

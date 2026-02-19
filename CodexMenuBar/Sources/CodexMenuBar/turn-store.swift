@@ -117,11 +117,15 @@ final class TurnStore {
   func ApplyThreadSnapshot(endpointId: String, thread: [String: Any], at now: Date) {
     var metadata = metadataByEndpoint[endpointId] ?? EndpointMetadata()
     metadata.threadId = NonEmptyString(thread["id"]) ?? metadata.threadId
-    metadata.chatTitle = NonEmptyString(thread["preview"]) ?? metadata.chatTitle
+    metadata.chatTitle = NonEmptyString(thread["title"]) ?? metadata.chatTitle
     metadata.cwd = NonEmptyString(thread["cwd"]) ?? metadata.cwd
     metadata.model = NonEmptyString(thread["model"]) ?? metadata.model
     metadata.modelProvider =
       NonEmptyString(thread["modelProvider"]) ?? metadata.modelProvider
+
+    if let fallbackPreview = NonEmptyString(thread["preview"]) {
+      metadata.promptPreview = fallbackPreview
+    }
 
     if let turns = thread["turns"] as? [[String: Any]], let latestTurn = turns.last {
       metadata.turnId = NonEmptyString(latestTurn["id"]) ?? metadata.turnId
@@ -133,8 +137,6 @@ final class TurnStore {
       }
       if let promptPreview = ExtractPromptPreview(from: latestTurn) {
         metadata.promptPreview = promptPreview
-      } else if let fallbackPreview = NonEmptyString(thread["preview"]) {
-        metadata.promptPreview = fallbackPreview
       }
       if let cwd = ExtractLatestCwd(from: latestTurn) {
         metadata.cwd = cwd
