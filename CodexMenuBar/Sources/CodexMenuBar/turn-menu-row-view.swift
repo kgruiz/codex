@@ -5,7 +5,7 @@ import Foundation
 
 final class TurnMenuRowView: NSView {
   private static let rowWidth: CGFloat = 420
-  private static let collapsedIdleHeight: CGFloat = 44
+  private static let collapsedIdleHeight: CGFloat = 58
   private static let collapsedActiveHeight: CGFloat = 56
   private static let maxExpandedHeight: CGFloat = 500
 
@@ -191,6 +191,7 @@ final class TurnMenuRowView: NSView {
     let collapsedBottom = bounds.height - collapsedHeight
 
     if barVisible {
+      cwdLabel.isHidden = true
       let detailY = topY - 28
       detailLabel.frame = NSRect(x: nameX, y: detailY, width: detailWidth, height: 13)
 
@@ -199,7 +200,16 @@ final class TurnMenuRowView: NSView {
       barView.frame = NSRect(x: nameX, y: barY, width: detailWidth, height: barHeight)
       barView.isHidden = false
     } else {
-      let detailY = topY - 27
+      if let cwd = endpointRow.cwd {
+        let shortPath = cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        cwdLabel.stringValue = "Workspace: \(shortPath)"
+        cwdLabel.frame = NSRect(x: nameX, y: topY - 28, width: detailWidth, height: 13)
+        cwdLabel.isHidden = false
+      } else {
+        cwdLabel.isHidden = true
+      }
+
+      let detailY = endpointRow.cwd != nil ? topY - 42 : topY - 27
       detailLabel.frame = NSRect(x: nameX, y: detailY, width: detailWidth, height: 13)
       barView.isHidden = true
     }
@@ -378,15 +388,6 @@ final class TurnMenuRowView: NSView {
       y += 16
     } else {
       gitModelLabel.isHidden = true
-    }
-
-    // Workspace path near the top for quick context.
-    if endpointRow.cwd != nil {
-      cwdLabel.frame = NSRect(x: pad, y: y, width: w, height: 12)
-      cwdLabel.isHidden = false
-      y += 16
-    } else {
-      cwdLabel.isHidden = true
     }
 
     y += pad
@@ -595,7 +596,7 @@ final class TurnMenuRowView: NSView {
     expandedDocView.addSubview(filesContentLabel)
     expandedDocView.addSubview(commandsTitleLabel)
     expandedDocView.addSubview(commandsContentLabel)
-    expandedDocView.addSubview(cwdLabel)
+    addSubview(cwdLabel)
     expandedDocView.addSubview(historySectionCard)
     historySectionCard.addSubview(historyTitleLabel)
     historySectionCard.addSubview(historyScrollView)
@@ -769,19 +770,9 @@ final class TurnMenuRowView: NSView {
       commandsContentLabel.stringValue = lines.joined(separator: "\n")
     }
 
-    // Workspace path
-    if let cwd = endpointRow.cwd {
-      let shortPath = cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~")
-      cwdLabel.stringValue = "Workspace: \(shortPath)"
-    }
-
     // History
     let runCount = endpointRow.recentRuns.count
-    if let chatTurnCount = endpointRow.chatTurnCount {
-      historyTitleLabel.stringValue = "Past Runs (\(runCount)) · Chat Turns (\(chatTurnCount))"
-    } else {
-      historyTitleLabel.stringValue = "Past Runs (\(runCount))"
-    }
+    historyTitleLabel.stringValue = "Past Runs (\(runCount))"
     RebuildHistoryRows()
   }
 
@@ -816,8 +807,6 @@ final class TurnMenuRowView: NSView {
         h += 6 + 6 + 12 + 4 + CGFloat(min(endpointRow.commands.count, 5)) * 14 + 2 + spc
       }
     }
-    // CWD
-    if endpointRow.cwd != nil { h += 16 }
     // History
     if !historyRunViews.isEmpty {
       let runH = HistoryScrollHeight()
