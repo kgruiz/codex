@@ -191,6 +191,7 @@ struct RateLimitInfo: Equatable {
 struct EndpointMetadata {
   var chatTitle: String?
   var promptPreview: String?
+  var chatTurnCount: Int?
   var cwd: String?
   var model: String?
   var modelProvider: String?
@@ -212,6 +213,7 @@ struct EndpointRow {
   let recentRuns: [CompletedRun]
   let chatTitle: String?
   let promptPreview: String?
+  let chatTurnCount: Int?
   let cwd: String?
   let model: String?
   let modelProvider: String?

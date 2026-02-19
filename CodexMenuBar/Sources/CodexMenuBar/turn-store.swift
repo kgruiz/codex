@@ -127,19 +127,22 @@ final class TurnStore {
       metadata.promptPreview = fallbackPreview
     }
 
-    if let turns = thread["turns"] as? [[String: Any]], let latestTurn = turns.last {
-      metadata.turnId = NonEmptyString(latestTurn["id"]) ?? metadata.turnId
-      if let threadId = metadata.threadId,
-        let turnId = metadata.turnId
-      {
-        let key = TurnKey(endpointId: endpointId, turnId: turnId)
-        turnsByKey[key]?.UpdateThreadId(threadId)
-      }
-      if let promptPreview = ExtractPromptPreview(from: latestTurn) {
-        metadata.promptPreview = promptPreview
-      }
-      if let cwd = ExtractLatestCwd(from: latestTurn) {
-        metadata.cwd = cwd
+    if let turns = thread["turns"] as? [[String: Any]] {
+      metadata.chatTurnCount = turns.count
+      if let latestTurn = turns.last {
+        metadata.turnId = NonEmptyString(latestTurn["id"]) ?? metadata.turnId
+        if let threadId = metadata.threadId,
+          let turnId = metadata.turnId
+        {
+          let key = TurnKey(endpointId: endpointId, turnId: turnId)
+          turnsByKey[key]?.UpdateThreadId(threadId)
+        }
+        if let promptPreview = ExtractPromptPreview(from: latestTurn) {
+          metadata.promptPreview = promptPreview
+        }
+        if let cwd = ExtractLatestCwd(from: latestTurn) {
+          metadata.cwd = cwd
+        }
       }
     }
     metadata.lastEventAt = now
@@ -348,6 +351,7 @@ final class TurnStore {
         recentRuns: completedRunsByEndpoint[endpointId] ?? [],
         chatTitle: metadata?.chatTitle,
         promptPreview: metadata?.promptPreview,
+        chatTurnCount: metadata?.chatTurnCount,
         cwd: metadata?.cwd,
         model: metadata?.model,
         modelProvider: metadata?.modelProvider,

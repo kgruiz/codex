@@ -767,7 +767,11 @@ final class TurnMenuRowView: NSView {
 
     // History
     let runCount = endpointRow.recentRuns.count
-    historyTitleLabel.stringValue = "Past Runs (\(runCount))"
+    if let chatTurnCount = endpointRow.chatTurnCount {
+      historyTitleLabel.stringValue = "Past Runs (\(runCount)) · Chat Turns (\(chatTurnCount))"
+    } else {
+      historyTitleLabel.stringValue = "Past Runs (\(runCount))"
+    }
     RebuildHistoryRows()
   }
 

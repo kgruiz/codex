@@ -231,7 +231,7 @@ private final class EndpointConnection {
   private func RequestThreadReadOnQueue(threadId: String) {
     let params: [String: Any] = [
       "threadId": threadId,
-      "includeHistory": false,
+      "includeTurns": true,
     ]
     SendRequestOnQueue(method: "thread/read", params: params) { [weak self] result in
       guard let self else { return }
