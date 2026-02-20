@@ -9,15 +9,31 @@ enum AppServerConnectionState: Equatable {
   case failed(String)
 }
 
+private enum EndpointTransport: Equatable {
+  case webSocket(URL)
+  case unixSocket(String)
+
+  var identity: String {
+    switch self {
+    case .webSocket(let endpointUrl):
+      return "ws:\(endpointUrl.absoluteString)"
+    case .unixSocket(let path):
+      return "uds:\(path)"
+    }
+  }
+}
+
 private struct RuntimeEndpoint {
   let endpointId: String
-  let endpointUrl: URL
+  let transport: EndpointTransport
   let pid: Int?
+  let authToken: String?
 }
 
 private final class EndpointConnection {
   let endpointId: String
-  let endpointUrl: URL
+  let transport: EndpointTransport
+  let authToken: String?
 
   var IsConnected: Bool {
     isConnected
@@ -29,7 +45,12 @@ private final class EndpointConnection {
 
   private let queue: DispatchQueue
   private let session: URLSession
-  private var task: URLSessionWebSocketTask?
+
+  private var webSocketTask: URLSessionWebSocketTask?
+  private var socketFD: Int32 = -1
+  private var readSource: DispatchSourceRead?
+  private var socketReadBuffer = Data()
+
   private var isConnected = false
   private var isInitialized = false
   private var nextRequestId = 1
@@ -37,31 +58,49 @@ private final class EndpointConnection {
   private var lastSnapshotRequestAt = Date.distantPast
   private let snapshotRefreshInterval: TimeInterval = 0.5
 
-  init(endpointId: String, endpointUrl: URL, queue: DispatchQueue, session: URLSession) {
+  init(
+    endpointId: String,
+    transport: EndpointTransport,
+    authToken: String?,
+    queue: DispatchQueue,
+    session: URLSession
+  ) {
     self.endpointId = endpointId
-    self.endpointUrl = endpointUrl
+    self.transport = transport
+    self.authToken = authToken
     self.queue = queue
     self.session = session
   }
 
   func Start() {
-    guard task == nil else {
+    guard webSocketTask == nil && socketFD < 0 else {
       return
     }
 
-    let webSocketTask = session.webSocketTask(with: endpointUrl)
-    task = webSocketTask
-    webSocketTask.resume()
+    switch transport {
+    case .webSocket(let endpointUrl):
+      var request = URLRequest(url: endpointUrl)
+      if let authToken, !authToken.isEmpty {
+        request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+      }
 
-    isConnected = true
-    OnConnected?()
+      let task = session.webSocketTask(with: request)
+      webSocketTask = task
+      task.resume()
 
-    StartReceiveLoopOnQueue()
-    SendInitializeHandshakeOnQueue()
+      isConnected = true
+      OnConnected?()
+
+      StartReceiveLoopOnQueue()
+      SendInitializeHandshakeOnQueue()
+
+    case .unixSocket(let socketPath):
+      StartUnixSocketConnectionOnQueue(socketPath: socketPath)
+    }
   }
 
   func Stop() {
-    guard task != nil || isConnected else {
+    guard webSocketTask != nil || socketFD >= 0 || isConnected else {
       return
     }
     DisconnectOnQueue(notify: true)
@@ -80,8 +119,100 @@ private final class EndpointConnection {
     RequestTurnActiveSnapshotOnQueue()
   }
 
+  private func StartUnixSocketConnectionOnQueue(socketPath: String) {
+    guard let socketAddress = SocketAddress(path: socketPath) else {
+      DisconnectOnQueue(notify: true)
+      return
+    }
+
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    if fd < 0 {
+      DisconnectOnQueue(notify: true)
+      return
+    }
+
+    let connectResult = withUnsafePointer(to: socketAddress) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+        connect(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_un>.stride))
+      }
+    }
+
+    if connectResult != 0 {
+      close(fd)
+      DisconnectOnQueue(notify: true)
+      return
+    }
+
+    socketFD = fd
+    socketReadBuffer.removeAll(keepingCapacity: false)
+
+    let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
+    source.setEventHandler { [weak self] in
+      self?.HandleUnixSocketReadableOnQueue()
+    }
+    source.setCancelHandler {
+      close(fd)
+    }
+    source.resume()
+    readSource = source
+
+    isConnected = true
+    OnConnected?()
+
+    SendInitializeHandshakeOnQueue()
+  }
+
+  private func HandleUnixSocketReadableOnQueue() {
+    guard socketFD >= 0 else {
+      return
+    }
+
+    var buffer = [UInt8](repeating: 0, count: 8192)
+
+    while true {
+      let bytesRead = recv(socketFD, &buffer, buffer.count, 0)
+
+      if bytesRead > 0 {
+        socketReadBuffer.append(buffer, count: Int(bytesRead))
+        HandleBufferedSocketMessagesOnQueue()
+        continue
+      }
+
+      if bytesRead == 0 {
+        DisconnectOnQueue(notify: true)
+        return
+      }
+
+      if errno == EAGAIN || errno == EWOULDBLOCK {
+        return
+      }
+
+      DisconnectOnQueue(notify: true)
+      return
+    }
+  }
+
+  private func HandleBufferedSocketMessagesOnQueue() {
+    let newlineData = Data([0x0A])
+
+    while let lineBreak = socketReadBuffer.range(of: newlineData) {
+      let lineData = socketReadBuffer.subdata(in: socketReadBuffer.startIndex..<lineBreak.lowerBound)
+      socketReadBuffer.removeSubrange(socketReadBuffer.startIndex..<lineBreak.upperBound)
+
+      if lineData.isEmpty {
+        continue
+      }
+
+      guard let line = String(data: lineData, encoding: .utf8) else {
+        continue
+      }
+
+      HandleIncomingTextOnQueue(line)
+    }
+  }
+
   private func StartReceiveLoopOnQueue() {
-    guard let webSocketTask = task else {
+    guard let webSocketTask else {
       return
     }
 
@@ -98,23 +229,25 @@ private final class EndpointConnection {
     }
   }
 
-  private func HandleReceiveResultOnQueue(_ result: Result<URLSessionWebSocketTask.Message, Error>)
-  {
+  private func HandleReceiveResultOnQueue(_ result: Result<URLSessionWebSocketTask.Message, Error>) {
     switch result {
-    case .failure(let error):
+    case .failure:
       DisconnectOnQueue(notify: true)
-      _ = error
+
     case .success(let message):
       switch message {
       case .string(let text):
         HandleIncomingTextOnQueue(text)
+
       case .data(let data):
         if let text = String(data: data, encoding: .utf8) {
           HandleIncomingTextOnQueue(text)
         }
+
       @unknown default:
         break
       }
+
       StartReceiveLoopOnQueue()
     }
   }
@@ -136,15 +269,16 @@ private final class EndpointConnection {
       return
     }
 
-    let responseId = ResponseIdFrom(dict)
-    guard let id = responseId else {
+    guard let id = ResponseIdFrom(dict) else {
       return
     }
+
     let handler = pendingResponses.removeValue(forKey: id)
     if let result = dict["result"] as? [String: Any] {
       handler?(result)
       return
     }
+
     handler?([:])
   }
 
@@ -152,9 +286,11 @@ private final class EndpointConnection {
     if let intId = dict["id"] as? Int {
       return intId
     }
+
     if let stringId = dict["id"] as? String {
       return Int(stringId)
     }
+
     return nil
   }
 
@@ -169,31 +305,33 @@ private final class EndpointConnection {
         "experimentalApi": true
       ],
     ]
+
     SendRequestOnQueue(method: "initialize", params: params) { [weak self] _ in
       guard let self else {
         return
       }
+
       self.isInitialized = true
-      let initialized: [String: Any] = [
-        "method": "initialized"
-      ]
-      self.SendObjectOnQueue(initialized)
+      self.SendObjectOnQueue(["method": "initialized"])
       self.RequestTurnActiveSnapshotOnQueue()
     }
   }
 
   private func RequestTurnActiveSnapshotOnQueue() {
     lastSnapshotRequestAt = Date()
+
     SendRequestOnQueue(method: "turn/active", params: [:]) { [weak self] result in
       guard let self else {
         return
       }
+
       guard let activeTurns = result["data"] as? [[String: Any]] else {
         return
       }
 
       var activeTurnKeys: [String] = []
       var threadIdsToFetch: Set<String> = []
+
       for activeTurn in activeTurns {
         guard
           let threadId = activeTurn["threadId"] as? String,
@@ -201,18 +339,19 @@ private final class EndpointConnection {
         else {
           continue
         }
+
         activeTurnKeys.append("\(threadId):\(turnId)")
         threadIdsToFetch.insert(threadId)
 
-        var params: [String: Any] = [
+        let params: [String: Any] = [
           "threadId": threadId,
           "turn": [
             "id": turnId,
             "status": "inProgress",
           ],
+          "endpointId": self.endpointId,
+          "fromSnapshot": true,
         ]
-        params["endpointId"] = self.endpointId
-        params["fromSnapshot"] = true
         self.OnNotification?("turn/started", params)
       }
 
@@ -233,14 +372,17 @@ private final class EndpointConnection {
       "threadId": threadId,
       "includeTurns": true,
     ]
+
     SendRequestOnQueue(method: "thread/read", params: params) { [weak self] result in
       guard let self else { return }
       guard let thread = result["thread"] as? [String: Any] else { return }
-      let notifParams: [String: Any] = [
-        "thread": thread,
-        "endpointId": self.endpointId,
-      ]
-      self.OnNotification?("thread/snapshot", notifParams)
+
+      self.OnNotification?(
+        "thread/snapshot",
+        [
+          "thread": thread,
+          "endpointId": self.endpointId,
+        ])
     }
   }
 
@@ -255,11 +397,12 @@ private final class EndpointConnection {
   }
 
   private func EmitSnapshotSummaryOnQueue(activeTurnKeys: [String]) {
-    var params: [String: Any] = [
-      "activeTurnKeys": activeTurnKeys
-    ]
-    params["endpointId"] = endpointId
-    OnNotification?("thread/snapshotSummary", params)
+    OnNotification?(
+      "thread/snapshotSummary",
+      [
+        "activeTurnKeys": activeTurnKeys,
+        "endpointId": endpointId,
+      ])
   }
 
   private func SendRequestOnQueue(
@@ -278,6 +421,7 @@ private final class EndpointConnection {
       "id": requestId,
       "method": method,
     ]
+
     if let params {
       request["params"] = params
     }
@@ -286,32 +430,88 @@ private final class EndpointConnection {
   }
 
   private func SendObjectOnQueue(_ object: [String: Any]) {
-    guard let webSocketTask = task else {
-      return
-    }
     guard
       let payload = try? JSONSerialization.data(withJSONObject: object),
-      let text = String(data: payload, encoding: .utf8)
+      var text = String(data: payload, encoding: .utf8)
     else {
       return
     }
 
-    webSocketTask.send(.string(text)) { [weak self] error in
-      guard let self else {
+    switch transport {
+    case .webSocket:
+      guard let webSocketTask else {
         return
       }
-      if error == nil {
+
+      webSocketTask.send(.string(text)) { [weak self] error in
+        guard let self else {
+          return
+        }
+
+        if error == nil {
+          return
+        }
+
+        self.queue.async { [weak self] in
+          self?.DisconnectOnQueue(notify: true)
+        }
+      }
+
+    case .unixSocket:
+      guard socketFD >= 0 else {
         return
       }
-      self.queue.async { [weak self] in
-        self?.DisconnectOnQueue(notify: true)
+
+      text.append("\n")
+      guard let data = text.data(using: .utf8) else {
+        return
+      }
+
+      let sendSucceeded = data.withUnsafeBytes { bytes -> Bool in
+        guard let baseAddress = bytes.baseAddress else {
+          return false
+        }
+
+        var offset = 0
+        while offset < bytes.count {
+          let sent = Darwin.send(socketFD, baseAddress.advanced(by: offset), bytes.count - offset, 0)
+          if sent > 0 {
+            offset += sent
+            continue
+          }
+
+          if sent < 0, errno == EINTR {
+            continue
+          }
+
+          return false
+        }
+
+        return true
+      }
+
+      if !sendSucceeded {
+        DisconnectOnQueue(notify: true)
       }
     }
   }
 
   private func DisconnectOnQueue(notify: Bool) {
-    task?.cancel(with: .goingAway, reason: nil)
-    task = nil
+    if let webSocketTask {
+      webSocketTask.cancel(with: .goingAway, reason: nil)
+      self.webSocketTask = nil
+    }
+
+    if let readSource {
+      readSource.cancel()
+      self.readSource = nil
+      socketFD = -1
+    } else if socketFD >= 0 {
+      close(socketFD)
+      socketFD = -1
+    }
+
+    socketReadBuffer.removeAll(keepingCapacity: false)
     pendingResponses.removeAll()
 
     let wasConnected = isConnected
@@ -322,6 +522,27 @@ private final class EndpointConnection {
       OnDisconnected?()
     }
   }
+
+  private func SocketAddress(path: String) -> sockaddr_un? {
+    var address = sockaddr_un()
+    address.sun_len = UInt8(MemoryLayout<sockaddr_un>.stride)
+    address.sun_family = sa_family_t(AF_UNIX)
+
+    let maxLength = MemoryLayout.size(ofValue: address.sun_path)
+    let pathBytes = path.utf8CString
+
+    if pathBytes.count > maxLength {
+      return nil
+    }
+
+    _ = withUnsafeMutablePointer(to: &address.sun_path.0) { pointer in
+      path.withCString { stringPointer in
+        strncpy(pointer, stringPointer, maxLength - 1)
+      }
+    }
+
+    return address
+  }
 }
 
 final class AppServerClient {
@@ -331,6 +552,7 @@ final class AppServerClient {
 
   private let workQueue = DispatchQueue(label: "com.openai.codex.menubar.appserver")
   private let session: URLSession
+
   private var endpointConnections: [String: EndpointConnection] = [:]
   private var endpointResyncTimer: DispatchSourceTimer?
   private var endpointSnapshotTimer: DispatchSourceTimer?
@@ -338,25 +560,17 @@ final class AppServerClient {
   private var endpointDirectoryWatcher: DispatchSourceFileSystemObject?
   private var rootDirectoryWatchPath: String?
   private var endpointDirectoryWatchPath: String?
-  private let resyncIntervalSeconds: TimeInterval = 15.0
-  private let endpointLeaseFreshnessSeconds: TimeInterval = 15.0
-  private let endpointStaleFileTTLSeconds: TimeInterval = 30 * 60
+
+  private let resyncIntervalSeconds: TimeInterval = 10.0
   private var shouldRun = false
   private var state: AppServerConnectionState = .disconnected
   private var lastEndpointIds: [String] = []
-  private let timestampFormatterWithFractionalSeconds = ISO8601DateFormatter()
-  private let timestampFormatter = ISO8601DateFormatter()
 
   init() {
     let config = URLSessionConfiguration.default
     config.timeoutIntervalForRequest = 30
     config.timeoutIntervalForResource = 30
     session = URLSession(configuration: config)
-    timestampFormatterWithFractionalSeconds.formatOptions = [
-      .withInternetDateTime,
-      .withFractionalSeconds,
-    ]
-    timestampFormatter.formatOptions = [.withInternetDateTime]
   }
 
   deinit {
@@ -417,6 +631,7 @@ final class AppServerClient {
     endpointResyncTimer = nil
     endpointSnapshotTimer?.cancel()
     endpointSnapshotTimer = nil
+
     CancelRootDirectoryWatcherOnQueue()
     CancelEndpointDirectoryWatcherOnQueue()
 
@@ -461,6 +676,7 @@ final class AppServerClient {
     guard shouldRun else {
       return
     }
+
     for connection in endpointConnections.values {
       connection.RefreshSnapshotIfNeeded()
     }
@@ -493,15 +709,13 @@ final class AppServerClient {
     guard let nextWatchPath else {
       return
     }
+
     guard let source = MakeDirectoryWatcherSourceOnQueue(path: nextWatchPath) else {
       return
     }
 
     source.setEventHandler { [weak self] in
-      guard let self else {
-        return
-      }
-      self.ScanEndpointsOnQueue()
+      self?.ScanEndpointsOnQueue()
     }
     source.resume()
     rootDirectoryWatcher = source
@@ -514,6 +728,7 @@ final class AppServerClient {
       CancelEndpointDirectoryWatcherOnQueue()
       return
     }
+
     if endpointDirectoryPath == endpointDirectoryWatchPath, endpointDirectoryWatcher != nil {
       return
     }
@@ -523,11 +738,9 @@ final class AppServerClient {
     guard let source = MakeDirectoryWatcherSourceOnQueue(path: endpointDirectoryPath) else {
       return
     }
+
     source.setEventHandler { [weak self] in
-      guard let self else {
-        return
-      }
-      self.ScanEndpointsOnQueue()
+      self?.ScanEndpointsOnQueue()
     }
     source.resume()
     endpointDirectoryWatcher = source
@@ -572,9 +785,11 @@ final class AppServerClient {
       CodexHomeDirectoryURL().path,
       URL(fileURLWithPath: NSHomeDirectory()).path,
     ]
+
     for path in candidates where DirectoryExists(path: path) {
       return path
     }
+
     return nil
   }
 
@@ -600,9 +815,12 @@ final class AppServerClient {
     return exists && isDirectory.boolValue
   }
 
+  private func FileExists(path: String) -> Bool {
+    FileManager.default.fileExists(atPath: path)
+  }
+
   private func ReadRuntimeEndpointsOnQueue() -> [String: RuntimeEndpoint] {
     let endpointDir = EndpointDirectoryURL()
-    let now = Date()
 
     guard
       let fileUrls = try? FileManager.default.contentsOfDirectory(
@@ -620,11 +838,12 @@ final class AppServerClient {
       guard let payload = try? Data(contentsOf: fileUrl) else {
         continue
       }
+
       guard
         let object = try? JSONSerialization.jsonObject(with: payload),
         let dict = object as? [String: Any],
-        let endpointUrlRaw = dict["endpointUrl"] as? String,
-        let endpointUrl = URL(string: endpointUrlRaw)
+        let socketPath = dict["socketPath"] as? String,
+        !socketPath.isEmpty
       else {
         continue
       }
@@ -634,31 +853,24 @@ final class AppServerClient {
         (dict["pid"] as? Int)
         ?? ((dict["pid"] as? String).flatMap { Int($0) })
         ?? Int(endpointId)
-      let lastHeartbeatAt = ParseTimestamp(dict["lastHeartbeatAt"])
-      let startedAt = ParseTimestamp(dict["startedAt"])
-      let isPidAlive = pid.map(IsProcessAlive) ?? false
-      let isFreshLease =
-        lastHeartbeatAt.map { now.timeIntervalSince($0) <= endpointLeaseFreshnessSeconds } ?? true
-      let isActiveEndpoint = isPidAlive && isFreshLease
+      let authToken = dict["authToken"] as? String
 
-      let shouldDeleteForDeadPid = pid != nil && !isPidAlive
-      let shouldDeleteForExpiredLease =
-        lastHeartbeatAt.map { now.timeIntervalSince($0) > endpointStaleFileTTLSeconds } ?? false
-      let shouldDeleteForAncientFile =
-        lastHeartbeatAt == nil
-        && startedAt.map { now.timeIntervalSince($0) > endpointStaleFileTTLSeconds } ?? false
-        && (pid == nil || !isPidAlive)
-      if shouldDeleteForDeadPid || shouldDeleteForExpiredLease || shouldDeleteForAncientFile {
+      let isPidAlive = pid.map(IsProcessAlive) ?? false
+      let socketExists = FileExists(path: socketPath)
+
+      if !isPidAlive || !socketExists {
         DeleteEndpointFileIfPresent(fileUrl)
       }
 
-      if !isActiveEndpoint {
+      guard isPidAlive, socketExists else {
         continue
       }
+
       endpoints[endpointId] = RuntimeEndpoint(
         endpointId: endpointId,
-        endpointUrl: endpointUrl,
-        pid: pid
+        transport: .unixSocket(socketPath),
+        pid: pid,
+        authToken: authToken
       )
     }
 
@@ -677,7 +889,7 @@ final class AppServerClient {
 
     for endpoint in endpoints.values {
       if let existing = endpointConnections[endpoint.endpointId] {
-        if existing.endpointUrl == endpoint.endpointUrl {
+        if existing.transport == endpoint.transport && existing.authToken == endpoint.authToken {
           existing.RefreshSnapshotIfNeeded()
           continue
         }
@@ -687,7 +899,8 @@ final class AppServerClient {
 
       let connection = EndpointConnection(
         endpointId: endpoint.endpointId,
-        endpointUrl: endpoint.endpointUrl,
+        transport: endpoint.transport,
+        authToken: endpoint.authToken,
         queue: workQueue,
         session: session
       )
@@ -716,8 +929,7 @@ final class AppServerClient {
       connection.Start()
     }
 
-    let endpointIds = ConnectedEndpointIdsOnQueue()
-    DispatchEndpointIds(endpointIds)
+    DispatchEndpointIds(ConnectedEndpointIdsOnQueue())
   }
 
   private func ConnectedEndpointIdsOnQueue() -> [String] {
@@ -737,21 +949,7 @@ final class AppServerClient {
       return true
     }
 
-    if errno == EPERM {
-      return true
-    }
-
-    return false
-  }
-
-  private func ParseTimestamp(_ rawValue: Any?) -> Date? {
-    guard let rawValue = rawValue as? String, !rawValue.isEmpty else {
-      return nil
-    }
-    if let parsed = timestampFormatterWithFractionalSeconds.date(from: rawValue) {
-      return parsed
-    }
-    return timestampFormatter.date(from: rawValue)
+    return errno == EPERM
   }
 
   private func DeleteEndpointFileIfPresent(_ fileUrl: URL) {
@@ -794,6 +992,7 @@ final class AppServerClient {
     if state == nextState {
       return
     }
+
     state = nextState
     DispatchQueue.main.async { [weak self] in
       self?.OnStateChange?(nextState)
@@ -804,6 +1003,7 @@ final class AppServerClient {
     if endpointIds == lastEndpointIds {
       return
     }
+
     lastEndpointIds = endpointIds
     DispatchQueue.main.async { [weak self] in
       self?.OnEndpointIdsChanged?(endpointIds)

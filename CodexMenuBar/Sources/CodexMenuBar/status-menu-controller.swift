@@ -1,183 +1,90 @@
 import AppKit
-import Foundation
+import Observation
+import SwiftUI
 
-final class StatusMenuController: NSObject, NSMenuDelegate {
+final class StatusMenuController: NSObject, NSPopoverDelegate {
   var ReconnectHandler: (() -> Void)?
   var ReconnectEndpointHandler: ((String) -> Void)?
   var QuitHandler: (() -> Void)?
 
+  private let model: MenuBarViewModel
   private let statusItem: NSStatusItem
-  private let menu: NSMenu
   private let statusIcon: NSImage?
-  private var expandedEndpointIds: Set<String> = []
-  private var expandedRunKeysByEndpoint: [String: Set<String>] = [:]
-  private var cachedEndpointRows: [EndpointRow] = []
-  private var cachedConnectionState: AppServerConnectionState = .disconnected
-  private var cachedAnimationFrame = 0
+  private let popover: NSPopover
 
-  override init() {
+  init(model: MenuBarViewModel) {
+    self.model = model
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    menu = NSMenu(title: "CodexMenuBar")
     statusIcon = Self.LoadStatusIcon()
+    popover = NSPopover()
     super.init()
-    menu.delegate = self
-    statusItem.menu = menu
+
+    popover.behavior = .transient
+    popover.delegate = self
+    popover.contentSize = NSSize(width: 460, height: 580)
+    popover.contentViewController = NSHostingController(
+      rootView: StatusDropdownView(
+        model: model,
+        onReconnectAll: { [weak self] in self?.ReconnectHandler?() },
+        onReconnectEndpoint: { [weak self] endpointId in
+          self?.ReconnectEndpointHandler?(endpointId)
+        },
+        onQuit: { [weak self] in self?.QuitHandler?() }
+      ))
+
     if let button = statusItem.button {
       button.title = ""
       button.image = statusIcon
       button.imagePosition = .imageLeading
+      button.target = self
+      button.action = #selector(OnStatusItemPressed)
     }
+
+    UpdateButton()
+    ObserveModel()
   }
 
-  func Render(
-    endpointRows: [EndpointRow],
-    connectionState: AppServerConnectionState,
-    animationFrame: Int,
-    now: Date
-  ) {
-    cachedEndpointRows = endpointRows
-    cachedConnectionState = connectionState
-    cachedAnimationFrame = animationFrame
+  @objc
+  private func OnStatusItemPressed() {
+    guard let button = statusItem.button else {
+      return
+    }
 
-    let endpointIds = Set(endpointRows.map(\.endpointId))
-    expandedEndpointIds = expandedEndpointIds.intersection(endpointIds)
-    expandedRunKeysByEndpoint = expandedRunKeysByEndpoint.filter { endpointIds.contains($0.key) }
-
-    let runningCount = endpointRows.filter { $0.activeTurn != nil }.count
-    UpdateButton(connectionState: connectionState, runningCount: runningCount)
-
-    menu.removeAllItems()
-
-    // Header
-    let headerItem = NSMenuItem(
-      title: HeaderTitle(connectionState: connectionState, runningCount: runningCount),
-      action: nil, keyEquivalent: "")
-    headerItem.isEnabled = false
-    menu.addItem(headerItem)
-    menu.addItem(.separator())
-
-    // Endpoint rows
-    if endpointRows.isEmpty {
-      let emptyItem = NSMenuItem(
-        title: "No active Codex sessions", action: nil, keyEquivalent: "")
-      emptyItem.isEnabled = false
-      menu.addItem(emptyItem)
-
-      if connectionState == .connected || connectionState == .connecting {
-        let hintItem = NSMenuItem(
-          title: "Run codex in a terminal to start a session",
-          action: nil, keyEquivalent: "")
-        hintItem.isEnabled = false
-        menu.addItem(hintItem)
-      }
+    if popover.isShown {
+      popover.performClose(nil)
     } else {
-      for endpointRow in endpointRows {
-        let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        item.view = TurnMenuRowView(
-          endpointRow: endpointRow,
-          now: now,
-          isExpanded: expandedEndpointIds.contains(endpointRow.endpointId),
-          expandedRunKeys: expandedRunKeysByEndpoint[endpointRow.endpointId] ?? [],
-          onToggle: { [weak self] endpointId in
-            guard let self else { return }
-            if self.expandedEndpointIds.contains(endpointId) {
-              self.expandedEndpointIds.remove(endpointId)
-            } else {
-              self.expandedEndpointIds.insert(endpointId)
-            }
-            self.Render(
-              endpointRows: self.cachedEndpointRows,
-              connectionState: self.cachedConnectionState,
-              animationFrame: self.cachedAnimationFrame,
-              now: Date())
-          },
-          onToggleHistoryRun: { [weak self] endpointId, runKey in
-            guard let self else { return }
-            var expandedRunKeys = self.expandedRunKeysByEndpoint[endpointId] ?? []
-            if expandedRunKeys.contains(runKey) {
-              expandedRunKeys.remove(runKey)
-            } else {
-              expandedRunKeys.insert(runKey)
-            }
-            self.expandedRunKeysByEndpoint[endpointId] = expandedRunKeys
-            self.Render(
-              endpointRows: self.cachedEndpointRows,
-              connectionState: self.cachedConnectionState,
-              animationFrame: self.cachedAnimationFrame,
-              now: Date())
-          },
-          onReconnectEndpoint: { [weak self] endpointId in
-            self?.ReconnectEndpointHandler?(endpointId)
-          })
-        item.isEnabled = true
-        menu.addItem(item)
+      popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+  }
+
+  func popoverDidClose(_ notification: Notification) {
+    _ = notification
+    model.ClearExpandedState()
+  }
+
+  private func ObserveModel() {
+    withObservationTracking {
+      _ = model.connectionState
+      _ = model.runningCount
+    } onChange: { [weak self] in
+      DispatchQueue.main.async {
+        self?.UpdateButton()
+        self?.ObserveModel()
       }
     }
-
-    menu.addItem(.separator())
-
-    // Rate limits footer
-    if let rateLimits = endpointRows.first(where: { $0.rateLimits != nil })?.rateLimits {
-      if let remaining = rateLimits.remaining, let limit = rateLimits.limit {
-        var rateLimitText = "Rate: \(remaining)/\(limit) remaining"
-        if let resetsAt = rateLimits.resetsAt {
-          let seconds = max(0, Int(resetsAt.timeIntervalSince(now)))
-          if seconds > 0 {
-            let minutes = seconds / 60
-            let secs = seconds % 60
-            if minutes > 0 {
-              rateLimitText += ", resets in \(minutes)m \(secs)s"
-            } else {
-              rateLimitText += ", resets in \(secs)s"
-            }
-          }
-        }
-        let rateLimitItem = NSMenuItem(
-          title: rateLimitText, action: nil, keyEquivalent: "")
-        rateLimitItem.isEnabled = false
-        menu.addItem(rateLimitItem)
-        menu.addItem(.separator())
-      }
-    }
-
-    // Actions
-    let reconnect = NSMenuItem(
-      title: "Reconnect endpoints", action: #selector(OnReconnect), keyEquivalent: "r")
-    reconnect.target = self
-    menu.addItem(reconnect)
-
-    let quit = NSMenuItem(
-      title: "Quit CodexMenuBar", action: #selector(OnQuit), keyEquivalent: "q")
-    quit.target = self
-    menu.addItem(quit)
   }
 
-  @objc
-  private func OnReconnect() {
-    ReconnectHandler?()
-  }
-
-  @objc
-  private func OnQuit() {
-    QuitHandler?()
-  }
-
-  func menuDidClose(_ menu: NSMenu) {
-    expandedEndpointIds.removeAll()
-    expandedRunKeysByEndpoint.removeAll()
-  }
-
-  private func UpdateButton(connectionState: AppServerConnectionState, runningCount: Int) {
+  private func UpdateButton() {
     guard let button = statusItem.button else { return }
 
     if let statusIcon {
       button.image = statusIcon
       button.imagePosition = .imageLeading
-      switch connectionState {
+      switch model.connectionState {
       case .connected:
-        button.title = runningCount > 0 ? "\(runningCount)" : ""
+        button.title = model.runningCount > 0 ? "\(model.runningCount)" : ""
       case .connecting, .reconnecting:
-        button.title = "…"
+        button.title = "..."
       case .failed:
         button.title = "!"
       case .disconnected:
@@ -186,9 +93,9 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
       return
     }
 
-    switch connectionState {
+    switch model.connectionState {
     case .connected:
-      button.title = runningCount > 0 ? "◉\(runningCount)" : "◎"
+      button.title = model.runningCount > 0 ? "◉\(model.runningCount)" : "◎"
     case .connecting, .reconnecting:
       button.title = "◌"
     case .failed:
@@ -212,22 +119,95 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     }
     return nil
   }
+}
 
-  private func HeaderTitle(connectionState: AppServerConnectionState, runningCount: Int) -> String {
-    switch connectionState {
-    case .connected:
-      if runningCount == 0 {
-        return "Codex — connected"
+private struct StatusDropdownView: View {
+  @Bindable var model: MenuBarViewModel
+
+  let onReconnectAll: () -> Void
+  let onReconnectEndpoint: (String) -> Void
+  let onQuit: () -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text(model.headerTitle)
+        .font(.headline)
+
+      Divider()
+
+      if model.endpointRows.isEmpty {
+        VStack(alignment: .leading, spacing: 6) {
+          Text("No active Codex sessions")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+
+          if model.connectionState == .connected || model.connectionState == .connecting {
+            Text("Run codex in a terminal to start a session")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+      } else {
+        ScrollView {
+          LazyVStack(spacing: 8) {
+            ForEach(model.endpointRows, id: \.endpointId) { endpointRow in
+              TurnMenuRowView(
+                endpointRow: endpointRow,
+                now: model.now,
+                isExpanded: model.expandedEndpointIds.contains(endpointRow.endpointId),
+                expandedRunKeys: model.expandedRunKeysByEndpoint[endpointRow.endpointId] ?? [],
+                onToggle: { model.ToggleEndpoint(endpointRow.endpointId) },
+                onToggleHistoryRun: { runKey in
+                  model.ToggleRun(endpointId: endpointRow.endpointId, runKey: runKey)
+                },
+                onReconnectEndpoint: { onReconnectEndpoint(endpointRow.endpointId) }
+              )
+            }
+          }
+          .padding(.vertical, 2)
+        }
+        .frame(maxHeight: 420)
       }
-      return "Codex — \(runningCount) active"
-    case .connecting:
-      return "Codex — connecting…"
-    case .reconnecting:
-      return "Codex — reconnecting…"
-    case .failed(let message):
-      return "Codex — error: \(message)"
-    case .disconnected:
-      return "Codex — disconnected"
+
+      if let rateLimits = model.endpointRows.first(where: { $0.rateLimits != nil })?.rateLimits,
+        let remaining = rateLimits.remaining,
+        let limit = rateLimits.limit
+      {
+        Divider()
+
+        Text(RateLimitText(rateLimits: rateLimits, remaining: remaining, limit: limit))
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
+      Divider()
+
+      HStack(spacing: 8) {
+        Button("Reconnect endpoints", action: onReconnectAll)
+        Spacer()
+        Button("Quit CodexMenuBar", action: onQuit)
+      }
     }
+    .padding(12)
+    .frame(width: 440)
+  }
+
+  private func RateLimitText(rateLimits: RateLimitInfo, remaining: Int, limit: Int) -> String {
+    var text = "Rate: \(remaining)/\(limit) remaining"
+
+    if let resetsAt = rateLimits.resetsAt {
+      let seconds = max(0, Int(resetsAt.timeIntervalSince(model.now)))
+      if seconds > 0 {
+        let minutes = seconds / 60
+        let secs = seconds % 60
+        if minutes > 0 {
+          text += ", resets in \(minutes)m \(secs)s"
+        } else {
+          text += ", resets in \(secs)s"
+        }
+      }
+    }
+
+    return text
   }
 }

@@ -1,9 +1,12 @@
 import Foundation
+import Observation
 
+@Observable
 final class TurnStore {
   private var turnsByKey: [String: ActiveTurn] = [:]
   private var completedRunsByEndpoint: [String: [CompletedRun]] = [:]
   private var metadataByEndpoint: [String: EndpointMetadata] = [:]
+  private(set) var activeEndpointIds: [String] = []
   private let completionRetentionSeconds: TimeInterval = 10
   private let maxCompletedRunsPerEndpoint = 50
 
@@ -371,6 +374,14 @@ final class TurnStore {
         sessionSource: metadata?.sessionSource
       )
     }
+  }
+
+  func SetActiveEndpointIds(_ endpointIds: [String]) {
+    activeEndpointIds = endpointIds
+  }
+
+  var EndpointRows: [EndpointRow] {
+    EndpointRows(activeEndpointIds: activeEndpointIds)
   }
 
   private func ArchiveCompletedTurnIfNeeded(_ turn: ActiveTurn) {

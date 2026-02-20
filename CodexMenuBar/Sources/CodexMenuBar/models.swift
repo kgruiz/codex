@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 enum TurnExecutionStatus: Equatable {
   case inProgress
@@ -288,6 +289,7 @@ struct CompletedRun: Equatable {
   }
 }
 
+@Observable
 final class ActiveTurn {
   let endpointId: String
   private(set) var threadId: String?

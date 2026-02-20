@@ -3,12 +3,10 @@ import Foundation
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
   private let turnStore = TurnStore()
-  private let statusMenu = StatusMenuController()
+  private lazy var model = MenuBarViewModel(turnStore: turnStore)
+  private lazy var statusMenu = StatusMenuController(model: model)
   private let appServerClient = AppServerClient()
 
-  private var connectionState: AppServerConnectionState = .disconnected
-  private var activeEndpointIds: [String] = []
-  private var animationFrame = 0
   private var timer: Timer?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
@@ -17,7 +15,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ConfigureClient()
     StartTimer()
     appServerClient.Start()
-    Render()
   }
 
   func applicationWillTerminate(_ notification: Notification) {
@@ -43,16 +40,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       guard let self else {
         return
       }
-      self.connectionState = state
-      self.Render()
+      self.model.connectionState = state
     }
 
     appServerClient.OnEndpointIdsChanged = { [weak self] endpointIds in
       guard let self else {
         return
       }
-      self.activeEndpointIds = endpointIds
-      self.Render()
+      self.model.SetEndpointIds(endpointIds)
     }
 
     appServerClient.OnNotification = { [weak self] method, params in
@@ -60,7 +55,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return
       }
       self.HandleNotification(method: method, params: params)
-      self.Render()
     }
   }
 
@@ -76,18 +70,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   @objc
   private func OnTimerTick() {
-    animationFrame += 1
-    turnStore.Tick(now: Date())
-    Render()
-  }
-
-  private func Render() {
-    statusMenu.Render(
-      endpointRows: turnStore.EndpointRows(activeEndpointIds: activeEndpointIds),
-      connectionState: connectionState,
-      animationFrame: animationFrame,
-      now: Date()
-    )
+    let now = Date()
+    turnStore.Tick(now: now)
+    model.now = now
   }
 
   private func HandleNotification(method: String, params: [String: Any]) {
