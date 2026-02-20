@@ -5,6 +5,8 @@ import SwiftUI
 final class StatusMenuController: NSObject, NSPopoverDelegate {
   var ReconnectHandler: (() -> Void)?
   var ReconnectEndpointHandler: ((String) -> Void)?
+  var QuickStartHandler: (() -> Void)?
+  var OpenTerminalHandler: ((String) -> Void)?
   var QuitHandler: (() -> Void)?
 
   private let model: MenuBarViewModel
@@ -28,6 +30,10 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
         onReconnectAll: { [weak self] in self?.ReconnectHandler?() },
         onReconnectEndpoint: { [weak self] endpointId in
           self?.ReconnectEndpointHandler?(endpointId)
+        },
+        onQuickStart: { [weak self] in self?.QuickStartHandler?() },
+        onOpenTerminal: { [weak self] workingDirectory in
+          self?.OpenTerminalHandler?(workingDirectory)
         },
         onQuit: { [weak self] in self?.QuitHandler?() }
       ))
@@ -126,12 +132,26 @@ private struct StatusDropdownView: View {
 
   let onReconnectAll: () -> Void
   let onReconnectEndpoint: (String) -> Void
+  let onQuickStart: () -> Void
+  let onOpenTerminal: (String) -> Void
   let onQuit: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text(model.headerTitle)
-        .font(.headline)
+      HStack(alignment: .center, spacing: 8) {
+        Text(model.headerTitle)
+          .font(.headline)
+          .lineLimit(1)
+
+        Spacer(minLength: 4)
+
+        if let warningText = model.lowRateLimitWarningText {
+          Label(warningText, systemImage: "exclamationmark.triangle.fill")
+            .font(.caption)
+            .foregroundStyle(.orange)
+            .lineLimit(1)
+        }
+      }
 
       Divider()
 
@@ -146,6 +166,12 @@ private struct StatusDropdownView: View {
               .font(.caption)
               .foregroundStyle(.secondary)
           }
+
+          Button(action: onQuickStart) {
+            Label("Quick Start", systemImage: "play.fill")
+          }
+          .buttonStyle(.borderedProminent)
+          .controlSize(.small)
         }
       } else {
         ScrollView {
@@ -160,7 +186,23 @@ private struct StatusDropdownView: View {
                 onToggleHistoryRun: { runKey in
                   model.ToggleRun(endpointId: endpointRow.endpointId, runKey: runKey)
                 },
-                onReconnectEndpoint: { onReconnectEndpoint(endpointRow.endpointId) }
+                isFilesExpanded: model.IsSectionExpanded(
+                  endpointId: endpointRow.endpointId, section: .files),
+                isCommandsExpanded: model.IsSectionExpanded(
+                  endpointId: endpointRow.endpointId, section: .commands),
+                isPastRunsExpanded: model.IsSectionExpanded(
+                  endpointId: endpointRow.endpointId, section: .pastRuns),
+                onToggleFiles: {
+                  model.ToggleSection(endpointId: endpointRow.endpointId, section: .files)
+                },
+                onToggleCommands: {
+                  model.ToggleSection(endpointId: endpointRow.endpointId, section: .commands)
+                },
+                onTogglePastRuns: {
+                  model.ToggleSection(endpointId: endpointRow.endpointId, section: .pastRuns)
+                },
+                onReconnectEndpoint: { onReconnectEndpoint(endpointRow.endpointId) },
+                onOpenInTerminal: { cwd in onOpenTerminal(cwd) }
               )
             }
           }
@@ -169,7 +211,7 @@ private struct StatusDropdownView: View {
         .frame(maxHeight: 420)
       }
 
-      if let rateLimits = model.endpointRows.first(where: { $0.rateLimits != nil })?.rateLimits,
+      if let rateLimits = model.activeRateLimitInfo,
         let remaining = rateLimits.remaining,
         let limit = rateLimits.limit
       {

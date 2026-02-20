@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private lazy var model = MenuBarViewModel(turnStore: turnStore)
   private lazy var statusMenu = StatusMenuController(model: model)
   private let appServerClient = AppServerClient()
+  private let terminalLauncher = TerminalLauncher()
 
   private var timer: Timer?
 
@@ -32,6 +33,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     statusMenu.QuitHandler = {
       NSApplication.shared.terminate(nil)
+    }
+    statusMenu.QuickStartHandler = { [weak self] in
+      self?.terminalLauncher.LaunchQuickStart()
+    }
+    statusMenu.OpenTerminalHandler = { [weak self] workingDirectory in
+      self?.terminalLauncher.OpenTerminal(at: workingDirectory)
     }
   }
 
@@ -73,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let now = Date()
     turnStore.Tick(now: now)
     model.now = now
+    model.SyncSectionDisclosureState()
   }
 
   private func HandleNotification(method: String, params: [String: Any]) {
@@ -104,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     default:
       break
     }
+    model.SyncSectionDisclosureState()
   }
 
   private func HandleTurnStarted(params: [String: Any]) {

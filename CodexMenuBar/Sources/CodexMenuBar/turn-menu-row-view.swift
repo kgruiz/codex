@@ -9,9 +9,14 @@ struct TurnMenuRowView: View {
   let expandedRunKeys: Set<String>
   let onToggle: () -> Void
   let onToggleHistoryRun: (String) -> Void
+  let isFilesExpanded: Bool
+  let isCommandsExpanded: Bool
+  let isPastRunsExpanded: Bool
+  let onToggleFiles: () -> Void
+  let onToggleCommands: () -> Void
+  let onTogglePastRuns: () -> Void
   let onReconnectEndpoint: () -> Void
-
-  @State private var hoveredTimelineSegment: TimelineSegment?
+  let onOpenInTerminal: (String) -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -39,25 +44,24 @@ struct TurnMenuRowView: View {
       .buttonStyle(.plain)
 
       if activeTurn != nil {
-        Text(TimelineDetailText())
+        Text(TimelineSummaryText())
           .font(.system(size: 11))
           .foregroundStyle(.secondary)
           .lineLimit(1)
 
-        TimelineBarView(
-          segments: activeTurn?.TimelineSegments(now: now) ?? [],
-          onHoveredSegmentChanged: { segment in
-            hoveredTimelineSegment = segment
-          }
-        )
-        .frame(height: 8)
+        TimelineBarView(segments: activeTurn?.TimelineSegments(now: now) ?? [])
+          .frame(height: 8)
       } else {
         if isExpanded, let cwd = endpointRow.cwd {
-          Text("Workspace: \(cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~"))")
-            .font(.system(size: 10))
-            .foregroundStyle(.tertiary)
-            .lineLimit(1)
-            .truncationMode(.middle)
+          Label {
+            Text(cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+              .lineLimit(1)
+              .truncationMode(.middle)
+          } icon: {
+            Image(systemName: "folder.fill")
+          }
+          .font(.system(size: 10))
+          .foregroundStyle(.tertiary)
         }
 
         Text(endpointRow.lastTraceLabel ?? "No active run")
@@ -73,10 +77,7 @@ struct TurnMenuRowView: View {
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 8)
-    .background(
-      RoundedRectangle(cornerRadius: 8, style: .continuous)
-        .fill(Color(nsColor: NSColor.controlBackgroundColor).opacity(0.45))
-    )
+    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     .overlay(
       RoundedRectangle(cornerRadius: 8, style: .continuous)
         .stroke(Color(nsColor: NSColor.separatorColor).opacity(0.2), lineWidth: 0.5)
@@ -87,22 +88,43 @@ struct TurnMenuRowView: View {
   @ViewBuilder
   private var ExpandedBody: some View {
     VStack(alignment: .leading, spacing: 10) {
-      if let prompt = PromptLabelText() {
-        Text("Prompt: \(prompt)")
-          .font(.system(size: 10))
-          .foregroundStyle(.secondary)
-          .lineLimit(2)
+      if let prompt = PromptDisplayText() {
+        SectionCard {
+          HStack(spacing: 6) {
+            Label("Prompt", systemImage: "text.bubble.fill")
+              .font(.system(size: 10, weight: .semibold))
+              .foregroundStyle(.secondary)
+
+            Spacer(minLength: 4)
+
+            Button(action: { CopyToClipboard(prompt) }) {
+              Image(systemName: "doc.on.doc")
+                .font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .help("Copy prompt")
+          }
+        } content: {
+          Text(prompt)
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+        }
       }
 
       if HasGitOrModelInfo() {
-        Text(GitModelLine())
+        Label(GitModelLine(), systemImage: "folder.fill")
           .font(.system(size: 10, weight: .medium))
           .foregroundStyle(.secondary)
           .lineLimit(1)
       }
 
       if let usage = EffectiveTokenUsage() {
-        SectionCard(title: TokenTitle(usage: usage)) {
+        SectionCard {
+          Label(TokenTitle(usage: usage), systemImage: "chart.bar.fill")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.secondary)
+        } content: {
           VStack(alignment: .leading, spacing: 4) {
             TokenUsageBarView(usage: usage)
               .frame(height: 12)
@@ -116,61 +138,85 @@ struct TurnMenuRowView: View {
       }
 
       if let latestError = endpointRow.latestError {
-        VStack(alignment: .leading, spacing: 4) {
-          Text(latestError.willRetry ? "\(latestError.message) (retrying...)" : latestError.message)
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(.red)
-            .lineLimit(2)
+        SectionCard {
+          HStack(spacing: 6) {
+            Label("Error", systemImage: "exclamationmark.circle.fill")
+              .font(.system(size: 10, weight: .semibold))
+              .foregroundStyle(.red)
+
+            Spacer(minLength: 4)
+
+            Button(action: { CopyToClipboard(ErrorCopyText(latestError)) }) {
+              Image(systemName: "doc.on.doc")
+                .font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .help("Copy error")
+          }
+        } content: {
+          VStack(alignment: .leading, spacing: 2) {
+            Text(latestError.willRetry ? "\(latestError.message) (retrying...)" : latestError.message)
+              .font(.system(size: 10, weight: .medium))
+              .foregroundStyle(.red)
+              .lineLimit(2)
+
+            if let details = latestError.details, !details.isEmpty {
+              Text(details)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+            }
+          }
         }
-        .padding(8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-          RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(Color.red.opacity(0.08))
-        )
-        .overlay(
-          RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .stroke(Color.red.opacity(0.25), lineWidth: 0.5)
-        )
       }
 
       if !endpointRow.planSteps.isEmpty {
-        VStack(alignment: .leading, spacing: 2) {
-          Text(PlanTitle())
+        SectionCard {
+          Label(PlanTitle(), systemImage: "checklist")
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(.secondary)
-
-          ForEach(Array(endpointRow.planSteps.prefix(6).enumerated()), id: \.offset) { _, step in
-            Text("\(PlanIcon(step.status))  \(Truncate(step.description, limit: 52))")
-              .font(.system(size: 10))
-              .foregroundStyle(.secondary)
-              .lineLimit(1)
-          }
-        }
-      }
-
-      if !endpointRow.fileChanges.isEmpty {
-        VStack(alignment: .leading, spacing: 2) {
-          Text("Files (\(endpointRow.fileChanges.count))")
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(.secondary)
-
-          ForEach(Array(endpointRow.fileChanges.prefix(8).enumerated()), id: \.offset) { _, change in
-            let filename = (change.path as NSString).lastPathComponent
-            let dir = (change.path as NSString).deletingLastPathComponent
-            let shortDir = dir.isEmpty ? "" : "\(dir)/"
-            Text("\(change.kind.label)  \(shortDir)\(filename)")
-              .font(.system(size: 10))
-              .foregroundStyle(.secondary)
-              .lineLimit(1)
-          }
-        }
-      }
-
-      if !endpointRow.commands.isEmpty {
-        SectionCard(title: "Commands / Tools Run (\(endpointRow.commands.count))") {
+        } content: {
           VStack(alignment: .leading, spacing: 2) {
-            ForEach(Array(endpointRow.commands.suffix(5).enumerated()), id: \.offset) { _, command in
+            ForEach(Array(endpointRow.planSteps.prefix(6).enumerated()), id: \.offset) { _, step in
+              Text("\(PlanIcon(step.status))  \(Truncate(step.description, limit: 52))")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+          }
+        }
+      }
+
+      if !VisibleFileChanges().isEmpty {
+        AccordionSectionCard(
+          title: "Files (\(VisibleFileChanges().count))",
+          systemImage: "doc.text.fill",
+          isExpanded: isFilesExpanded,
+          onToggle: onToggleFiles
+        ) {
+          VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(VisibleFileChanges().prefix(8).enumerated()), id: \.offset) { _, change in
+              let filename = (change.path as NSString).lastPathComponent
+              let dir = (change.path as NSString).deletingLastPathComponent
+              let shortDir = dir.isEmpty ? "" : "\(dir)/"
+              Text("\(change.kind.label)  \(shortDir)\(filename)")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+          }
+        }
+      }
+
+      if !VisibleCommands().isEmpty {
+        AccordionSectionCard(
+          title: "Commands / Tools Run (\(VisibleCommands().count))",
+          systemImage: "terminal.fill",
+          isExpanded: isCommandsExpanded,
+          onToggle: onToggleCommands
+        ) {
+          VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(VisibleCommands().suffix(5).enumerated()), id: \.offset) { _, command in
               Text(CommandLine(command: command))
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
@@ -181,7 +227,12 @@ struct TurnMenuRowView: View {
       }
 
       if !endpointRow.recentRuns.isEmpty {
-        SectionCard(title: "Past Runs (\(endpointRow.recentRuns.count))") {
+        AccordionSectionCard(
+          title: "Past Runs (\(endpointRow.recentRuns.count))",
+          systemImage: "clock.arrow.circlepath",
+          isExpanded: isPastRunsExpanded,
+          onToggle: onTogglePastRuns
+        ) {
           VStack(spacing: 4) {
             ForEach(endpointRow.recentRuns, id: \.runKey) { run in
               RunHistoryRowView(
@@ -201,6 +252,10 @@ struct TurnMenuRowView: View {
         if let cwd = endpointRow.cwd {
           Button("Open in Finder") {
             NSWorkspace.shared.open(URL(fileURLWithPath: cwd))
+          }
+
+          Button("Open in Terminal") {
+            onOpenInTerminal(cwd)
           }
         }
 
@@ -234,11 +289,7 @@ struct TurnMenuRowView: View {
     return "\(StatusLabel(activeTurn.status)) \(activeTurn.ElapsedString(now: now))"
   }
 
-  private func TimelineDetailText() -> String {
-    if let hoveredTimelineSegment {
-      return HoverText(segment: hoveredTimelineSegment)
-    }
-
+  private func TimelineSummaryText() -> String {
     var summaryParts: [String] = []
     if let traceLabel = endpointRow.lastTraceLabel ?? activeTurn?.latestLabel {
       summaryParts.append(traceLabel)
@@ -257,22 +308,10 @@ struct TurnMenuRowView: View {
     return summaryParts.isEmpty ? "Working..." : summaryParts.joined(separator: " · ")
   }
 
-  private func HoverText(segment: TimelineSegment) -> String {
-    let category = SegmentKindLabel(segment.kind)
-    let duration = FormatDuration(segment.duration)
-    let start = FormatClockTime(segment.startedAt)
-    let end = FormatClockTime(segment.endedAt)
-
-    if let label = segment.label, !label.isEmpty {
-      return "\(category) · \(duration) · \(start)-\(end) · \(label)"
-    }
-    return "\(category) · \(duration) · \(start)-\(end)"
-  }
-
-  private func PromptLabelText() -> String? {
+  private func PromptDisplayText() -> String? {
     guard endpointRow.activeTurn != nil else { return nil }
     if let promptPreview = endpointRow.promptPreview, !promptPreview.isEmpty {
-      return Truncate(promptPreview, limit: 130)
+      return promptPreview
     }
     return "waiting for first user message"
   }
@@ -346,6 +385,50 @@ struct TurnMenuRowView: View {
     case .inProgress: return "●"
     case .pending: return "○"
     }
+  }
+
+  private func VisibleFileChanges() -> [FileChangeSummary] {
+    if !endpointRow.fileChanges.isEmpty {
+      return endpointRow.fileChanges
+    }
+
+    if endpointRow.activeTurn == nil {
+      return endpointRow.recentRuns.first?.fileChanges ?? []
+    }
+
+    return []
+  }
+
+  private func VisibleCommands() -> [CommandSummary] {
+    if !endpointRow.commands.isEmpty {
+      return endpointRow.commands
+    }
+
+    if endpointRow.activeTurn == nil {
+      return endpointRow.recentRuns.first?.commands ?? []
+    }
+
+    return []
+  }
+
+  private func ErrorCopyText(_ error: ErrorInfo) -> String {
+    var lines = [error.message]
+
+    if let details = error.details, !details.isEmpty {
+      lines.append(details)
+    }
+
+    if error.willRetry {
+      lines.append("retrying...")
+    }
+
+    return lines.joined(separator: "\n")
+  }
+
+  private func CopyToClipboard(_ value: String) {
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    pasteboard.setString(value, forType: .string)
   }
 
   private func CommandLine(command: CommandSummary) -> String {
@@ -429,7 +512,7 @@ private struct RunHistoryRowView: View {
               .lineLimit(1)
           }
 
-          TimelineBarView(segments: run.TimelineSegments(), onHoveredSegmentChanged: { _ in })
+          TimelineBarView(segments: run.TimelineSegments())
             .frame(height: 8)
 
           if let usage = run.tokenUsage, usage.totalTokens > 0 {
@@ -441,10 +524,7 @@ private struct RunHistoryRowView: View {
     }
     .padding(.horizontal, 6)
     .padding(.vertical, 4)
-    .background(
-      RoundedRectangle(cornerRadius: 4, style: .continuous)
-        .fill(Color(nsColor: NSColor.controlBackgroundColor).opacity(0.35))
-    )
+    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
   }
 
   private func TitleText() -> String {
@@ -471,24 +551,23 @@ private struct RunHistoryRowView: View {
   }
 }
 
-private struct SectionCard<Content: View>: View {
-  let title: String
+private struct SectionCard<Header: View, Content: View>: View {
+  @ViewBuilder let header: Header
   @ViewBuilder let content: Content
+
+  init(@ViewBuilder header: () -> Header, @ViewBuilder content: () -> Content) {
+    self.header = header()
+    self.content = content()
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      Text(title)
-        .font(.system(size: 10, weight: .semibold))
-        .foregroundStyle(.secondary)
-
+      header
       content
     }
     .padding(6)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(
-      RoundedRectangle(cornerRadius: 6, style: .continuous)
-        .fill(Color(nsColor: NSColor.controlBackgroundColor).opacity(0.5))
-    )
+    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     .overlay(
       RoundedRectangle(cornerRadius: 6, style: .continuous)
         .stroke(Color(nsColor: NSColor.separatorColor).opacity(0.3), lineWidth: 0.5)
@@ -496,9 +575,39 @@ private struct SectionCard<Content: View>: View {
   }
 }
 
+private struct AccordionSectionCard<Content: View>: View {
+  let title: String
+  let systemImage: String
+  let isExpanded: Bool
+  let onToggle: () -> Void
+  @ViewBuilder let content: Content
+
+  var body: some View {
+    SectionCard {
+      Button(action: onToggle) {
+        HStack(spacing: 6) {
+          Label(title, systemImage: systemImage)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.secondary)
+
+          Spacer(minLength: 4)
+
+          Text(isExpanded ? "▾" : "▸")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(.tertiary)
+        }
+      }
+      .buttonStyle(.plain)
+    } content: {
+      if isExpanded {
+        content
+      }
+    }
+  }
+}
+
 private struct TimelineBarView: View {
   let segments: [TimelineSegment]
-  let onHoveredSegmentChanged: (TimelineSegment?) -> Void
 
   @State private var hoveredIndex: Int?
 
@@ -531,9 +640,9 @@ private struct TimelineBarView: View {
                     .frame(width: 0.5)
                 }
               }
+              .help(SegmentTooltipText(segment: segment))
               .onHover { hovering in
                 hoveredIndex = hovering ? index : nil
-                onHoveredSegmentChanged(hovering ? segment : nil)
               }
           }
         }
@@ -625,12 +734,14 @@ private struct TokenUsageBarView: View {
 
         HStack(spacing: 0) {
           ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+            let width = total > 0
+              ? availableWidth * CGFloat(segment.count / total)
+              : 0
+
             Rectangle()
               .fill(segment.color)
-              .frame(
-                width: total > 0
-                  ? availableWidth * CGFloat(segment.count / total)
-                  : 0)
+              .frame(width: width)
+              .help(TokenSegmentTooltip(segment: segment, total: total))
           }
         }
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
@@ -640,6 +751,18 @@ private struct TokenUsageBarView: View {
           .stroke(Color(nsColor: NSColor.separatorColor).opacity(0.5), lineWidth: 0.5)
       )
     }
+  }
+
+  private func TokenSegmentTooltip(
+    segment: (label: String, count: Double, color: Color),
+    total: Double
+  ) -> String {
+    let countText = FormatTokenCount(Int(segment.count))
+    guard total > 0 else {
+      return "\(segment.label): \(countText)"
+    }
+    let fraction = Int((segment.count / total * 100).rounded())
+    return "\(segment.label): \(countText) (\(fraction)%)"
   }
 
   private func BuildUsageSegments(_ usage: TokenUsageInfo) -> [(label: String, count: Double, color: Color)] {
@@ -684,6 +807,18 @@ private let clockTimeFormatter: DateFormatter = {
   formatter.dateStyle = .none
   return formatter
 }()
+
+private func SegmentTooltipText(segment: TimelineSegment) -> String {
+  let category = SegmentKindLabel(segment.kind)
+  let duration = FormatDuration(segment.duration)
+  let start = FormatClockTime(segment.startedAt)
+  let end = FormatClockTime(segment.endedAt)
+
+  if let label = segment.label, !label.isEmpty {
+    return "\(category) · \(duration) · \(start)-\(end) · \(label)"
+  }
+  return "\(category) · \(duration) · \(start)-\(end)"
+}
 
 private func SegmentFillColor(_ kind: TimelineSegmentKind) -> Color {
   switch kind {
