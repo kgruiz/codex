@@ -22,7 +22,7 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
     super.init()
 
     popover.behavior = .transient
-    popover.animates = false
+    popover.animates = true
     popover.delegate = self
     popover.contentSize = NSSize(width: 460, height: 360)
     popover.contentViewController = NSHostingController(
@@ -62,8 +62,15 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
       popover.performClose(nil)
     } else {
       popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-      PinPopoverWindow(to: button)
     }
+  }
+
+  func popoverWillShow(_ notification: Notification) {
+    _ = notification
+    guard let button = statusItem.button else {
+      return
+    }
+    PinPopoverWindow(to: button, allowDeferredRetry: true)
   }
 
   func popoverDidClose(_ notification: Notification) {
@@ -130,38 +137,38 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
     popover.contentSize = NSSize(width: 460, height: height)
   }
 
-  private func PinPopoverWindow(to button: NSStatusBarButton) {
-    let pin: () -> Void = { [weak self] in
-      guard
-        let self,
-        let buttonWindow = button.window,
-        let popoverWindow = self.popover.contentViewController?.view.window
-      else {
-        return
+  private func PinPopoverWindow(to button: NSStatusBarButton, allowDeferredRetry: Bool) {
+    guard
+      let buttonWindow = button.window,
+      let popoverWindow = popover.contentViewController?.view.window
+    else {
+      if allowDeferredRetry {
+        DispatchQueue.main.async { [weak self, weak button] in
+          guard let self, let button else { return }
+          self.PinPopoverWindow(to: button, allowDeferredRetry: false)
+        }
       }
-
-      let rectInWindow = button.convert(button.bounds, to: nil)
-      let rectOnScreen = buttonWindow.convertToScreen(rectInWindow)
-      let visibleFrame = buttonWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
-      let popoverSize = popoverWindow.frame.size
-
-      let horizontalPadding: CGFloat = 8
-      let verticalGap: CGFloat = 4
-
-      let desiredX = rectOnScreen.midX - (popoverSize.width / 2)
-      let minX = visibleFrame.minX + horizontalPadding
-      let maxX = visibleFrame.maxX - popoverSize.width - horizontalPadding
-      let clampedX = min(max(desiredX, minX), maxX)
-
-      let desiredY = rectOnScreen.minY - popoverSize.height - verticalGap
-      let minY = visibleFrame.minY + horizontalPadding
-      let clampedY = max(desiredY, minY)
-
-      popoverWindow.setFrameOrigin(NSPoint(x: clampedX, y: clampedY))
+      return
     }
 
-    DispatchQueue.main.async(execute: pin)
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.01, execute: pin)
+    let rectInWindow = button.convert(button.bounds, to: nil)
+    let rectOnScreen = buttonWindow.convertToScreen(rectInWindow)
+    let visibleFrame = buttonWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+    let popoverSize = popoverWindow.frame.size
+
+    let horizontalPadding: CGFloat = 8
+    let verticalGap: CGFloat = 4
+
+    let desiredX = rectOnScreen.midX - (popoverSize.width / 2)
+    let minX = visibleFrame.minX + horizontalPadding
+    let maxX = visibleFrame.maxX - popoverSize.width - horizontalPadding
+    let clampedX = min(max(desiredX, minX), maxX)
+
+    let desiredY = rectOnScreen.minY - popoverSize.height - verticalGap
+    let minY = visibleFrame.minY + horizontalPadding
+    let clampedY = max(desiredY, minY)
+
+    popoverWindow.setFrameOrigin(NSPoint(x: clampedX, y: clampedY))
   }
 
   private static func LoadStatusIcon() -> NSImage? {
