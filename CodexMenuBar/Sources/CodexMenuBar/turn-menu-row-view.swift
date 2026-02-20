@@ -20,28 +20,32 @@ struct TurnMenuRowView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      Button(action: onToggle) {
-        HStack(alignment: .center, spacing: 6) {
-          Circle()
-            .fill(StatusDotColor(activeTurn?.status ?? .completed))
-            .frame(width: 8, height: 8)
+      HStack(alignment: .center, spacing: 6) {
+        Circle()
+          .fill(StatusDotColor(activeTurn?.status ?? .completed))
+          .frame(width: 8, height: 8)
 
-          Text(NameText())
-            .font(.system(size: 12, weight: .semibold))
-            .lineLimit(1)
+        Text(NameText())
+          .font(.system(size: 12, weight: .semibold))
+          .lineLimit(1)
 
-          Spacer(minLength: 8)
+        Spacer(minLength: 8)
 
-          Text(ElapsedText())
-            .font(.system(size: 11, weight: .medium, design: .monospaced))
-            .foregroundStyle(.secondary)
+        Text(ElapsedText())
+          .font(.system(size: 11, weight: .medium, design: .monospaced))
+          .foregroundStyle(.secondary)
 
-          Text(isExpanded ? "▾" : "▸")
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(.tertiary)
+        Text(isExpanded ? "▾" : "▸")
+          .font(.system(size: 10, weight: .medium))
+          .foregroundStyle(.tertiary)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .contentShape(Rectangle())
+      .onTapGesture {
+        if isExpanded {
+          onToggle()
         }
       }
-      .buttonStyle(.plain)
 
       if activeTurn != nil {
         Text(TimelineSummaryText())
@@ -53,15 +57,11 @@ struct TurnMenuRowView: View {
           .frame(height: 8)
       } else {
         if isExpanded, let cwd = endpointRow.cwd {
-          Label {
-            Text(cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-              .lineLimit(1)
-              .truncationMode(.middle)
-          } icon: {
-            Image(systemName: "folder.fill")
-          }
-          .font(.system(size: 10))
-          .foregroundStyle(.tertiary)
+          Text(cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+            .font(.system(size: 10))
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .truncationMode(.middle)
         }
 
         Text(endpointRow.lastTraceLabel ?? "No active run")
@@ -82,6 +82,12 @@ struct TurnMenuRowView: View {
       RoundedRectangle(cornerRadius: 8, style: .continuous)
         .stroke(Color(nsColor: NSColor.separatorColor).opacity(0.2), lineWidth: 0.5)
     )
+    .contentShape(Rectangle())
+    .onTapGesture {
+      if !isExpanded {
+        onToggle()
+      }
+    }
     .animation(.spring(response: 0.3, dampingFraction: 0.85), value: isExpanded)
   }
 
