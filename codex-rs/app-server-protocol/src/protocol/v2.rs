@@ -1858,6 +1858,8 @@ pub struct Thread {
     pub id: String,
     /// Usually the first user message in the thread, if available.
     pub preview: String,
+    /// Model slug used for this thread, when known.
+    pub model: Option<String>,
     /// Model provider used for this thread (for example, 'openai').
     pub model_provider: String,
     /// Unix timestamp (in seconds) when the thread was created.
@@ -1953,6 +1955,8 @@ impl From<CoreTokenUsage> for TokenUsageBreakdown {
 #[ts(export_to = "v2/")]
 pub struct Turn {
     pub id: String,
+    /// Model slug used for this turn, when known.
+    pub model: Option<String>,
     /// Only populated on a `thread/resume` or `thread/fork` response.
     /// For all other responses and notifications returning a Turn,
     /// the items field will be an empty list.

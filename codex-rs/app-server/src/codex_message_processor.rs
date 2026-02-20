@@ -259,6 +259,7 @@ pub(crate) struct TurnSummary {
     pub(crate) file_change_started: HashSet<String>,
     pub(crate) last_error: Option<TurnError>,
     pub(crate) active_turn_id: Option<String>,
+    pub(crate) active_turn_model: Option<String>,
 }
 
 pub(crate) type TurnSummaryStore = Arc<Mutex<HashMap<ThreadId, TurnSummary>>>;
@@ -1860,7 +1861,7 @@ impl CodexMessageProcessor {
 
                 // A bit hacky, but the summary contains a lot of useful information for the thread
                 // that unfortunately does not get returned from thread_manager.start_thread().
-                let thread = match session_configured.rollout_path.as_ref() {
+                let mut thread = match session_configured.rollout_path.as_ref() {
                     Some(rollout_path) => {
                         match read_summary_from_rollout(rollout_path.as_path(), fallback_provider)
                             .await
@@ -1881,10 +1882,11 @@ impl CodexMessageProcessor {
                     }
                     None => build_ephemeral_thread(thread_id, &config_snapshot),
                 };
+                thread.model = Some(config_snapshot.model.clone());
 
                 let response = ThreadStartResponse {
                     thread: thread.clone(),
-                    model: config_snapshot.model,
+                    model: config_snapshot.model.clone(),
                     model_provider: config_snapshot.model_provider_id,
                     cwd: config_snapshot.cwd,
                     approval_policy: config_snapshot.approval_policy.into(),
@@ -2506,6 +2508,12 @@ impl CodexMessageProcessor {
             }
         }
 
+        if thread.model.is_none()
+            && let Ok(loaded_thread) = self.thread_manager.get_thread(thread_uuid).await
+        {
+            thread.model = Some(loaded_thread.config_snapshot().await.model);
+        }
+
         let response = ThreadReadResponse { thread };
         self.outgoing.send_response(request_id, response).await;
     }
@@ -2726,6 +2734,7 @@ impl CodexMessageProcessor {
                 thread.turns = initial_messages
                     .as_deref()
                     .map_or_else(Vec::new, build_turns_from_event_msgs);
+                thread.model = Some(session_configured.model.clone());
 
                 let response = ThreadResumeResponse {
                     thread,
@@ -2934,6 +2943,7 @@ impl CodexMessageProcessor {
         thread.turns = initial_messages
             .as_deref()
             .map_or_else(Vec::new, build_turns_from_event_msgs);
+        thread.model = Some(session_configured.model.clone());
 
         let response = ThreadForkResponse {
             thread: thread.clone(),
@@ -4577,6 +4587,8 @@ impl CodexMessageProcessor {
                 .await;
         }
 
+        let turn_model = thread.config_snapshot().await.model;
+
         // Start the turn by submitting the user input. Return its submission id as turn_id.
         let turn_id = thread
             .submit(Op::UserInput {
@@ -4589,6 +4601,7 @@ impl CodexMessageProcessor {
             Ok(turn_id) => {
                 let turn = Turn {
                     id: turn_id.clone(),
+                    model: Some(turn_model.clone()),
                     items: vec![],
                     error: None,
                     status: TurnStatus::InProgress,
@@ -4596,7 +4609,9 @@ impl CodexMessageProcessor {
 
                 {
                     let mut map = self.turn_summary_store.lock().await;
-                    map.entry(thread_uuid).or_default().active_turn_id = Some(turn_id.clone());
+                    let summary = map.entry(thread_uuid).or_default();
+                    summary.active_turn_id = Some(turn_id.clone());
+                    summary.active_turn_model = Some(turn_model);
                 }
 
                 let response = TurnStartResponse { turn: turn.clone() };
@@ -4622,7 +4637,7 @@ impl CodexMessageProcessor {
         }
     }
 
-    fn build_review_turn(turn_id: String, display_text: &str) -> Turn {
+    fn build_review_turn(turn_id: String, display_text: &str, model: Option<String>) -> Turn {
         let items = if display_text.is_empty() {
             Vec::new()
         } else {
@@ -4638,6 +4653,7 @@ impl CodexMessageProcessor {
 
         Turn {
             id: turn_id,
+            model,
             items,
             error: None,
             status: TurnStatus::InProgress,
@@ -4654,7 +4670,9 @@ impl CodexMessageProcessor {
     ) {
         {
             let mut map = self.turn_summary_store.lock().await;
-            map.entry(parent_thread_uuid).or_default().active_turn_id = Some(turn.id.clone());
+            let summary = map.entry(parent_thread_uuid).or_default();
+            summary.active_turn_id = Some(turn.id.clone());
+            summary.active_turn_model = turn.model.clone();
         }
 
         let response = ReviewStartResponse {
@@ -4683,11 +4701,12 @@ impl CodexMessageProcessor {
         parent_thread_uuid: ThreadId,
         parent_thread_id: String,
     ) -> std::result::Result<(), JSONRPCErrorError> {
+        let turn_model = Some(parent_thread.config_snapshot().await.model);
         let turn_id = parent_thread.submit(Op::Review { review_request }).await;
 
         match turn_id {
             Ok(turn_id) => {
-                let turn = Self::build_review_turn(turn_id, display_text);
+                let turn = Self::build_review_turn(turn_id, display_text, turn_model);
                 self.emit_review_started(
                     request_id,
                     turn,
@@ -4746,6 +4765,7 @@ impl CodexMessageProcessor {
                 message: format!("error creating detached review thread: {err}"),
                 data: None,
             })?;
+        let review_model = session_configured.model.clone();
 
         if let Err(err) = self
             .attach_conversation_listener(thread_id, false, ApiVersion::V2)
@@ -4762,7 +4782,8 @@ impl CodexMessageProcessor {
         if let Some(rollout_path) = review_thread.rollout_path() {
             match read_summary_from_rollout(rollout_path.as_path(), fallback_provider).await {
                 Ok(summary) => {
-                    let thread = summary_to_thread(summary);
+                    let mut thread = summary_to_thread(summary);
+                    thread.model = Some(review_model.clone());
                     let notif = ThreadStartedNotification { thread };
                     self.outgoing
                         .send_server_notification(ServerNotification::ThreadStarted(notif))
@@ -4792,7 +4813,7 @@ impl CodexMessageProcessor {
                 data: None,
             })?;
 
-        let turn = Self::build_review_turn(turn_id, display_text);
+        let turn = Self::build_review_turn(turn_id, display_text, Some(review_model));
         let review_thread_id = thread_id.to_string();
         self.emit_review_started(
             request_id,
@@ -5036,6 +5057,32 @@ impl CodexMessageProcessor {
                             && !experimental_raw_events {
                                 continue;
                             }
+
+                        let suppress_legacy_notification = if matches!(&event.msg, EventMsg::Error(_))
+                        {
+                            let map = turn_summary_store.lock().await;
+                            map.get(&conversation_id)
+                                .and_then(|summary| summary.active_turn_id.as_deref())
+                                .is_some_and(|active_turn_id| active_turn_id != event.id)
+                        } else {
+                            false
+                        };
+
+                        if suppress_legacy_notification {
+                            apply_bespoke_event_handling(
+                                event.clone(),
+                                conversation_id,
+                                conversation.clone(),
+                                outgoing_for_task.clone(),
+                                pending_interrupts.clone(),
+                                pending_rollbacks.clone(),
+                                turn_summary_store.clone(),
+                                api_version_for_task,
+                                fallback_model_provider.clone(),
+                            )
+                            .await;
+                            continue;
+                        }
 
                         // For now, we send a notification for every event,
                         // JSON-serializing the `Event` as-is, but these should
@@ -5523,6 +5570,7 @@ async fn summary_from_thread_list_item(
             preview: it.first_user_message.unwrap_or_default(),
             timestamp,
             updated_at,
+            model: None,
             model_provider,
             cwd,
             cli_version,
@@ -5593,6 +5641,7 @@ fn summary_from_state_db_metadata(
         preview,
         timestamp: Some(timestamp),
         updated_at: Some(updated_at),
+        model: None,
         model_provider,
         cwd,
         cli_version,
@@ -5661,6 +5710,7 @@ pub(crate) async fn read_summary_from_rollout(
         updated_at,
         path: path.to_path_buf(),
         preview: String::new(),
+        model: None,
         model_provider,
         cwd: session_meta.cwd,
         cli_version: session_meta.cli_version,
@@ -5727,6 +5777,7 @@ fn extract_conversation_summary(
         updated_at,
         path,
         preview: preview.to_string(),
+        model: None,
         model_provider,
         cwd: session_meta.cwd.clone(),
         cli_version: session_meta.cli_version.clone(),
@@ -5768,6 +5819,7 @@ fn build_ephemeral_thread(thread_id: ThreadId, config_snapshot: &ThreadConfigSna
     Thread {
         id: thread_id.to_string(),
         preview: String::new(),
+        model: Some(config_snapshot.model.clone()),
         model_provider: config_snapshot.model_provider_id.clone(),
         created_at: now,
         updated_at: now,
@@ -5787,6 +5839,7 @@ pub(crate) fn summary_to_thread(summary: ConversationSummary) -> Thread {
         preview,
         timestamp,
         updated_at,
+        model,
         model_provider,
         cwd,
         cli_version,
@@ -5805,6 +5858,7 @@ pub(crate) fn summary_to_thread(summary: ConversationSummary) -> Thread {
     Thread {
         id: conversation_id.to_string(),
         preview,
+        model,
         model_provider,
         created_at: created_at.map(|dt| dt.timestamp()).unwrap_or(0),
         updated_at: updated_at.map(|dt| dt.timestamp()).unwrap_or(0),
@@ -5899,6 +5953,7 @@ mod tests {
             updated_at: timestamp,
             path,
             preview: "Count to 5".to_string(),
+            model: None,
             model_provider: "test-provider".to_string(),
             cwd: PathBuf::from("/"),
             cli_version: "0.0.0".to_string(),
@@ -5955,6 +6010,7 @@ mod tests {
             updated_at: Some("2025-09-05T16:53:11Z".to_string()),
             path: path.clone(),
             preview: String::new(),
+            model: None,
             model_provider: "fallback".to_string(),
             cwd: PathBuf::new(),
             cli_version: String::new(),

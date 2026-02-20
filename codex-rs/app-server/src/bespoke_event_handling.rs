@@ -127,7 +127,9 @@ pub(crate) async fn apply_bespoke_event_handling(
     match msg {
         EventMsg::TurnStarted(_) => {
             let mut map = turn_summary_store.lock().await;
-            map.entry(conversation_id).or_default().active_turn_id = Some(event_turn_id.clone());
+            let summary = map.entry(conversation_id).or_default();
+            summary.active_turn_id = Some(event_turn_id.clone());
+            summary.last_error = None;
         }
         EventMsg::TurnComplete(_ev) => {
             handle_turn_complete(
@@ -715,7 +717,16 @@ pub(crate) async fn apply_bespoke_event_handling(
                 codex_error_info: ev.codex_error_info.map(V2CodexErrorInfo::from),
                 additional_details: None,
             };
-            handle_error(conversation_id, turn_error.clone(), &turn_summary_store).await;
+            let should_notify = handle_error(
+                conversation_id,
+                &event_turn_id,
+                turn_error.clone(),
+                &turn_summary_store,
+            )
+            .await;
+            if !should_notify {
+                return;
+            }
             outgoing
                 .send_server_notification(ServerNotification::Error(ErrorNotification {
                     error: turn_error.clone(),
@@ -1230,12 +1241,14 @@ async fn emit_turn_completed_with_status(
     event_turn_id: String,
     status: TurnStatus,
     error: Option<TurnError>,
+    model: Option<String>,
     outgoing: &OutgoingMessageSender,
 ) {
     let notification = TurnCompletedNotification {
         thread_id: conversation_id.to_string(),
         turn: Turn {
             id: event_turn_id,
+            model,
             items: vec![],
             error,
             status,
@@ -1360,7 +1373,15 @@ async fn handle_turn_complete(
         None => (TurnStatus::Completed, None),
     };
 
-    emit_turn_completed_with_status(conversation_id, event_turn_id, status, error, outgoing).await;
+    emit_turn_completed_with_status(
+        conversation_id,
+        event_turn_id,
+        status,
+        error,
+        turn_summary.active_turn_model,
+        outgoing,
+    )
+    .await;
 }
 
 async fn handle_turn_interrupted(
@@ -1382,6 +1403,7 @@ async fn handle_turn_interrupted(
         event_turn_id,
         TurnStatus::Interrupted,
         None,
+        turn_summary.active_turn_model,
         outgoing,
     )
     .await;
@@ -1442,12 +1464,22 @@ async fn handle_token_count_event(
 
 async fn handle_error(
     conversation_id: ThreadId,
+    event_turn_id: &str,
     error: TurnError,
     turn_summary_store: &TurnSummaryStore,
-) {
+) -> bool {
     let mut map = turn_summary_store.lock().await;
     let summary = map.entry(conversation_id).or_default();
+    if let Some(active_turn_id) = summary.active_turn_id.as_deref()
+        && active_turn_id != event_turn_id
+    {
+        warn!(
+            "received error for non-active turn {event_turn_id} in thread {conversation_id}; active summary turn is {active_turn_id}"
+        );
+        return false;
+    }
     summary.last_error = Some(error);
+    true
 }
 
 async fn on_patch_approval_response(
@@ -1937,6 +1969,7 @@ mod tests {
 
         handle_error(
             conversation_id,
+            "turn-1",
             TurnError {
                 message: "boom".to_string(),
                 codex_error_info: Some(V2CodexErrorInfo::InternalServerError),
@@ -1955,6 +1988,32 @@ mod tests {
                 additional_details: None,
             })
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_handle_error_ignores_non_active_turn_errors() -> Result<()> {
+        let conversation_id = ThreadId::new();
+        let turn_summary_store = new_turn_summary_store();
+        {
+            let mut map = turn_summary_store.lock().await;
+            map.entry(conversation_id).or_default().active_turn_id = Some("active".to_string());
+        }
+
+        handle_error(
+            conversation_id,
+            "stale",
+            TurnError {
+                message: "late error".to_string(),
+                codex_error_info: Some(V2CodexErrorInfo::Other),
+                additional_details: None,
+            },
+            &turn_summary_store,
+        )
+        .await;
+
+        let turn_summary = find_and_remove_turn_summary(conversation_id, &turn_summary_store).await;
+        assert_eq!(turn_summary.last_error, None);
         Ok(())
     }
 
@@ -1994,6 +2053,7 @@ mod tests {
         let turn_summary_store = new_turn_summary_store();
         handle_error(
             conversation_id,
+            &event_turn_id,
             TurnError {
                 message: "oops".to_string(),
                 codex_error_info: None,
@@ -2033,6 +2093,7 @@ mod tests {
         let turn_summary_store = new_turn_summary_store();
         handle_error(
             conversation_id,
+            &event_turn_id,
             TurnError {
                 message: "bad".to_string(),
                 codex_error_info: Some(V2CodexErrorInfo::Other),
@@ -2275,6 +2336,7 @@ mod tests {
         let a_turn1 = "a_turn1".to_string();
         handle_error(
             conversation_a,
+            &a_turn1,
             TurnError {
                 message: "a1".to_string(),
                 codex_error_info: Some(V2CodexErrorInfo::BadRequest),
@@ -2295,6 +2357,7 @@ mod tests {
         let b_turn1 = "b_turn1".to_string();
         handle_error(
             conversation_b,
+            &b_turn1,
             TurnError {
                 message: "b1".to_string(),
                 codex_error_info: None,

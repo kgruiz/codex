@@ -284,6 +284,11 @@ async fn resume_with_model_mismatch_appends_model_switch_once() -> Result<()> {
                 responses::ev_completed("resp-1"),
             ]),
             responses::sse(vec![
+                responses::ev_response_created("resp-title"),
+                responses::ev_assistant_message("msg-title", "Thread title"),
+                responses::ev_completed("resp-title"),
+            ]),
+            responses::sse(vec![
                 responses::ev_response_created("resp-2"),
                 responses::ev_assistant_message("msg-2", "Done again"),
                 responses::ev_completed("resp-2"),
@@ -355,9 +360,16 @@ async fn resume_with_model_mismatch_appends_model_switch_once() -> Result<()> {
     send_message("second turn", conversation_id, &mut mcp).await?;
 
     let requests = response_mock.requests();
-    assert_eq!(requests.len(), 2, "expected two model requests");
-
-    let first_developer_texts = requests[0].message_input_texts("developer");
+    let first_request = requests
+        .iter()
+        .find(|request| {
+            request
+                .message_input_texts("user")
+                .iter()
+                .any(|text| text.contains("hello after resume"))
+        })
+        .expect("expected model request for first post-resume turn");
+    let first_developer_texts = first_request.message_input_texts("developer");
     let first_model_switch_count = first_developer_texts
         .iter()
         .filter(|text| text.contains("<model_switch>"))
@@ -367,7 +379,16 @@ async fn resume_with_model_mismatch_appends_model_switch_once() -> Result<()> {
         "expected model switch message on first post-resume turn, got {first_developer_texts:?}"
     );
 
-    let second_developer_texts = requests[1].message_input_texts("developer");
+    let second_request = requests
+        .iter()
+        .find(|request| {
+            request
+                .message_input_texts("user")
+                .iter()
+                .any(|text| text.contains("second turn"))
+        })
+        .expect("expected model request for second post-resume turn");
+    let second_developer_texts = second_request.message_input_texts("developer");
     let second_model_switch_count = second_developer_texts
         .iter()
         .filter(|text| text.contains("<model_switch>"))
