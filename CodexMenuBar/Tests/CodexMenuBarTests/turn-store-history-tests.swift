@@ -76,6 +76,92 @@ final class TurnStoreHistoryTests: XCTestCase {
     XCTAssertEqual(rows[0].recentRuns[0].status, .completed)
   }
 
+  func testSnapshotReconciliationHonorsEndpointTurnKeys() {
+    let store = TurnStore()
+    let start = Date(timeIntervalSince1970: 1_700_000_000)
+
+    store.UpsertTurnStarted(endpointId: "ep-1", threadId: "thread-1", turnId: "turn-1", at: start)
+    store.ReconcileSnapshotActiveTurns(
+      endpointId: "ep-1",
+      activeTurnKeys: ["ep-1:turn-1"],
+      at: start.addingTimeInterval(1)
+    )
+
+    let rows = store.EndpointRows(activeEndpointIds: ["ep-1"])
+    XCTAssertEqual(rows.count, 1)
+    XCTAssertTrue(rows[0].recentRuns.isEmpty)
+    XCTAssertEqual(rows[0].activeTurn?.turnId, "turn-1")
+    XCTAssertEqual(rows[0].activeTurn?.status, .inProgress)
+  }
+
+  func testTokenUsageUpdateBackfillsArchivedRun() {
+    let store = TurnStore()
+    let start = Date(timeIntervalSince1970: 1_700_000_000)
+
+    store.UpsertTurnStarted(endpointId: "ep-1", threadId: "thread-1", turnId: "turn-1", at: start)
+    store.MarkTurnCompleted(
+      endpointId: "ep-1",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      status: .completed,
+      at: start.addingTimeInterval(1)
+    )
+
+    var usage = TokenUsageInfo()
+    usage.totalTokens = 123
+    usage.inputTokens = 77
+    usage.outputTokens = 46
+
+    store.UpdateTokenUsage(
+      endpointId: "ep-1",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      tokenUsage: usage
+    )
+
+    let rows = store.EndpointRows(activeEndpointIds: ["ep-1"])
+    XCTAssertEqual(rows.count, 1)
+    XCTAssertEqual(rows[0].recentRuns.count, 1)
+    XCTAssertEqual(rows[0].recentRuns[0].tokenUsage, usage)
+  }
+
+  func testApplyItemMetadataExtractsPromptPreviewFromStringAndArrayContent() {
+    let store = TurnStore()
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+    store.ApplyItemMetadata(
+      endpointId: "ep-1",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: [
+        "type": "userMessage",
+        "content": [
+          "Summarize",
+          ["type": "text", "text": "this diff"],
+          ["type": "input_text", "text": "quickly"],
+        ],
+      ],
+      at: now
+    )
+
+    var rows = store.EndpointRows(activeEndpointIds: ["ep-1"])
+    XCTAssertEqual(rows.first?.promptPreview, "Summarize this diff quickly")
+
+    store.ApplyItemMetadata(
+      endpointId: "ep-1",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: [
+        "type": "userMessage",
+        "content": "Single string prompt",
+      ],
+      at: now.addingTimeInterval(1)
+    )
+
+    rows = store.EndpointRows(activeEndpointIds: ["ep-1"])
+    XCTAssertEqual(rows.first?.promptPreview, "Single string prompt")
+  }
+
   func testCompletedRunHistoryIsCappedAtFifty() {
     let store = TurnStore()
     let base = Date(timeIntervalSince1970: 1_700_000_000)

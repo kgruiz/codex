@@ -340,7 +340,7 @@ private final class EndpointConnection {
           continue
         }
 
-        activeTurnKeys.append("\(threadId):\(turnId)")
+        activeTurnKeys.append("\(self.endpointId):\(turnId)")
         threadIdsToFetch.insert(threadId)
 
         let params: [String: Any] = [

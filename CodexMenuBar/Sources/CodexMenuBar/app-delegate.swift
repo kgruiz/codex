@@ -317,6 +317,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func HandleTokenUsageUpdated(params: [String: Any]) {
     guard let endpointId = params["endpointId"] as? String else { return }
     guard let usage = params["tokenUsage"] as? [String: Any] else { return }
+    let threadId = StringValue(params["threadId"]) ?? StringValue(params["thread_id"])
+    let turnId = StringValue(params["turnId"]) ?? StringValue(params["turn_id"])
 
     var info = TokenUsageInfo()
 
@@ -333,7 +335,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     info.contextWindow =
       usage["modelContextWindow"] as? Int ?? usage["model_context_window"] as? Int
 
-    turnStore.UpdateTokenUsage(endpointId: endpointId, tokenUsage: info)
+    turnStore.UpdateTokenUsage(
+      endpointId: endpointId, threadId: threadId, turnId: turnId, tokenUsage: info)
   }
 
   private func HandleTurnPlanUpdated(params: [String: Any]) {

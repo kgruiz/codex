@@ -209,10 +209,62 @@ final class TurnStore {
     metadataByEndpoint[endpointId] = metadata
   }
 
-  func UpdateTokenUsage(endpointId: String, tokenUsage: TokenUsageInfo) {
+  func UpdateTokenUsage(
+    endpointId: String,
+    threadId: String?,
+    turnId: String?,
+    tokenUsage: TokenUsageInfo
+  ) {
     var metadata = metadataByEndpoint[endpointId] ?? EndpointMetadata()
+    if let threadId {
+      metadata.threadId = threadId
+    }
+    if let turnId {
+      metadata.turnId = turnId
+    }
     metadata.tokenUsage = tokenUsage
     metadataByEndpoint[endpointId] = metadata
+
+    guard let turnId else {
+      return
+    }
+
+    guard var runs = completedRunsByEndpoint[endpointId] else {
+      return
+    }
+
+    guard
+      let index = runs.firstIndex(where: { run in
+        guard run.turnId == turnId else {
+          return false
+        }
+        if let threadId {
+          return run.threadId == threadId
+        }
+        return true
+      })
+    else {
+      return
+    }
+
+    let run = runs[index]
+    runs[index] = CompletedRun(
+      endpointId: run.endpointId,
+      threadId: run.threadId,
+      turnId: run.turnId,
+      startedAt: run.startedAt,
+      endedAt: run.endedAt,
+      status: run.status,
+      latestLabel: run.latestLabel,
+      promptPreview: run.promptPreview,
+      model: run.model,
+      modelProvider: run.modelProvider,
+      tokenUsage: tokenUsage,
+      fileChanges: run.fileChanges,
+      commands: run.commands,
+      traceHistory: run.traceHistory
+    )
+    completedRunsByEndpoint[endpointId] = runs
   }
 
   func RecordError(endpointId: String, error: ErrorInfo) {
@@ -272,12 +324,9 @@ final class TurnStore {
       guard turn.status == .inProgress else {
         continue
       }
-      let isActive: Bool
-      if let threadId = turn.threadId {
-        isActive = activeSet.contains("\(threadId):\(turn.turnId)")
-      } else {
-        isActive = activeSet.contains { $0.hasSuffix(":\(turn.turnId)") }
-      }
+      let key = TurnKey(endpointId: endpointId, turnId: turn.turnId)
+      let isActive =
+        activeSet.contains(key) || activeSet.contains { $0.hasSuffix(":\(turn.turnId)") }
       if isActive { continue }
       turn.ApplyStatus(.completed, at: now)
       ArchiveCompletedTurnIfNeeded(turn)
@@ -440,29 +489,41 @@ final class TurnStore {
         continue
       }
 
-      if let contentValue = NonEmptyString(item["content"]) {
-        return contentValue
-      }
-
-      guard let content = item["content"] as? [[String: Any]] else {
-        continue
-      }
-      let textParts = content.compactMap { input -> String? in
-        if let type = input["type"] as? String {
-          if type == "text" || type == "input_text" {
-            return NonEmptyString(input["text"])
-          }
-        }
-        return NonEmptyString(input["text"])
-      }
-      let combined = textParts.joined(separator: " ").trimmingCharacters(
-        in: .whitespacesAndNewlines)
-      if !combined.isEmpty {
-        return combined
+      if let preview = ExtractContentPreview(item["content"]) {
+        return preview
       }
     }
 
     return nil
+  }
+
+  private func ExtractContentPreview(_ content: Any?) -> String? {
+    if let value = NonEmptyString(content) {
+      return value
+    }
+
+    if let dict = content as? [String: Any], let value = NonEmptyString(dict["text"]) {
+      return value
+    }
+
+    guard let items = content as? [Any] else {
+      return nil
+    }
+
+    let textParts = items.compactMap { item -> String? in
+      if let text = NonEmptyString(item) {
+        return text
+      }
+
+      if let dict = item as? [String: Any] {
+        return NonEmptyString(dict["text"])
+      }
+
+      return nil
+    }
+    let combined = textParts.joined(separator: " ").trimmingCharacters(
+      in: .whitespacesAndNewlines)
+    return combined.isEmpty ? nil : combined
   }
 
   private func ExtractLatestCwd(from turn: [String: Any]) -> String? {
