@@ -10,37 +10,29 @@ mod imp {
     use chrono::SecondsFormat;
     use chrono::Utc;
     use codex_app_server::EmbeddedAppServerHandle;
-    use codex_app_server::start_embedded_websocket_server;
+    use codex_app_server::start_embedded_uds_server;
     use serde::Serialize;
-    use std::net::Ipv4Addr;
-    use std::net::SocketAddr;
     use std::path::Path;
     use std::path::PathBuf;
-    use std::time::Duration;
     use tokio::fs;
-    use tokio::sync::oneshot;
-    use tokio::task::JoinHandle;
-    use tokio::time::MissedTickBehavior;
     use tracing::warn;
+    use uuid::Uuid;
 
-    const ENDPOINT_SCHEMA_VERSION: u32 = 2;
-    const HEARTBEAT_INTERVAL_SECS: u64 = 5;
+    const ENDPOINT_SCHEMA_VERSION: u32 = 3;
 
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct EndpointRecord {
         schema_version: u32,
         pid: u32,
-        endpoint_url: String,
+        socket_path: String,
+        auth_token: String,
         started_at: String,
-        last_heartbeat_at: String,
         codex_version: String,
     }
 
     pub struct MenuBarBridge {
         endpoint_file: PathBuf,
-        heartbeat_stop_tx: Option<oneshot::Sender<()>>,
-        heartbeat_task: JoinHandle<()>,
         handle: EmbeddedAppServerHandle,
     }
 
@@ -52,14 +44,45 @@ mod imp {
             thread_manager: Arc<ThreadManager>,
             cli_overrides: Vec<(String, TomlValue)>,
         ) -> Option<Self> {
-            let bind_address = SocketAddr::from((Ipv4Addr::LOCALHOST, 0));
-            let handle = match start_embedded_websocket_server(
+            let runtime_dir = config.codex_home.join("runtime").join("menubar");
+            let endpoint_dir = runtime_dir.join("endpoints");
+            let socket_dir = runtime_dir.join("sockets");
+            if let Err(err) = fs::create_dir_all(&endpoint_dir).await {
+                warn!(
+                    "failed to create menu bar runtime endpoint dir {}: {err}",
+                    endpoint_dir.display()
+                );
+                return None;
+            }
+            if let Err(err) = fs::create_dir_all(&socket_dir).await {
+                warn!(
+                    "failed to create menu bar runtime socket dir {}: {err}",
+                    socket_dir.display()
+                );
+                return None;
+            }
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ =
+                    fs::set_permissions(&runtime_dir, std::fs::Permissions::from_mode(0o700)).await;
+                let _ = fs::set_permissions(&endpoint_dir, std::fs::Permissions::from_mode(0o700))
+                    .await;
+                let _ =
+                    fs::set_permissions(&socket_dir, std::fs::Permissions::from_mode(0o700)).await;
+            }
+
+            let socket_id = Uuid::new_v4().to_string();
+            let socket_path = socket_dir.join(format!("{socket_id}.sock"));
+            let auth_token = Uuid::new_v4().to_string();
+            let handle = match start_embedded_uds_server(
                 codex_linux_sandbox_exe,
                 config.clone(),
                 auth_manager,
                 thread_manager,
                 cli_overrides,
-                bind_address,
+                socket_path.clone(),
             )
             .await
             {
@@ -69,31 +92,22 @@ mod imp {
                     return None;
                 }
             };
-
-            let endpoint_dir = config
-                .codex_home
-                .join("runtime")
-                .join("menubar")
-                .join("endpoints");
-            if let Err(err) = fs::create_dir_all(&endpoint_dir).await {
-                warn!(
-                    "failed to create menu bar runtime endpoint dir {}: {err}",
-                    endpoint_dir.display()
-                );
-                let _ = handle.shutdown().await;
-                return None;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ =
+                    fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600)).await;
             }
 
             let pid = std::process::id();
             let endpoint_file = endpoint_dir.join(format!("{pid}.json"));
             let tmp_file = endpoint_dir.join(format!("{pid}.json.tmp"));
-            let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
             let endpoint_record = EndpointRecord {
                 schema_version: ENDPOINT_SCHEMA_VERSION,
                 pid,
-                endpoint_url: handle.websocket_url().to_string(),
-                started_at: now.clone(),
-                last_heartbeat_at: now,
+                socket_path: socket_path.to_string_lossy().to_string(),
+                auth_token,
+                started_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
                 codex_version: env!("CARGO_PKG_VERSION").to_string(),
             };
 
@@ -108,56 +122,13 @@ mod imp {
                 return None;
             }
 
-            let heartbeat_endpoint_file = endpoint_file.clone();
-            let heartbeat_tmp_file = tmp_file.clone();
-            let mut heartbeat_record = endpoint_record;
-            let (heartbeat_stop_tx, mut heartbeat_stop_rx) = oneshot::channel();
-            let heartbeat_task = tokio::spawn(async move {
-                let mut interval =
-                    tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
-                interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-                interval.tick().await;
-
-                loop {
-                    tokio::select! {
-                        _ = &mut heartbeat_stop_rx => {
-                            break;
-                        }
-                        _ = interval.tick() => {
-                            heartbeat_record.last_heartbeat_at =
-                                Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
-                            if let Err(err) = write_endpoint_record(
-                                &heartbeat_endpoint_file,
-                                &heartbeat_tmp_file,
-                                &heartbeat_record
-                            ).await {
-                                warn!(
-                                    "failed to refresh menu bar endpoint heartbeat {}: {err}",
-                                    heartbeat_endpoint_file.display()
-                                );
-                            }
-                        }
-                    }
-                }
-            });
-
             Some(Self {
                 endpoint_file,
-                heartbeat_stop_tx: Some(heartbeat_stop_tx),
-                heartbeat_task,
                 handle,
             })
         }
 
-        pub async fn shutdown(mut self) {
-            if let Some(stop_tx) = self.heartbeat_stop_tx.take() {
-                let _ = stop_tx.send(());
-            }
-
-            if let Err(err) = self.heartbeat_task.await {
-                warn!("menu bar heartbeat task join failure: {err}");
-            }
-
+        pub async fn shutdown(self) {
             if let Err(err) = fs::remove_file(&self.endpoint_file).await
                 && err.kind() != std::io::ErrorKind::NotFound
             {

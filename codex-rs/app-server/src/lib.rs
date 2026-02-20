@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::io::Result as IoResult;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -27,6 +28,8 @@ use crate::transport::TransportEvent;
 use crate::transport::has_initialized_connections;
 use crate::transport::route_outgoing_envelope;
 use crate::transport::start_stdio_connection;
+#[cfg(unix)]
+use crate::transport::start_uds_acceptor;
 use crate::transport::start_websocket_acceptor;
 use codex_app_server_protocol::ConfigLayerSource;
 use codex_app_server_protocol::ConfigWarningNotification;
@@ -64,15 +67,33 @@ mod transport;
 
 pub use crate::transport::AppServerTransport;
 
+pub enum EmbeddedAppServerEndpoint {
+    WebSocketUrl(String),
+    #[cfg(unix)]
+    UnixSocketPath(PathBuf),
+}
+
 pub struct EmbeddedAppServerHandle {
-    websocket_url: String,
+    endpoint: EmbeddedAppServerEndpoint,
     shutdown_tx: Option<oneshot::Sender<()>>,
     supervisor_handle: Option<JoinHandle<()>>,
 }
 
 impl EmbeddedAppServerHandle {
-    pub fn websocket_url(&self) -> &str {
-        self.websocket_url.as_str()
+    pub fn websocket_url(&self) -> Option<&str> {
+        match &self.endpoint {
+            EmbeddedAppServerEndpoint::WebSocketUrl(url) => Some(url.as_str()),
+            #[cfg(unix)]
+            EmbeddedAppServerEndpoint::UnixSocketPath(_) => None,
+        }
+    }
+
+    #[cfg(unix)]
+    pub fn socket_path(&self) -> Option<&Path> {
+        match &self.endpoint {
+            EmbeddedAppServerEndpoint::WebSocketUrl(_) => None,
+            EmbeddedAppServerEndpoint::UnixSocketPath(path) => Some(path.as_path()),
+        }
     }
 
     pub async fn shutdown(mut self) -> IoResult<()> {
@@ -235,7 +256,7 @@ pub async fn run_main_with_transport(
         }
         AppServerTransport::WebSocket { bind_address } => {
             let (_local_addr, handle) =
-                start_websocket_acceptor(bind_address, transport_event_tx.clone()).await?;
+                start_websocket_acceptor(bind_address, transport_event_tx.clone(), None).await?;
             websocket_accept_handle = Some(handle);
         }
     }
@@ -479,20 +500,29 @@ pub async fn run_main_with_transport(
     Ok(())
 }
 
-pub async fn start_embedded_websocket_server(
+struct EmbeddedProcessorArgs {
     codex_linux_sandbox_exe: Option<PathBuf>,
     config: Arc<Config>,
     auth_manager: Arc<AuthManager>,
     thread_manager: Arc<ThreadManager>,
     cli_overrides: Vec<(String, TomlValue)>,
-    bind_address: SocketAddr,
-) -> IoResult<EmbeddedAppServerHandle> {
-    let (transport_event_tx, mut transport_event_rx) =
-        mpsc::channel::<TransportEvent>(CHANNEL_CAPACITY);
-    let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<OutgoingEnvelope>(CHANNEL_CAPACITY);
-    let (local_addr, websocket_accept_handle) =
-        start_websocket_acceptor(bind_address, transport_event_tx.clone()).await?;
-    let websocket_url = format!("ws://{local_addr}");
+    outgoing_tx: mpsc::Sender<OutgoingEnvelope>,
+}
+
+fn spawn_embedded_processor(
+    args: EmbeddedProcessorArgs,
+    mut transport_event_rx: mpsc::Receiver<TransportEvent>,
+    mut outgoing_rx: mpsc::Receiver<OutgoingEnvelope>,
+) -> (oneshot::Sender<()>, JoinHandle<()>) {
+    let EmbeddedProcessorArgs {
+        codex_linux_sandbox_exe,
+        config,
+        auth_manager,
+        thread_manager,
+        cli_overrides,
+        outgoing_tx,
+    } = args;
+
     let loader_overrides = LoaderOverrides::default();
     let cloud_requirements =
         cloud_requirements_loader(auth_manager.clone(), config.chatgpt_base_url.clone());
@@ -587,6 +617,61 @@ pub async fn start_embedded_websocket_server(
         }
     });
 
+    (shutdown_tx, processor_handle)
+}
+
+pub async fn start_embedded_websocket_server(
+    codex_linux_sandbox_exe: Option<PathBuf>,
+    config: Arc<Config>,
+    auth_manager: Arc<AuthManager>,
+    thread_manager: Arc<ThreadManager>,
+    cli_overrides: Vec<(String, TomlValue)>,
+    bind_address: SocketAddr,
+) -> IoResult<EmbeddedAppServerHandle> {
+    start_embedded_websocket_server_with_auth(
+        codex_linux_sandbox_exe,
+        config,
+        auth_manager,
+        thread_manager,
+        cli_overrides,
+        bind_address,
+        None,
+    )
+    .await
+}
+
+pub async fn start_embedded_websocket_server_with_auth(
+    codex_linux_sandbox_exe: Option<PathBuf>,
+    config: Arc<Config>,
+    auth_manager: Arc<AuthManager>,
+    thread_manager: Arc<ThreadManager>,
+    cli_overrides: Vec<(String, TomlValue)>,
+    bind_address: SocketAddr,
+    required_bearer_token: Option<String>,
+) -> IoResult<EmbeddedAppServerHandle> {
+    let (transport_event_tx, transport_event_rx) =
+        mpsc::channel::<TransportEvent>(CHANNEL_CAPACITY);
+    let (outgoing_tx, outgoing_rx) = mpsc::channel::<OutgoingEnvelope>(CHANNEL_CAPACITY);
+    let (local_addr, websocket_accept_handle) = start_websocket_acceptor(
+        bind_address,
+        transport_event_tx.clone(),
+        required_bearer_token,
+    )
+    .await?;
+    let websocket_url = format!("ws://{local_addr}");
+    let (shutdown_tx, processor_handle) = spawn_embedded_processor(
+        EmbeddedProcessorArgs {
+            codex_linux_sandbox_exe,
+            config,
+            auth_manager,
+            thread_manager,
+            cli_overrides,
+            outgoing_tx,
+        },
+        transport_event_rx,
+        outgoing_rx,
+    );
+
     drop(transport_event_tx);
 
     let supervisor_handle = tokio::spawn(async move {
@@ -596,7 +681,52 @@ pub async fn start_embedded_websocket_server(
     });
 
     Ok(EmbeddedAppServerHandle {
-        websocket_url,
+        endpoint: EmbeddedAppServerEndpoint::WebSocketUrl(websocket_url),
+        shutdown_tx: Some(shutdown_tx),
+        supervisor_handle: Some(supervisor_handle),
+    })
+}
+
+#[cfg(unix)]
+pub async fn start_embedded_uds_server(
+    codex_linux_sandbox_exe: Option<PathBuf>,
+    config: Arc<Config>,
+    auth_manager: Arc<AuthManager>,
+    thread_manager: Arc<ThreadManager>,
+    cli_overrides: Vec<(String, TomlValue)>,
+    socket_path: PathBuf,
+) -> IoResult<EmbeddedAppServerHandle> {
+    let (transport_event_tx, transport_event_rx) =
+        mpsc::channel::<TransportEvent>(CHANNEL_CAPACITY);
+    let (outgoing_tx, outgoing_rx) = mpsc::channel::<OutgoingEnvelope>(CHANNEL_CAPACITY);
+    let uds_accept_handle =
+        start_uds_acceptor(socket_path.as_path(), transport_event_tx.clone()).await?;
+    let socket_path_for_cleanup = socket_path.clone();
+    let (shutdown_tx, processor_handle) = spawn_embedded_processor(
+        EmbeddedProcessorArgs {
+            codex_linux_sandbox_exe,
+            config,
+            auth_manager,
+            thread_manager,
+            cli_overrides,
+            outgoing_tx: outgoing_tx.clone(),
+        },
+        transport_event_rx,
+        outgoing_rx,
+    );
+
+    drop(transport_event_tx);
+    drop(outgoing_tx);
+
+    let supervisor_handle = tokio::spawn(async move {
+        let _ = processor_handle.await;
+        uds_accept_handle.abort();
+        let _ = uds_accept_handle.await;
+        let _ = tokio::fs::remove_file(socket_path_for_cleanup).await;
+    });
+
+    Ok(EmbeddedAppServerHandle {
+        endpoint: EmbeddedAppServerEndpoint::UnixSocketPath(socket_path),
         shutdown_tx: Some(shutdown_tx),
         supervisor_handle: Some(supervisor_handle),
     })
