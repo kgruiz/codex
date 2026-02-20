@@ -60,7 +60,7 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
     if popover.isShown {
       popover.performClose(nil)
     } else {
-      popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+      popover.show(relativeTo: PopoverAnchorRect(for: button), of: button, preferredEdge: .minY)
     }
   }
 
@@ -126,6 +126,15 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
 
     let height = min(max(baseHeight + rowHeight + expandedHeight, 280), 520)
     popover.contentSize = NSSize(width: 460, height: height)
+  }
+
+  private func PopoverAnchorRect(for button: NSStatusBarButton) -> NSRect {
+    NSRect(
+      x: button.bounds.midX - 1,
+      y: button.bounds.maxY - 2,
+      width: 2,
+      height: 2
+    )
   }
 
   private static func LoadStatusIcon() -> NSImage? {
