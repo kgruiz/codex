@@ -20,32 +20,30 @@ struct TurnMenuRowView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      HStack(alignment: .center, spacing: 6) {
-        Circle()
-          .fill(StatusDotColor(activeTurn?.status ?? .completed))
-          .frame(width: 8, height: 8)
+      Button(action: onToggle) {
+        HStack(alignment: .center, spacing: 6) {
+          Circle()
+            .fill(StatusDotColor(activeTurn?.status ?? .completed))
+            .frame(width: 8, height: 8)
 
-        Text(NameText())
-          .font(.system(size: 12, weight: .semibold))
-          .lineLimit(1)
+          Text(NameText())
+            .font(.system(size: 12, weight: .semibold))
+            .lineLimit(1)
 
-        Spacer(minLength: 8)
+          Spacer(minLength: 8)
 
-        Text(ElapsedText())
-          .font(.system(size: 11, weight: .medium, design: .monospaced))
-          .foregroundStyle(.secondary)
+          Text(ElapsedText())
+            .font(.system(size: 11, weight: .medium, design: .monospaced))
+            .foregroundStyle(.secondary)
 
-        Text(isExpanded ? "▾" : "▸")
-          .font(.system(size: 10, weight: .medium))
-          .foregroundStyle(.tertiary)
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .contentShape(Rectangle())
-      .onTapGesture {
-        if isExpanded {
-          onToggle()
+          Text(isExpanded ? "▾" : "▸")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(.tertiary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
       }
+      .buttonStyle(.plain)
 
       if activeTurn != nil {
         Text(TimelineSummaryText())
@@ -82,12 +80,6 @@ struct TurnMenuRowView: View {
       RoundedRectangle(cornerRadius: 8, style: .continuous)
         .stroke(Color(nsColor: NSColor.separatorColor).opacity(0.2), lineWidth: 0.5)
     )
-    .contentShape(Rectangle())
-    .onTapGesture {
-      if !isExpanded {
-        onToggle()
-      }
-    }
     .animation(.spring(response: 0.3, dampingFraction: 0.85), value: isExpanded)
   }
 
@@ -161,10 +153,12 @@ struct TurnMenuRowView: View {
           }
         } content: {
           VStack(alignment: .leading, spacing: 2) {
-            Text(latestError.willRetry ? "\(latestError.message) (retrying...)" : latestError.message)
-              .font(.system(size: 10, weight: .medium))
-              .foregroundStyle(.red)
-              .lineLimit(2)
+            Text(
+              latestError.willRetry ? "\(latestError.message) (retrying...)" : latestError.message
+            )
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(.red)
+            .lineLimit(2)
 
             if let details = latestError.details, !details.isEmpty {
               Text(details)
@@ -363,7 +357,8 @@ struct TurnMenuRowView: View {
 
   private func TokenTitle(usage: TokenUsageInfo) -> String {
     if let contextWindow = usage.contextWindow {
-      return "Token Usage - \(FormatTokenCount(usage.totalTokens)) / \(FormatTokenCount(contextWindow))"
+      return
+        "Token Usage - \(FormatTokenCount(usage.totalTokens)) / \(FormatTokenCount(contextWindow))"
     }
     return "Token Usage - \(FormatTokenCount(usage.totalTokens))"
   }
@@ -394,24 +389,24 @@ struct TurnMenuRowView: View {
   }
 
   private func VisibleFileChanges() -> [FileChangeSummary] {
-    if !endpointRow.fileChanges.isEmpty {
-      return endpointRow.fileChanges
+    guard endpointRow.activeTurn != nil else {
+      return []
     }
 
-    if endpointRow.activeTurn == nil {
-      return endpointRow.recentRuns.first?.fileChanges ?? []
+    if !endpointRow.fileChanges.isEmpty {
+      return endpointRow.fileChanges
     }
 
     return []
   }
 
   private func VisibleCommands() -> [CommandSummary] {
-    if !endpointRow.commands.isEmpty {
-      return endpointRow.commands
+    guard endpointRow.activeTurn != nil else {
+      return []
     }
 
-    if endpointRow.activeTurn == nil {
-      return endpointRow.recentRuns.first?.commands ?? []
+    if !endpointRow.commands.isEmpty {
+      return endpointRow.commands
     }
 
     return []
@@ -520,6 +515,36 @@ private struct RunHistoryRowView: View {
 
           TimelineBarView(segments: run.TimelineSegments())
             .frame(height: 8)
+
+          if !run.fileChanges.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+              Text("Files touched:")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.tertiary)
+
+              ForEach(Array(run.fileChanges.prefix(5).enumerated()), id: \.offset) { _, change in
+                Text("\(change.kind.label)  \((change.path as NSString).lastPathComponent)")
+                  .font(.system(size: 10))
+                  .foregroundStyle(.secondary)
+                  .lineLimit(1)
+              }
+            }
+          }
+
+          if !run.commands.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+              Text("Commands:")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.tertiary)
+
+              ForEach(Array(run.commands.prefix(5).enumerated()), id: \.offset) { _, cmd in
+                Text("• \(cmd.command)")
+                  .font(.system(size: 10))
+                  .foregroundStyle(.secondary)
+                  .lineLimit(1)
+              }
+            }
+          }
 
           if let usage = run.tokenUsage, usage.totalTokens > 0 {
             TokenUsageBarView(usage: usage)
@@ -646,13 +671,30 @@ private struct TimelineBarView: View {
                     .frame(width: 0.5)
                 }
               }
-              .help(SegmentTooltipText(segment: segment))
               .onHover { hovering in
                 hoveredIndex = hovering ? index : nil
               }
           }
         }
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+
+        if let hoveredIndex,
+          hoveredIndex < filtered.count
+        {
+          Text(SegmentTooltipText(segment: filtered[hoveredIndex]))
+            .font(.system(size: 10))
+            .padding(4)
+            .background(
+              Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 4)
+            )
+            .overlay(
+              RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.gray.opacity(0.3), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
+            .offset(x: 0, y: -20)
+            .zIndex(1)
+        }
       }
       .overlay(
         RoundedRectangle(cornerRadius: 4, style: .continuous)
@@ -723,15 +765,18 @@ private struct TimelineBarView: View {
 private struct TokenUsageBarView: View {
   let usage: TokenUsageInfo
 
+  @State private var hoveredIndex: Int?
+
   var body: some View {
     GeometryReader { geometry in
       let segments = BuildUsageSegments(usage)
       let total = segments.reduce(0.0) { $0 + $1.count }
-      let maxFraction = usage.contextWindow.map { contextWindow in
-        contextWindow > 0
-          ? CGFloat(min(1.0, Double(usage.totalTokens) / Double(contextWindow)))
-          : CGFloat(1.0)
-      } ?? 1.0
+      let maxFraction =
+        usage.contextWindow.map { contextWindow in
+          contextWindow > 0
+            ? CGFloat(min(1.0, Double(usage.totalTokens) / Double(contextWindow)))
+            : CGFloat(1.0)
+        } ?? 1.0
       let availableWidth = geometry.size.width * maxFraction
 
       ZStack(alignment: .leading) {
@@ -739,18 +784,39 @@ private struct TokenUsageBarView: View {
           .fill(Color(nsColor: NSColor.controlBackgroundColor).opacity(0.8))
 
         HStack(spacing: 0) {
-          ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
-            let width = total > 0
+          ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+            let width =
+              total > 0
               ? availableWidth * CGFloat(segment.count / total)
               : 0
 
             Rectangle()
               .fill(segment.color)
               .frame(width: width)
-              .help(TokenSegmentTooltip(segment: segment, total: total))
+              .onHover { hovering in
+                hoveredIndex = hovering ? index : nil
+              }
           }
         }
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+
+        if let hoveredIndex,
+          hoveredIndex < segments.count
+        {
+          Text(TokenSegmentTooltip(segment: segments[hoveredIndex], total: total))
+            .font(.system(size: 10))
+            .padding(4)
+            .background(
+              Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 4)
+            )
+            .overlay(
+              RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.gray.opacity(0.3), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
+            .offset(x: 0, y: -20)
+            .zIndex(1)
+        }
       }
       .overlay(
         RoundedRectangle(cornerRadius: 4, style: .continuous)
@@ -771,7 +837,9 @@ private struct TokenUsageBarView: View {
     return "\(segment.label): \(countText) (\(fraction)%)"
   }
 
-  private func BuildUsageSegments(_ usage: TokenUsageInfo) -> [(label: String, count: Double, color: Color)] {
+  private func BuildUsageSegments(_ usage: TokenUsageInfo) -> [(
+    label: String, count: Double, color: Color
+  )] {
     var segments: [(String, Double, Color)] = []
 
     let cached = usage.cachedInputTokens
@@ -786,7 +854,8 @@ private struct TokenUsageBarView: View {
     }
 
     if usage.reasoningTokens > 0 {
-      segments.append(("Reasoning", Double(usage.reasoningTokens), Color(nsColor: .systemPink).opacity(0.55)))
+      segments.append(
+        ("Reasoning", Double(usage.reasoningTokens), Color(nsColor: .systemPink).opacity(0.55)))
     }
 
     let regularOutput = max(0, usage.outputTokens - usage.reasoningTokens)

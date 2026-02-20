@@ -65,14 +65,6 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
     }
   }
 
-  func popoverWillShow(_ notification: Notification) {
-    _ = notification
-    guard let button = statusItem.button else {
-      return
-    }
-    PinPopoverWindow(to: button, allowDeferredRetry: true)
-  }
-
   func popoverDidClose(_ notification: Notification) {
     _ = notification
     model.ClearExpandedState()
@@ -135,40 +127,6 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
 
     let height = min(max(baseHeight + rowHeight + expandedHeight, 280), 520)
     popover.contentSize = NSSize(width: 460, height: height)
-  }
-
-  private func PinPopoverWindow(to button: NSStatusBarButton, allowDeferredRetry: Bool) {
-    guard
-      let buttonWindow = button.window,
-      let popoverWindow = popover.contentViewController?.view.window
-    else {
-      if allowDeferredRetry {
-        DispatchQueue.main.async { [weak self, weak button] in
-          guard let self, let button else { return }
-          self.PinPopoverWindow(to: button, allowDeferredRetry: false)
-        }
-      }
-      return
-    }
-
-    let rectInWindow = button.convert(button.bounds, to: nil)
-    let rectOnScreen = buttonWindow.convertToScreen(rectInWindow)
-    let visibleFrame = buttonWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
-    let popoverSize = popoverWindow.frame.size
-
-    let horizontalPadding: CGFloat = 8
-    let verticalGap: CGFloat = 4
-
-    let desiredX = rectOnScreen.midX - (popoverSize.width / 2)
-    let minX = visibleFrame.minX + horizontalPadding
-    let maxX = visibleFrame.maxX - popoverSize.width - horizontalPadding
-    let clampedX = min(max(desiredX, minX), maxX)
-
-    let desiredY = rectOnScreen.minY - popoverSize.height - verticalGap
-    let minY = visibleFrame.minY + horizontalPadding
-    let clampedY = max(desiredY, minY)
-
-    popoverWindow.setFrameOrigin(NSPoint(x: clampedX, y: clampedY))
   }
 
   private static func LoadStatusIcon() -> NSImage? {
@@ -286,8 +244,10 @@ private struct StatusDropdownView: View {
 
       HStack(spacing: 8) {
         Button("Reconnect endpoints", action: onReconnectAll)
+          .focusable(false)
         Spacer()
         Button("Quit CodexMenuBar", action: onQuit)
+          .focusable(false)
       }
     }
     .padding(12)
