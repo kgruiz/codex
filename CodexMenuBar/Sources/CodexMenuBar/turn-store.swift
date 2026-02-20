@@ -122,9 +122,8 @@ final class TurnStore {
     metadata.threadId = NonEmptyString(thread["id"]) ?? metadata.threadId
     metadata.chatTitle = NonEmptyString(thread["title"]) ?? metadata.chatTitle
     metadata.cwd = NonEmptyString(thread["cwd"]) ?? metadata.cwd
-    metadata.model = NonEmptyString(thread["model"]) ?? metadata.model
-    metadata.modelProvider =
-      NonEmptyString(thread["modelProvider"]) ?? metadata.modelProvider
+    metadata.model = ExtractModelIdentifier(from: thread) ?? metadata.model
+    metadata.modelProvider = ExtractModelProvider(from: thread) ?? metadata.modelProvider
 
     if let fallbackPreview = NonEmptyString(thread["preview"]) {
       metadata.promptPreview = fallbackPreview
@@ -134,6 +133,8 @@ final class TurnStore {
       metadata.chatTurnCount = turns.count
       if let latestTurn = turns.last {
         metadata.turnId = NonEmptyString(latestTurn["id"]) ?? metadata.turnId
+        metadata.model = ExtractModelIdentifier(from: latestTurn) ?? metadata.model
+        metadata.modelProvider = ExtractModelProvider(from: latestTurn) ?? metadata.modelProvider
         if let threadId = metadata.threadId,
           let turnId = metadata.turnId
         {
@@ -164,8 +165,13 @@ final class TurnStore {
       metadata.threadId = threadId
     }
     metadata.turnId = turnId
-    if let turn, let promptPreview = ExtractPromptPreview(from: turn) {
-      metadata.promptPreview = promptPreview
+    if let turn {
+      if let promptPreview = ExtractPromptPreview(from: turn) {
+        metadata.promptPreview = promptPreview
+      }
+
+      metadata.model = ExtractModelIdentifier(from: turn) ?? metadata.model
+      metadata.modelProvider = ExtractModelProvider(from: turn) ?? metadata.modelProvider
     }
     metadata.lastEventAt = now
     metadataByEndpoint[endpointId] = metadata
@@ -482,5 +488,55 @@ final class TurnStore {
     }
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? nil : trimmed
+  }
+
+  private func ExtractModelIdentifier(from payload: [String: Any]) -> String? {
+    let directKeys = ["model", "modelSlug", "model_slug", "modelName", "model_name"]
+    for key in directKeys {
+      if let value = NonEmptyString(payload[key]) {
+        return value
+      }
+    }
+
+    if let model = payload["model"] as? [String: Any] {
+      if let value = NonEmptyString(model["slug"]) ?? NonEmptyString(model["name"])
+        ?? NonEmptyString(model["id"])
+      {
+        return value
+      }
+    }
+
+    if let modelInfo = payload["modelInfo"] as? [String: Any] {
+      if let value = NonEmptyString(modelInfo["slug"]) ?? NonEmptyString(modelInfo["name"])
+        ?? NonEmptyString(modelInfo["id"])
+      {
+        return value
+      }
+    }
+
+    return nil
+  }
+
+  private func ExtractModelProvider(from payload: [String: Any]) -> String? {
+    let directKeys = ["modelProvider", "model_provider", "provider", "modelVendor", "model_vendor"]
+    for key in directKeys {
+      if let value = NonEmptyString(payload[key]) {
+        return value
+      }
+    }
+
+    if let model = payload["model"] as? [String: Any] {
+      if let value = NonEmptyString(model["provider"]) ?? NonEmptyString(model["vendor"]) {
+        return value
+      }
+    }
+
+    if let modelInfo = payload["modelInfo"] as? [String: Any] {
+      if let value = NonEmptyString(modelInfo["provider"]) ?? NonEmptyString(modelInfo["vendor"]) {
+        return value
+      }
+    }
+
+    return nil
   }
 }

@@ -44,6 +44,7 @@ struct TurnMenuRowView: View {
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
+      .focusable(false)
 
       if activeTurn != nil {
         Text(TimelineSummaryText())
@@ -80,6 +81,16 @@ struct TurnMenuRowView: View {
       RoundedRectangle(cornerRadius: 8, style: .continuous)
         .stroke(Color(nsColor: NSColor.separatorColor).opacity(0.2), lineWidth: 0.5)
     )
+    .overlay {
+      if !isExpanded {
+        Rectangle()
+          .fill(.clear)
+          .contentShape(Rectangle())
+          .onTapGesture {
+            onToggle()
+          }
+      }
+    }
     .animation(.spring(response: 0.3, dampingFraction: 0.85), value: isExpanded)
   }
 
@@ -237,6 +248,8 @@ struct TurnMenuRowView: View {
             ForEach(endpointRow.recentRuns, id: \.runKey) { run in
               RunHistoryRowView(
                 run: run,
+                fallbackModel: endpointRow.model,
+                fallbackModelProvider: endpointRow.modelProvider,
                 isLastRun: run.turnId == endpointRow.recentRuns.first?.turnId,
                 isExpanded: expandedRunKeys.contains(run.runKey),
                 onToggle: { onToggleHistoryRun(run.runKey) }
@@ -473,6 +486,8 @@ struct TurnMenuRowView: View {
 
 private struct RunHistoryRowView: View {
   let run: CompletedRun
+  let fallbackModel: String?
+  let fallbackModelProvider: String?
   let isLastRun: Bool
   let isExpanded: Bool
   let onToggle: () -> Void
@@ -496,8 +511,11 @@ private struct RunHistoryRowView: View {
             .font(.system(size: 9, weight: .medium))
             .foregroundStyle(.tertiary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
+      .focusable(false)
 
       if isExpanded {
         VStack(alignment: .leading, spacing: 4) {
@@ -506,8 +524,8 @@ private struct RunHistoryRowView: View {
             .foregroundStyle(.secondary)
             .lineLimit(2)
 
-          if let model = run.model, !model.isEmpty {
-            Text("Model: \(model)")
+          if let modelLine = ModelLine() {
+            Text(modelLine)
               .font(.system(size: 10, weight: .medium))
               .foregroundStyle(.tertiary)
               .lineLimit(1)
@@ -556,6 +574,16 @@ private struct RunHistoryRowView: View {
     .padding(.horizontal, 6)
     .padding(.vertical, 4)
     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+    .overlay {
+      if !isExpanded {
+        Rectangle()
+          .fill(.clear)
+          .contentShape(Rectangle())
+          .onTapGesture {
+            onToggle()
+          }
+      }
+    }
   }
 
   private func TitleText() -> String {
@@ -579,6 +607,34 @@ private struct RunHistoryRowView: View {
     case .interrupted: return .orange
     case .failed: return .red
     }
+  }
+
+  private func ModelLine() -> String? {
+    let model = NonEmpty(run.model) ?? NonEmpty(fallbackModel)
+    let provider = NonEmpty(run.modelProvider) ?? NonEmpty(fallbackModelProvider)
+
+    if let model, let provider {
+      return "Model: \(model) (\(provider))"
+    }
+
+    if let model {
+      return "Model: \(model)"
+    }
+
+    if let provider {
+      return "Model Provider: \(provider)"
+    }
+
+    return nil
+  }
+
+  private func NonEmpty(_ value: String?) -> String? {
+    guard let value else {
+      return nil
+    }
+
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 }
 
@@ -677,24 +733,6 @@ private struct TimelineBarView: View {
           }
         }
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-
-        if let hoveredIndex,
-          hoveredIndex < filtered.count
-        {
-          Text(SegmentTooltipText(segment: filtered[hoveredIndex]))
-            .font(.system(size: 10))
-            .padding(4)
-            .background(
-              Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 4)
-            )
-            .overlay(
-              RoundedRectangle(cornerRadius: 4)
-                .stroke(Color.gray.opacity(0.3), lineWidth: 0.5)
-            )
-            .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
-            .offset(x: 0, y: -20)
-            .zIndex(1)
-        }
       }
       .overlay(
         RoundedRectangle(cornerRadius: 4, style: .continuous)
@@ -722,6 +760,49 @@ private struct TimelineBarView: View {
             .stroke(Color.primary.opacity(0.4), lineWidth: 1)
             .frame(width: max(0, width - 1), height: max(0, geometry.size.height - 1))
             .offset(x: xOffset + 0.5, y: 0)
+        }
+      }
+      .overlay(alignment: .topLeading) {
+        if let hoveredIndex,
+          hoveredIndex < filtered.count
+        {
+          let xOffset = HoverOffset(
+            availableWidth: geometry.size.width,
+            segments: filtered,
+            index: hoveredIndex,
+            totalDuration: totalDuration,
+            segmentCount: segmentCount
+          )
+          let width = SegmentWidth(
+            availableWidth: geometry.size.width,
+            segmentDuration: filtered[hoveredIndex].duration,
+            totalDuration: totalDuration,
+            segmentCount: segmentCount
+          )
+          let tooltipMaxWidth = max(120, min(geometry.size.width - 8, 260))
+          let tooltipX = max(
+            0,
+            min(
+              xOffset + (width / 2) - (tooltipMaxWidth / 2), geometry.size.width - tooltipMaxWidth))
+
+          Text(SegmentTooltipText(segment: filtered[hoveredIndex]))
+            .font(.system(size: 9, weight: .medium))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .frame(width: tooltipMaxWidth, alignment: .leading)
+            .background(
+              Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 4)
+            )
+            .overlay(
+              RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.gray.opacity(0.25), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(0.08), radius: 1.5, y: 1)
+            .offset(x: tooltipX, y: -18)
+            .allowsHitTesting(false)
+            .zIndex(2)
         }
       }
     }
@@ -799,29 +880,52 @@ private struct TokenUsageBarView: View {
           }
         }
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-
-        if let hoveredIndex,
-          hoveredIndex < segments.count
-        {
-          Text(TokenSegmentTooltip(segment: segments[hoveredIndex], total: total))
-            .font(.system(size: 10))
-            .padding(4)
-            .background(
-              Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 4)
-            )
-            .overlay(
-              RoundedRectangle(cornerRadius: 4)
-                .stroke(Color.gray.opacity(0.3), lineWidth: 0.5)
-            )
-            .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
-            .offset(x: 0, y: -20)
-            .zIndex(1)
-        }
       }
       .overlay(
         RoundedRectangle(cornerRadius: 4, style: .continuous)
           .stroke(Color(nsColor: NSColor.separatorColor).opacity(0.5), lineWidth: 0.5)
       )
+      .overlay(alignment: .topLeading) {
+        if let hoveredIndex,
+          hoveredIndex < segments.count
+        {
+          let xOffset = TokenHoverOffset(
+            availableWidth: availableWidth,
+            segments: segments,
+            index: hoveredIndex,
+            total: total
+          )
+          let width = TokenSegmentWidth(
+            availableWidth: availableWidth,
+            segmentCount: segments[hoveredIndex].count,
+            total: total
+          )
+          let tooltipMaxWidth = max(100, min(geometry.size.width - 8, 220))
+          let tooltipX = max(
+            0,
+            min(
+              xOffset + (width / 2) - (tooltipMaxWidth / 2), geometry.size.width - tooltipMaxWidth))
+
+          Text(TokenSegmentTooltip(segment: segments[hoveredIndex], total: total))
+            .font(.system(size: 9, weight: .medium))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .frame(width: tooltipMaxWidth, alignment: .leading)
+            .background(
+              Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 4)
+            )
+            .overlay(
+              RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.gray.opacity(0.25), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(0.08), radius: 1.5, y: 1)
+            .offset(x: tooltipX, y: -18)
+            .allowsHitTesting(false)
+            .zIndex(2)
+        }
+      }
     }
   }
 
@@ -864,6 +968,35 @@ private struct TokenUsageBarView: View {
     }
 
     return segments
+  }
+
+  private func TokenSegmentWidth(
+    availableWidth: CGFloat,
+    segmentCount: Double,
+    total: Double
+  ) -> CGFloat {
+    guard total > 0 else {
+      return 0
+    }
+
+    return availableWidth * CGFloat(segmentCount / total)
+  }
+
+  private func TokenHoverOffset(
+    availableWidth: CGFloat,
+    segments: [(label: String, count: Double, color: Color)],
+    index: Int,
+    total: Double
+  ) -> CGFloat {
+    guard index > 0 else {
+      return 0
+    }
+
+    return segments.prefix(index).reduce(0) { value, segment in
+      value
+        + TokenSegmentWidth(
+          availableWidth: availableWidth, segmentCount: segment.count, total: total)
+    }
   }
 }
 
