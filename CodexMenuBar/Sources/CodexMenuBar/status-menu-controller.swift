@@ -60,7 +60,8 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
     if popover.isShown {
       popover.performClose(nil)
     } else {
-      popover.show(relativeTo: PopoverAnchorRect(for: button), of: button, preferredEdge: .minY)
+      popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+      PinPopoverWindow(to: button)
     }
   }
 
@@ -128,13 +129,38 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
     popover.contentSize = NSSize(width: 460, height: height)
   }
 
-  private func PopoverAnchorRect(for button: NSStatusBarButton) -> NSRect {
-    NSRect(
-      x: button.bounds.midX - 1,
-      y: button.bounds.maxY - 2,
-      width: 2,
-      height: 2
-    )
+  private func PinPopoverWindow(to button: NSStatusBarButton) {
+    let pin: () -> Void = { [weak self] in
+      guard
+        let self,
+        let buttonWindow = button.window,
+        let popoverWindow = self.popover.contentViewController?.view.window
+      else {
+        return
+      }
+
+      let rectInWindow = button.convert(button.bounds, to: nil)
+      let rectOnScreen = buttonWindow.convertToScreen(rectInWindow)
+      let visibleFrame = buttonWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+      let popoverSize = popoverWindow.frame.size
+
+      let horizontalPadding: CGFloat = 8
+      let verticalGap: CGFloat = 4
+
+      let desiredX = rectOnScreen.midX - (popoverSize.width / 2)
+      let minX = visibleFrame.minX + horizontalPadding
+      let maxX = visibleFrame.maxX - popoverSize.width - horizontalPadding
+      let clampedX = min(max(desiredX, minX), maxX)
+
+      let desiredY = rectOnScreen.minY - popoverSize.height - verticalGap
+      let minY = visibleFrame.minY + horizontalPadding
+      let clampedY = max(desiredY, minY)
+
+      popoverWindow.setFrameOrigin(NSPoint(x: clampedX, y: clampedY))
+    }
+
+    DispatchQueue.main.async(execute: pin)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.01, execute: pin)
   }
 
   private static func LoadStatusIcon() -> NSImage? {
