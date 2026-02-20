@@ -256,6 +256,8 @@ struct CompletedRun: Equatable {
   let model: String?
   let modelProvider: String?
   let tokenUsage: TokenUsageInfo?
+  let fileChanges: [FileChangeSummary]
+  let commands: [CommandSummary]
   let traceHistory: [ProgressTraceSnapshot]
 
   var runKey: String {

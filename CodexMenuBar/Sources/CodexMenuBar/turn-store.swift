@@ -411,6 +411,8 @@ final class TurnStore {
         model: metadata?.model,
         modelProvider: metadata?.modelProvider,
         tokenUsage: metadata?.tokenUsage,
+        fileChanges: turn.fileChanges,
+        commands: turn.commands,
         traceHistory: turn.traceHistory
       ),
       at: 0

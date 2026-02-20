@@ -28,6 +28,21 @@ final class TurnStoreHistoryTests: XCTestCase {
       label: "Done",
       at: start.addingTimeInterval(2)
     )
+    store.RecordFileChange(
+      endpointId: "ep-1",
+      turnId: "turn-1",
+      change: FileChangeSummary(path: "src/main.swift", kind: .update)
+    )
+    store.RecordCommand(
+      endpointId: "ep-1",
+      turnId: "turn-1",
+      command: CommandSummary(
+        command: "swift test",
+        status: .completed,
+        exitCode: 0,
+        durationMs: 1200
+      )
+    )
     store.MarkTurnCompleted(
       endpointId: "ep-1",
       threadId: "thread-1",
@@ -41,6 +56,8 @@ final class TurnStoreHistoryTests: XCTestCase {
     XCTAssertEqual(rows[0].recentRuns.count, 1)
     XCTAssertEqual(rows[0].recentRuns[0].turnId, "turn-1")
     XCTAssertEqual(rows[0].recentRuns[0].status, .completed)
+    XCTAssertEqual(rows[0].recentRuns[0].fileChanges.map(\.path), ["src/main.swift"])
+    XCTAssertEqual(rows[0].recentRuns[0].commands.map(\.command), ["swift test"])
     XCTAssertFalse(rows[0].recentRuns[0].TimelineSegments().isEmpty)
   }
 
