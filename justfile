@@ -120,8 +120,6 @@ codex-menubar-install:
 codexd-install:
     cargo run --bin codex -- app-server codexd install-launch-agent
 
-alias codexd-install-launch-agent := codexd-install
-
 # Show local codexd launch agent status.
 codexd-status:
     cargo run --bin codex -- app-server codexd status
