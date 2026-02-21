@@ -16,6 +16,7 @@ use codex_cli::login::run_login_with_chatgpt;
 use codex_cli::login::run_login_with_device_code;
 use codex_cli::login::run_logout;
 use codex_cloud_tasks::Cli as CloudTasksCli;
+use codex_codexd::daemon::run_daemon as run_codexd_daemon;
 use codex_common::CliConfigOverrides;
 use codex_exec::Cli as ExecCli;
 use codex_exec::Command as ExecCommand;
@@ -27,8 +28,11 @@ use codex_tui::Cli as TuiCli;
 use codex_tui::ExitReason;
 use codex_tui::update_action::UpdateAction;
 use owo_colors::OwoColorize;
+use std::fs;
 use std::io::IsTerminal;
+use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command as ProcessCommand;
 use supports_color::Stream;
 
 #[cfg(target_os = "macos")]
@@ -341,6 +345,9 @@ enum AppServerSubcommand {
 
     /// [experimental] Generate JSON Schema for the app server protocol.
     GenerateJsonSchema(GenerateJsonSchemaCommand),
+
+    /// Manage the local codexd runtime-state daemon used by CodexMenuBar.
+    Codexd(CodexdCommand),
 }
 
 #[derive(Debug, Args)]
@@ -367,6 +374,31 @@ struct GenerateJsonSchemaCommand {
     /// Include experimental methods and fields in the generated output
     #[arg(long = "experimental", default_value_t = false)]
     experimental: bool,
+}
+
+#[derive(Debug, Args)]
+struct CodexdCommand {
+    #[command(subcommand)]
+    action: CodexdSubcommand,
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum CodexdSubcommand {
+    /// Run codexd in the foreground.
+    Run(CodexdRunCommand),
+    /// Install and bootstrap the launch agent.
+    InstallLaunchAgent,
+    /// Boot out and remove the launch agent.
+    UninstallLaunchAgent,
+    /// Show launch agent status.
+    Status,
+}
+
+#[derive(Debug, Args)]
+struct CodexdRunCommand {
+    /// Optional socket path override (defaults to $CODEX_HOME/runtime/codexd/codexd.sock).
+    #[arg(long = "socket-path", value_name = "PATH")]
+    socket_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Parser)]
@@ -473,6 +505,210 @@ fn run_debug_app_server_command(cmd: DebugAppServerCommand) -> anyhow::Result<()
             codex_app_server_test_client::send_message_v2(&codex_bin, &[], cmd.user_message, &None)
         }
     }
+}
+
+async fn run_codexd_command(cmd: CodexdCommand) -> anyhow::Result<()> {
+    match cmd.action {
+        CodexdSubcommand::Run(run) => {
+            let codex_home = find_codex_home()?;
+            run_codexd_daemon(codex_home.as_path(), run.socket_path).await?;
+        }
+        CodexdSubcommand::InstallLaunchAgent => {
+            install_codexd_launch_agent()?;
+        }
+        CodexdSubcommand::UninstallLaunchAgent => {
+            uninstall_codexd_launch_agent()?;
+        }
+        CodexdSubcommand::Status => {
+            print_codexd_launch_agent_status()?;
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn codexd_launch_agent_label() -> &'static str {
+    "com.openai.codexd"
+}
+
+#[cfg(target_os = "macos")]
+fn codexd_launch_agent_path() -> anyhow::Result<PathBuf> {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("failed to determine HOME"))?;
+    Ok(home
+        .join("Library")
+        .join("LaunchAgents")
+        .join(format!("{}.plist", codexd_launch_agent_label())))
+}
+
+#[cfg(target_os = "macos")]
+fn codexd_launch_domain() -> String {
+    let uid = unsafe { libc::geteuid() };
+    format!("gui/{uid}")
+}
+
+#[cfg(target_os = "macos")]
+fn install_codexd_launch_agent() -> anyhow::Result<()> {
+    let codex_home = find_codex_home()?;
+    let socket_path = codex_codexd::default_socket_path(codex_home.as_path());
+    let plist_path = codexd_launch_agent_path()?;
+    let launch_agents_dir = plist_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("launch agent path has no parent"))?;
+
+    fs::create_dir_all(launch_agents_dir)?;
+    if let Some(socket_parent) = socket_path.parent() {
+        fs::create_dir_all(socket_parent)?;
+    }
+
+    let codex_bin = std::env::current_exe()?;
+    let plist = render_codexd_launch_agent_plist(codex_bin.as_path(), socket_path.as_path());
+    fs::write(&plist_path, plist)?;
+
+    let domain = codexd_launch_domain();
+    let label = codexd_launch_agent_label();
+    let _ = ProcessCommand::new("launchctl")
+        .arg("bootout")
+        .arg(&domain)
+        .arg(label)
+        .status();
+
+    let status = ProcessCommand::new("launchctl")
+        .arg("bootstrap")
+        .arg(&domain)
+        .arg(&plist_path)
+        .status()?;
+
+    if !status.success() {
+        anyhow::bail!(
+            "launchctl bootstrap failed for {} ({})",
+            label,
+            plist_path.display()
+        );
+    }
+
+    println!(
+        "Installed codexd LaunchAgent {} ({})",
+        label,
+        plist_path.display()
+    );
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_codexd_launch_agent() -> anyhow::Result<()> {
+    anyhow::bail!("codexd launch-agent commands are only supported on macOS")
+}
+
+#[cfg(target_os = "macos")]
+fn uninstall_codexd_launch_agent() -> anyhow::Result<()> {
+    let plist_path = codexd_launch_agent_path()?;
+    let domain = codexd_launch_domain();
+    let label = codexd_launch_agent_label();
+
+    let _ = ProcessCommand::new("launchctl")
+        .arg("bootout")
+        .arg(&domain)
+        .arg(label)
+        .status();
+
+    if plist_path.exists() {
+        fs::remove_file(&plist_path)?;
+    }
+
+    if let Ok(codex_home) = find_codex_home() {
+        let socket_path = codex_codexd::default_socket_path(codex_home.as_path());
+        if socket_path.exists() {
+            let _ = fs::remove_file(socket_path);
+        }
+    }
+
+    println!("Uninstalled codexd LaunchAgent {label}");
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn uninstall_codexd_launch_agent() -> anyhow::Result<()> {
+    anyhow::bail!("codexd launch-agent commands are only supported on macOS")
+}
+
+#[cfg(target_os = "macos")]
+fn print_codexd_launch_agent_status() -> anyhow::Result<()> {
+    let plist_path = codexd_launch_agent_path()?;
+    let domain = codexd_launch_domain();
+    let label = codexd_launch_agent_label();
+
+    println!("LaunchAgent plist: {}", plist_path.display());
+    println!(
+        "LaunchAgent plist exists: {}",
+        if plist_path.exists() { "yes" } else { "no" }
+    );
+
+    let status = ProcessCommand::new("launchctl")
+        .arg("print")
+        .arg(format!("{domain}/{label}"))
+        .status()?;
+
+    println!(
+        "launchctl print status: {}",
+        if status.success() {
+            "loaded"
+        } else {
+            "not loaded"
+        }
+    );
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn print_codexd_launch_agent_status() -> anyhow::Result<()> {
+    anyhow::bail!("codexd launch-agent commands are only supported on macOS")
+}
+
+#[cfg(target_os = "macos")]
+fn render_codexd_launch_agent_plist(codex_bin: &Path, socket_path: &Path) -> String {
+    let codex_bin = xml_escape(codex_bin.to_string_lossy().as_ref());
+    let socket_path = xml_escape(socket_path.to_string_lossy().as_ref());
+    let label = codexd_launch_agent_label();
+
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \
+\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+<plist version=\"1.0\">\n\
+<dict>\n\
+  <key>Label</key><string>{label}</string>\n\
+  <key>ProgramArguments</key>\n\
+  <array>\n\
+    <string>{codex_bin}</string>\n\
+    <string>app-server</string>\n\
+    <string>codexd</string>\n\
+    <string>run</string>\n\
+  </array>\n\
+  <key>Sockets</key>\n\
+  <dict>\n\
+    <key>codexd</key>\n\
+    <dict>\n\
+      <key>SockPathName</key><string>{socket_path}</string>\n\
+      <key>SockPathMode</key><integer>384</integer>\n\
+    </dict>\n\
+  </dict>\n\
+  <key>ProcessType</key><string>Background</string>\n\
+</dict>\n\
+</plist>\n"
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn xml_escape(input: &str) -> String {
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('\"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 #[derive(Debug, Default, Parser, Clone)]
@@ -622,6 +858,9 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
                     &gen_cli.out_dir,
                     gen_cli.experimental,
                 )?;
+            }
+            Some(AppServerSubcommand::Codexd(codexd_command)) => {
+                run_codexd_command(codexd_command).await?;
             }
         },
         #[cfg(target_os = "macos")]
@@ -1380,6 +1619,19 @@ mod tests {
         let parse_result =
             MultitoolCli::try_parse_from(["codex", "app-server", "--listen", "http://foo"]);
         assert!(parse_result.is_err());
+    }
+
+    #[test]
+    fn app_server_codexd_run_subcommand_parses() {
+        let app_server = app_server_from_args(["codex", "app-server", "codexd", "run"].as_ref());
+        match app_server.subcommand {
+            Some(AppServerSubcommand::Codexd(CodexdCommand {
+                action: CodexdSubcommand::Run(run),
+            })) => {
+                assert!(run.socket_path.is_none());
+            }
+            other => panic!("unexpected subcommand: {other:?}"),
+        }
     }
 
     #[test]

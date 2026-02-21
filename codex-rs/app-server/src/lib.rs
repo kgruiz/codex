@@ -36,6 +36,8 @@ use codex_app_server_protocol::ConfigWarningNotification;
 use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::TextPosition as AppTextPosition;
 use codex_app_server_protocol::TextRange as AppTextRange;
+use codex_codexd::producer::CodexdProducerClient;
+use codex_codexd::producer::RuntimeMetadata;
 use codex_core::ExecPolicyError;
 use codex_core::check_execpolicy_for_warnings;
 use codex_core::config_loader::ConfigLoadError;
@@ -390,7 +392,11 @@ pub async fn run_main_with_transport(
     }
 
     let processor_handle = tokio::spawn({
-        let outgoing_message_sender = Arc::new(OutgoingMessageSender::new(outgoing_tx));
+        let codexd_producer = create_codexd_producer(&config, "appServer");
+        let outgoing_message_sender = Arc::new(OutgoingMessageSender::new_with_codexd(
+            outgoing_tx,
+            codexd_producer,
+        ));
         let cli_overrides: Vec<(String, TomlValue)> = cli_kv_overrides.clone();
         let loader_overrides = loader_overrides_for_config_api;
         let mut processor = MessageProcessor::new(MessageProcessorArgs {
@@ -530,7 +536,11 @@ fn spawn_embedded_processor(
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
 
     let processor_handle = tokio::spawn({
-        let outgoing_message_sender = Arc::new(OutgoingMessageSender::new(outgoing_tx));
+        let codexd_producer = create_codexd_producer(config.as_ref(), "appServer");
+        let outgoing_message_sender = Arc::new(OutgoingMessageSender::new_with_codexd(
+            outgoing_tx,
+            codexd_producer,
+        ));
         let mut processor = MessageProcessor::new(MessageProcessorArgs {
             outgoing: outgoing_message_sender,
             codex_linux_sandbox_exe,
@@ -618,6 +628,29 @@ fn spawn_embedded_processor(
     });
 
     (shutdown_tx, processor_handle)
+}
+
+fn create_codexd_producer(config: &Config, session_source: &str) -> Option<CodexdProducerClient> {
+    #[cfg(unix)]
+    {
+        let runtime_metadata = RuntimeMetadata {
+            runtime_id: format!("pid:{}", std::process::id()),
+            pid: Some(std::process::id()),
+            session_source: Some(session_source.to_string()),
+            cwd: Some(config.cwd.to_string_lossy().into_owned()),
+            display_name: Some("codex-app-server".to_string()),
+        };
+        Some(CodexdProducerClient::spawn(
+            config.codex_home.as_path(),
+            runtime_metadata,
+        ))
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = (config, session_source);
+        None
+    }
 }
 
 pub async fn start_embedded_websocket_server(
