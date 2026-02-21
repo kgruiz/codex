@@ -550,6 +550,11 @@ fn codexd_launch_domain() -> String {
 }
 
 #[cfg(target_os = "macos")]
+fn codexd_launch_service_target() -> String {
+    format!("{}/{}", codexd_launch_domain(), codexd_launch_agent_label())
+}
+
+#[cfg(target_os = "macos")]
 fn install_codexd_launch_agent() -> anyhow::Result<()> {
     let codex_home = find_codex_home()?;
     let socket_path = codex_codexd::default_socket_path(codex_home.as_path());
@@ -569,10 +574,10 @@ fn install_codexd_launch_agent() -> anyhow::Result<()> {
 
     let domain = codexd_launch_domain();
     let label = codexd_launch_agent_label();
+    let service_target = codexd_launch_service_target();
     let _ = ProcessCommand::new("launchctl")
         .arg("bootout")
-        .arg(&domain)
-        .arg(label)
+        .arg(&service_target)
         .status();
 
     let status = ProcessCommand::new("launchctl")
@@ -605,24 +610,28 @@ fn install_codexd_launch_agent() -> anyhow::Result<()> {
 #[cfg(target_os = "macos")]
 fn uninstall_codexd_launch_agent() -> anyhow::Result<()> {
     let plist_path = codexd_launch_agent_path()?;
-    let domain = codexd_launch_domain();
     let label = codexd_launch_agent_label();
+    let service_target = codexd_launch_service_target();
 
-    let _ = ProcessCommand::new("launchctl")
+    let bootout_succeeded = ProcessCommand::new("launchctl")
         .arg("bootout")
-        .arg(&domain)
-        .arg(label)
-        .status();
+        .arg(&service_target)
+        .status()
+        .is_ok_and(|status| status.success());
 
     if plist_path.exists() {
         fs::remove_file(&plist_path)?;
     }
 
-    if let Ok(codex_home) = find_codex_home() {
-        let socket_path = codex_codexd::default_socket_path(codex_home.as_path());
-        if socket_path.exists() {
-            let _ = fs::remove_file(socket_path);
+    if bootout_succeeded {
+        if let Ok(codex_home) = find_codex_home() {
+            let socket_path = codex_codexd::default_socket_path(codex_home.as_path());
+            if socket_path.exists() {
+                let _ = fs::remove_file(socket_path);
+            }
         }
+    } else {
+        eprintln!("launchctl bootout failed; skipped codexd socket cleanup");
     }
 
     println!("Uninstalled codexd LaunchAgent {label}");
