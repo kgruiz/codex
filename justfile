@@ -116,6 +116,14 @@ codex-menubar-install:
         '</plist>' > "$PLIST"
     open "$APP_DIR"
 
+# Install and bootstrap the local codexd launch agent used by CodexMenuBar.
+codexd-install-launch-agent:
+    cargo run --bin codex -- app-server codexd install-launch-agent
+
+# Show local codexd launch agent status.
+codexd-status:
+    cargo run --bin codex -- app-server codexd status
+
 # Regenerate the json schema for config.toml from the current config types.
 write-config-schema:
     cargo run -p codex-core --bin codex-write-config-schema
