@@ -120,6 +120,15 @@ codex-menubar-install:
 codexd-install:
     cargo run --bin codex -- app-server codexd install-launch-agent
 
+# Uninstall the local codexd launch agent.
+codexd-uninstall:
+    cargo run --bin codex -- app-server codexd uninstall-launch-agent
+
+# Restart codexd launch agent to ensure the latest binary is active.
+codexd-restart:
+    just codexd-uninstall
+    just codexd-install
+
 # Show local codexd launch agent status.
 codexd-status:
     cargo run --bin codex -- app-server codexd status
