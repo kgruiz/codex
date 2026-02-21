@@ -117,8 +117,10 @@ codex-menubar-install:
     open "$APP_DIR"
 
 # Install and bootstrap the local codexd launch agent used by CodexMenuBar.
-codexd-install-launch-agent:
+codexd-install:
     cargo run --bin codex -- app-server codexd install-launch-agent
+
+alias codexd-install-launch-agent := codexd-install
 
 # Show local codexd launch agent status.
 codexd-status:
