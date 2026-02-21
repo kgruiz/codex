@@ -19,6 +19,7 @@ mod imp {
     pub struct MenuBarBridge {
         producer: CodexdProducerClient,
         active_turns: HashMap<String, String>,
+        turn_key_by_turn_id: HashMap<String, String>,
         turn_start_order: Vec<String>,
         known_turn_keys: HashSet<String>,
     }
@@ -45,14 +46,27 @@ mod imp {
             Some(Self {
                 producer,
                 active_turns: HashMap::new(),
+                turn_key_by_turn_id: HashMap::new(),
                 turn_start_order: Vec::new(),
                 known_turn_keys: HashSet::new(),
             })
         }
 
-        pub fn publish_event(&mut self, event: &EventMsg) {
+        pub fn publish_event(
+            &mut self,
+            event: &EventMsg,
+            event_turn_id: &str,
+            active_thread_id: Option<String>,
+        ) {
             let mut notifications = Vec::new();
             match event {
+                EventMsg::TurnStarted(_) => {
+                    if let Some(turn_id) = normalize_turn_id(event_turn_id)
+                        && let Some(thread_id) = active_thread_id
+                    {
+                        notifications.extend(self.ensure_turn_started(thread_id, turn_id));
+                    }
+                }
                 EventMsg::ItemStarted(item) => {
                     notifications.extend(
                         self.ensure_turn_started(item.thread_id.to_string(), item.turn_id.clone()),
@@ -67,6 +81,9 @@ mod imp {
                     });
                 }
                 EventMsg::ItemCompleted(item) => {
+                    notifications.extend(
+                        self.ensure_turn_started(item.thread_id.to_string(), item.turn_id.clone()),
+                    );
                     notifications.push(HubNotification {
                         method: "item/completed".to_string(),
                         params: Some(json!({
@@ -77,12 +94,12 @@ mod imp {
                     });
                 }
                 EventMsg::ProgressTrace(trace) => {
-                    if trace.state == codex_core::protocol::ProgressTraceState::Started {
-                        notifications.extend(self.ensure_turn_started(
+                    notifications.extend(
+                        self.ensure_turn_started(
                             trace.thread_id.to_string(),
                             trace.turn_id.clone(),
-                        ));
-                    }
+                        ),
+                    );
                     notifications.push(HubNotification {
                         method: "turn/progressTrace".to_string(),
                         params: Some(json!({
@@ -94,8 +111,28 @@ mod imp {
                         })),
                     });
                 }
-                EventMsg::TurnComplete(_) => {
-                    notifications.extend(self.complete_latest_turn());
+                EventMsg::AgentMessageContentDelta(event) => {
+                    notifications.extend(
+                        self.ensure_turn_started(event.thread_id.clone(), event.turn_id.clone()),
+                    );
+                }
+                EventMsg::PlanDelta(event) => {
+                    notifications.extend(
+                        self.ensure_turn_started(event.thread_id.clone(), event.turn_id.clone()),
+                    );
+                }
+                EventMsg::ReasoningContentDelta(event) => {
+                    notifications.extend(
+                        self.ensure_turn_started(event.thread_id.clone(), event.turn_id.clone()),
+                    );
+                }
+                EventMsg::ReasoningRawContentDelta(event) => {
+                    notifications.extend(
+                        self.ensure_turn_started(event.thread_id.clone(), event.turn_id.clone()),
+                    );
+                }
+                EventMsg::TurnComplete(_) | EventMsg::TurnAborted(_) => {
+                    notifications.extend(self.complete_turn(normalize_turn_id(event_turn_id)));
                 }
                 EventMsg::Error(error) => {
                     notifications.push(HubNotification {
@@ -129,8 +166,16 @@ mod imp {
                 return Vec::new();
             }
 
+            if let Some(existing_key) = self.turn_key_by_turn_id.get(&turn_id)
+                && existing_key != &key
+            {
+                return Vec::new();
+            }
+
             self.known_turn_keys.insert(key.clone());
             self.active_turns.insert(key.clone(), thread_id.clone());
+            self.turn_key_by_turn_id
+                .insert(turn_id.clone(), key.clone());
             self.turn_start_order.push(key);
 
             vec![HubNotification {
@@ -145,7 +190,24 @@ mod imp {
             }]
         }
 
-        fn complete_latest_turn(&mut self) -> Vec<HubNotification> {
+        fn complete_turn(&mut self, turn_id: Option<String>) -> Vec<HubNotification> {
+            if let Some(turn_id) = turn_id
+                && let Some(key) = self.turn_key_by_turn_id.remove(&turn_id)
+                && let Some(thread_id) = self.active_turns.remove(&key)
+            {
+                self.turn_start_order.retain(|existing| existing != &key);
+                return vec![HubNotification {
+                    method: "turn/completed".to_string(),
+                    params: Some(json!({
+                        "threadId": thread_id,
+                        "turn": {
+                            "id": turn_id,
+                            "status": "completed",
+                        }
+                    })),
+                }];
+            }
+
             while let Some(key) = self.turn_start_order.pop() {
                 let Some(thread_id) = self.active_turns.remove(&key) else {
                     continue;
@@ -153,6 +215,7 @@ mod imp {
                 let Some((_, turn_id)) = key.split_once(':') else {
                     continue;
                 };
+                self.turn_key_by_turn_id.remove(turn_id);
                 return vec![HubNotification {
                     method: "turn/completed".to_string(),
                     params: Some(json!({
@@ -174,6 +237,15 @@ mod imp {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn normalize_turn_id(turn_id: &str) -> Option<String> {
+    let trimmed = turn_id.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
 #[cfg(not(target_os = "macos"))]
 mod imp {
     use super::*;
@@ -192,7 +264,13 @@ mod imp {
             None
         }
 
-        pub fn publish_event(&mut self, _event: &EventMsg) {}
+        pub fn publish_event(
+            &mut self,
+            _event: &EventMsg,
+            _event_turn_id: &str,
+            _active_thread_id: Option<String>,
+        ) {
+        }
 
         pub async fn shutdown(self) {}
     }
