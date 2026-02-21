@@ -15,7 +15,6 @@ struct TurnMenuRowView: View {
   let onToggleFiles: () -> Void
   let onToggleCommands: () -> Void
   let onTogglePastRuns: () -> Void
-  let onReconnectEndpoint: () -> Void
   let onOpenInTerminal: (String) -> Void
 
   var body: some View {
@@ -270,10 +269,6 @@ struct TurnMenuRowView: View {
           Button("Open in Terminal") {
             onOpenInTerminal(cwd)
           }
-        }
-
-        Button("Reconnect") {
-          onReconnectEndpoint()
         }
       }
       .buttonStyle(.bordered)

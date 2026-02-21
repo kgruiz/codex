@@ -28,9 +28,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     statusMenu.ReconnectHandler = { [weak self] in
       self?.appServerClient.Restart()
     }
-    statusMenu.ReconnectEndpointHandler = { [weak self] endpointId in
-      self?.appServerClient.ReconnectEndpoint(endpointId)
-    }
     statusMenu.QuitHandler = {
       NSApplication.shared.terminate(nil)
     }

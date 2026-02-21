@@ -4,7 +4,6 @@ import SwiftUI
 
 final class StatusMenuController: NSObject, NSPopoverDelegate {
   var ReconnectHandler: (() -> Void)?
-  var ReconnectEndpointHandler: ((String) -> Void)?
   var QuickStartHandler: (() -> Void)?
   var OpenTerminalHandler: ((String) -> Void)?
   var QuitHandler: (() -> Void)?
@@ -29,9 +28,6 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
       rootView: StatusDropdownView(
         model: model,
         onReconnectAll: { [weak self] in self?.ReconnectHandler?() },
-        onReconnectEndpoint: { [weak self] endpointId in
-          self?.ReconnectEndpointHandler?(endpointId)
-        },
         onQuickStart: { [weak self] in self?.QuickStartHandler?() },
         onOpenTerminal: { [weak self] workingDirectory in
           self?.OpenTerminalHandler?(workingDirectory)
@@ -149,7 +145,6 @@ private struct StatusDropdownView: View {
   @Bindable var model: MenuBarViewModel
 
   let onReconnectAll: () -> Void
-  let onReconnectEndpoint: (String) -> Void
   let onQuickStart: () -> Void
   let onOpenTerminal: (String) -> Void
   let onQuit: () -> Void
@@ -219,7 +214,6 @@ private struct StatusDropdownView: View {
                 onTogglePastRuns: {
                   model.ToggleSection(endpointId: endpointRow.endpointId, section: .pastRuns)
                 },
-                onReconnectEndpoint: { onReconnectEndpoint(endpointRow.endpointId) },
                 onOpenInTerminal: { cwd in onOpenTerminal(cwd) }
               )
             }
@@ -243,7 +237,7 @@ private struct StatusDropdownView: View {
       Divider()
 
       HStack(spacing: 8) {
-        Button("Reconnect endpoints", action: onReconnectAll)
+        Button("Reconnect codexd", action: onReconnectAll)
           .focusable(false)
         Spacer()
         Button("Quit CodexMenuBar", action: onQuit)
