@@ -2515,6 +2515,9 @@ impl App {
             event.msg,
             EventMsg::SessionConfigured(_) | EventMsg::TokenCount(_)
         );
+        if let Some(bridge) = self.menubar_bridge.as_mut() {
+            bridge.publish_event(&event.msg);
+        }
         if self.suppress_shutdown_complete && matches!(event.msg, EventMsg::ShutdownComplete) {
             self.suppress_shutdown_complete = false;
             return;
