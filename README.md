@@ -59,8 +59,6 @@ Added a standalone Swift menu bar app (`CodexMenuBar`) and a local background da
 
 *   **Auto-Renaming**: If you finish a turn in an "Untitled" thread, Codex will run a background request to generate a short, relevant title for the chat.
 *   **Server Connectivity**: The App Server now supports Unix Domain Sockets as well as authenticated WebSockets (via Bearer token or URL parameter).
-*   **Legacy Auth Fix**: Correctly prioritizes ChatGPT tokens over OpenAI API keys if both exist in a legacy `auth.json` file.
-
 ---
 
 ## Quickstart
