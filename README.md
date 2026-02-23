@@ -17,6 +17,8 @@ This fork adds several TUI features, better diff rendering, message queueing, an
 
 ![Side-by-side diff view and syntax highlighting](docs/assets/diff-view.png)
 
+![Syntax highlighting preview](docs/assets/syntax-highlighting.png)
+
 *   **Syntax Highlighting**: Added `syntect` for actual syntax highlighting in Markdown and code blocks. You can use the built-in themes or point it to a VS Code `.json` theme file.
 *   **Diff Views**: Rewrote `/diff` and the patch approval UI. It now supports four modes: `pretty` (highlighted with line numbers), `side-by-side` (with intra-line word diffs), `inline`, and `line`.
 *   **Progress Tracing**: The status indicator now has a timeline bar showing exactly what the agent is doing (running tools, editing files, waiting on network, reasoning, etc.). Added `/legend-mode` to toggle the label explanations.
