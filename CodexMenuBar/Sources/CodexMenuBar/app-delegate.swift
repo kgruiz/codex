@@ -82,6 +82,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   private func HandleNotification(method: String, params: [String: Any]) {
     switch method {
+    case "runtime/metadata":
+      HandleRuntimeMetadata(params: params)
     case "thread/snapshot":
       HandleThreadSnapshot(params: params)
     case "thread/snapshotSummary":
@@ -110,6 +112,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       break
     }
     model.SyncSectionDisclosureState()
+  }
+
+  private func HandleRuntimeMetadata(params: [String: Any]) {
+    let endpointId = params["endpointId"] as? String ?? "unknown"
+    let cwd = params["cwd"] as? String
+    let sessionSource = params["sessionSource"] as? String
+    turnStore.UpdateRuntimeMetadata(endpointId: endpointId, cwd: cwd, sessionSource: sessionSource)
   }
 
   private func HandleTurnStarted(params: [String: Any]) {

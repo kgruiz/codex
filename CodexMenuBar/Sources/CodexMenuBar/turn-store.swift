@@ -14,6 +14,13 @@ final class TurnStore {
     "\(endpointId):\(turnId)"
   }
 
+  func UpdateRuntimeMetadata(endpointId: String, cwd: String?, sessionSource: String?) {
+    var metadata = metadataByEndpoint[endpointId] ?? EndpointMetadata()
+    if let cwd { metadata.cwd = cwd }
+    if let sessionSource { metadata.sessionSource = sessionSource }
+    metadataByEndpoint[endpointId] = metadata
+  }
+
   func UpsertTurnStarted(endpointId: String, threadId: String?, turnId: String, at now: Date) {
     let key = TurnKey(endpointId: endpointId, turnId: turnId)
     if let existing = turnsByKey[key] {
@@ -402,6 +409,7 @@ final class TurnStore {
           return lhs.turnId < rhs.turnId
         }
         .first
+
       let metadata = metadataByEndpoint[endpointId]
       return EndpointRow(
         endpointId: endpointId,

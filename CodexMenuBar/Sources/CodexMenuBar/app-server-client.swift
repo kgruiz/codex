@@ -187,11 +187,20 @@ final class AppServerClient {
     var activeTurnKeysByEndpoint: [String: [String]] = [:]
 
     for runtime in runtimes {
-      guard let runtimeId = NonEmptyString(runtime["runtimeId"]) else {
+      guard let runtimeId = NonEmptyString(runtime["runtimeId"]) ?? NonEmptyString(runtime["runtime_id"]) else {
         continue
       }
 
       endpointIds.insert(runtimeId)
+
+      var metadataParams: [String: Any] = ["endpointId": runtimeId]
+      if let cwd = runtime["cwd"] as? String {
+        metadataParams["cwd"] = cwd
+      }
+      if let sessionSource = runtime["sessionSource"] as? String ?? runtime["session_source"] as? String {
+        metadataParams["sessionSource"] = sessionSource
+      }
+      DispatchNotification(method: "runtime/metadata", params: metadataParams)
 
       let activeTurns = runtime["activeTurns"] as? [[String: Any]] ?? []
       for activeTurn in activeTurns {
@@ -260,7 +269,7 @@ final class AppServerClient {
     switch eventType {
     case "runtimeUpsert":
       guard let runtime = event["runtime"] as? [String: Any],
-        let runtimeId = NonEmptyString(runtime["runtimeId"])
+        let runtimeId = NonEmptyString(runtime["runtimeId"]) ?? NonEmptyString(runtime["runtime_id"])
       else {
         return
       }
@@ -269,8 +278,17 @@ final class AppServerClient {
       summaryKnownEndpointIds.insert(runtimeId)
       DispatchEndpointIds(Array(knownEndpointIds).sorted())
 
+      var metadataParams: [String: Any] = ["endpointId": runtimeId]
+      if let cwd = runtime["cwd"] as? String {
+        metadataParams["cwd"] = cwd
+      }
+      if let sessionSource = runtime["sessionSource"] as? String ?? runtime["session_source"] as? String {
+        metadataParams["sessionSource"] = sessionSource
+      }
+      DispatchNotification(method: "runtime/metadata", params: metadataParams)
+
     case "runtimeRemoved":
-      guard let runtimeId = NonEmptyString(event["runtimeId"]) else {
+      guard let runtimeId = NonEmptyString(event["runtimeId"]) ?? NonEmptyString(event["runtime_id"]) else {
         return
       }
 
@@ -288,7 +306,7 @@ final class AppServerClient {
 
     case "runtimeNotification":
       guard
-        let runtimeId = NonEmptyString(event["runtimeId"]),
+        let runtimeId = NonEmptyString(event["runtimeId"]) ?? NonEmptyString(event["runtime_id"]),
         let notification = event["notification"] as? [String: Any],
         let method = notification["method"] as? String
       else {
