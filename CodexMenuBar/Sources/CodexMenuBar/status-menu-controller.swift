@@ -183,7 +183,7 @@ private struct StatusDropdownView: View {
           Button(action: onQuickStart) {
             Label("Quick Start", systemImage: "play.fill")
           }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(.bordered)
           .controlSize(.small)
         }
       } else {
