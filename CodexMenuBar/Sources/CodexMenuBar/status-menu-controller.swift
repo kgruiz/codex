@@ -33,7 +33,9 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
           self?.OpenTerminalHandler?(workingDirectory)
         },
         onQuit: { [weak self] in self?.QuitHandler?() }
-      ))
+      )
+      .fixedSize(horizontal: false, vertical: true)
+    )
 
     if let button = statusItem.button {
       button.title = ""
@@ -57,6 +59,7 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
     if popover.isShown {
       popover.performClose(nil)
     } else {
+      UpdatePopoverSize()
       popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
   }
@@ -187,6 +190,7 @@ private struct StatusDropdownView: View {
           }
           .buttonStyle(.bordered)
           .controlSize(.small)
+          .focusable(false)
         }
       } else {
         ScrollView {
