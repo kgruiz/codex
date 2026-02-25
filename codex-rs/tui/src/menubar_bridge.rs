@@ -22,6 +22,8 @@ mod imp {
         turn_key_by_turn_id: HashMap<String, String>,
         turn_start_order: Vec<String>,
         known_turn_keys: HashSet<String>,
+        current_model: Option<String>,
+        current_model_provider: Option<String>,
     }
 
     impl MenuBarBridge {
@@ -49,6 +51,8 @@ mod imp {
                 turn_key_by_turn_id: HashMap::new(),
                 turn_start_order: Vec::new(),
                 known_turn_keys: HashSet::new(),
+                current_model: None,
+                current_model_provider: None,
             })
         }
 
@@ -66,6 +70,10 @@ mod imp {
                     {
                         notifications.extend(self.ensure_turn_started(thread_id, turn_id));
                     }
+                }
+                EventMsg::SessionConfigured(event) => {
+                    self.current_model = Some(event.model.clone());
+                    self.current_model_provider = Some(event.model_provider_id.clone());
                 }
                 EventMsg::ItemStarted(item) => {
                     notifications.extend(
@@ -196,6 +204,8 @@ mod imp {
                     "turn": {
                         "id": turn_id,
                         "status": "inProgress",
+                        "model": self.current_model.clone(),
+                        "modelProvider": self.current_model_provider.clone(),
                     }
                 })),
             }]
