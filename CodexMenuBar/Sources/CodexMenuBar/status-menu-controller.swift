@@ -228,11 +228,14 @@ private struct StatusDropdownView: View {
                 },
                 onOpenInTerminal: { cwd in onOpenTerminal(cwd) }
               )
+              .frame(maxWidth: .infinity, alignment: .leading)
               .padding(.horizontal, 6)
             }
           }
+          .frame(maxWidth: .infinity, alignment: .leading)
           .padding(.vertical, 2)
         }
+        .frame(maxWidth: .infinity)
         .frame(maxHeight: 420)
       }
 

@@ -52,6 +52,7 @@ struct TurnMenuRowView: View {
           .lineLimit(1)
 
         TimelineBarView(segments: activeTurn?.TimelineSegments(now: now) ?? [])
+          .frame(maxWidth: .infinity)
           .frame(height: 8)
       } else {
         if isExpanded, let cwd = endpointRow.cwd {
@@ -73,6 +74,7 @@ struct TurnMenuRowView: View {
           .transition(.opacity.combined(with: .move(edge: .top)))
       }
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.horizontal, 10)
     .padding(.vertical, 8)
     .background(
@@ -138,9 +140,29 @@ struct TurnMenuRowView: View {
         } content: {
           VStack(alignment: .leading, spacing: 4) {
             TokenUsageBarView(usage: usage)
+              .frame(maxWidth: .infinity)
               .frame(height: 12)
 
             Text(TokenDetail(usage: usage))
+              .font(.system(size: 10, design: .monospaced))
+              .foregroundStyle(.tertiary)
+              .lineLimit(1)
+          }
+        }
+      }
+
+      if let overallUsage = OverallInstanceTokenUsage() {
+        SectionCard {
+          Label(OverallTokenTitle(usage: overallUsage), systemImage: "chart.pie.fill")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.secondary)
+        } content: {
+          VStack(alignment: .leading, spacing: 4) {
+            TokenUsageBarView(usage: overallUsage)
+              .frame(maxWidth: .infinity)
+              .frame(height: 12)
+
+            Text(TokenDetail(usage: overallUsage))
               .font(.system(size: 10, design: .monospaced))
               .foregroundStyle(.tertiary)
               .lineLimit(1)
@@ -386,6 +408,56 @@ struct TurnMenuRowView: View {
     return values.joined(separator: " · ")
   }
 
+  private func OverallTokenTitle(usage: TokenUsageInfo) -> String {
+    if let contextWindow = usage.contextWindow {
+      return
+        "Instance Token Usage - \(FormatTokenCount(usage.totalTokens)) / \(FormatTokenCount(contextWindow))"
+    }
+    return "Instance Token Usage - \(FormatTokenCount(usage.totalTokens))"
+  }
+
+  private func OverallInstanceTokenUsage() -> TokenUsageInfo? {
+    var aggregate = TokenUsageInfo()
+    var hasUsage = false
+
+    if endpointRow.activeTurn != nil,
+      let activeUsage = endpointRow.tokenUsage,
+      activeUsage.totalTokens > 0
+    {
+      aggregate = MergeTokenUsage(aggregate, activeUsage)
+      hasUsage = true
+    }
+
+    for run in endpointRow.recentRuns {
+      guard let usage = run.tokenUsage, usage.totalTokens > 0 else {
+        continue
+      }
+      aggregate = MergeTokenUsage(aggregate, usage)
+      hasUsage = true
+    }
+
+    return hasUsage ? aggregate : nil
+  }
+
+  private func MergeTokenUsage(_ lhs: TokenUsageInfo, _ rhs: TokenUsageInfo) -> TokenUsageInfo {
+    var merged = lhs
+    merged.inputTokens += rhs.inputTokens
+    merged.cachedInputTokens += rhs.cachedInputTokens
+    merged.outputTokens += rhs.outputTokens
+    merged.reasoningTokens += rhs.reasoningTokens
+    merged.totalTokens += rhs.totalTokens
+
+    if let rhsContext = rhs.contextWindow {
+      if let lhsContext = merged.contextWindow {
+        merged.contextWindow = max(lhsContext, rhsContext)
+      } else {
+        merged.contextWindow = rhsContext
+      }
+    }
+
+    return merged
+  }
+
   private func PlanTitle() -> String {
     let completed = endpointRow.planSteps.filter { $0.status == .completed }.count
     return "Plan (\(completed)/\(endpointRow.planSteps.count))"
@@ -515,6 +587,12 @@ private struct RunHistoryRowView: View {
       .buttonStyle(.plain)
       .focusable(false)
 
+      if let usage = run.tokenUsage, usage.totalTokens > 0 {
+        TokenUsageBarView(usage: usage)
+          .frame(maxWidth: .infinity)
+          .frame(height: 7)
+      }
+
       if isExpanded {
         VStack(alignment: .leading, spacing: 4) {
           Text("Prompt: \(run.promptPreview ?? "Prompt unavailable")")
@@ -530,6 +608,7 @@ private struct RunHistoryRowView: View {
           }
 
           TimelineBarView(segments: run.TimelineSegments())
+            .frame(maxWidth: .infinity)
             .frame(height: 8)
 
           if !run.fileChanges.isEmpty {
@@ -564,11 +643,18 @@ private struct RunHistoryRowView: View {
 
           if let usage = run.tokenUsage, usage.totalTokens > 0 {
             TokenUsageBarView(usage: usage)
+              .frame(maxWidth: .infinity)
               .frame(height: 10)
+
+            Text(TokenDetail(usage: usage))
+              .font(.system(size: 10, design: .monospaced))
+              .foregroundStyle(.tertiary)
+              .lineLimit(1)
           }
         }
       }
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.horizontal, 6)
     .padding(.vertical, 4)
     .background(
@@ -627,6 +713,22 @@ private struct RunHistoryRowView: View {
     }
 
     return nil
+  }
+
+  private func TokenDetail(usage: TokenUsageInfo) -> String {
+    var values = ["In: \(FormatTokenCount(usage.inputTokens))"]
+
+    if usage.cachedInputTokens > 0 {
+      values[0] += " (\(FormatTokenCount(usage.cachedInputTokens)) cached)"
+    }
+
+    values.append("Out: \(FormatTokenCount(usage.outputTokens))")
+
+    if usage.reasoningTokens > 0 {
+      values.append("Reasoning: \(FormatTokenCount(usage.reasoningTokens))")
+    }
+
+    return values.joined(separator: " · ")
   }
 
   private func NonEmpty(_ value: String?) -> String? {
