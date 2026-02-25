@@ -60,7 +60,13 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
       popover.performClose(nil)
     } else {
       UpdatePopoverSize()
-      popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+      let anchorRect = NSRect(
+        x: button.bounds.midX - 1,
+        y: button.bounds.maxY - 1,
+        width: 2,
+        height: 1
+      )
+      popover.show(relativeTo: anchorRect, of: button, preferredEdge: .minY)
     }
   }
 
@@ -222,6 +228,7 @@ private struct StatusDropdownView: View {
                 },
                 onOpenInTerminal: { cwd in onOpenTerminal(cwd) }
               )
+              .padding(.horizontal, 6)
             }
           }
           .padding(.vertical, 2)
