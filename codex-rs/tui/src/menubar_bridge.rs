@@ -24,6 +24,7 @@ mod imp {
         known_turn_keys: HashSet<String>,
         current_model: Option<String>,
         current_model_provider: Option<String>,
+        current_thinking_level: Option<String>,
     }
 
     impl MenuBarBridge {
@@ -53,6 +54,7 @@ mod imp {
                 known_turn_keys: HashSet::new(),
                 current_model: None,
                 current_model_provider: None,
+                current_thinking_level: None,
             })
         }
 
@@ -74,6 +76,8 @@ mod imp {
                 EventMsg::SessionConfigured(event) => {
                     self.current_model = Some(event.model.clone());
                     self.current_model_provider = Some(event.model_provider_id.clone());
+                    self.current_thinking_level =
+                        event.reasoning_effort.as_ref().map(ToString::to_string);
                 }
                 EventMsg::ItemStarted(item) => {
                     notifications.extend(
@@ -206,6 +210,7 @@ mod imp {
                         "status": "inProgress",
                         "model": self.current_model.clone(),
                         "modelProvider": self.current_model_provider.clone(),
+                        "thinkingLevel": self.current_thinking_level.clone(),
                     }
                 })),
             }]
