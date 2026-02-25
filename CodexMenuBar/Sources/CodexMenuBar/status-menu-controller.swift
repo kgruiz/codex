@@ -114,15 +114,17 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
   }
 
   private func UpdatePopoverSize() {
-    let endpointCount = model.endpointRows.count
-    let expandedCount = model.expandedEndpointIds.count
+    let width: CGFloat = 460
+    guard let contentView = popover.contentViewController?.view else {
+      popover.contentSize = NSSize(width: width, height: 280)
+      return
+    }
 
-    let baseHeight: CGFloat = endpointCount == 0 ? 210 : 220
-    let rowHeight = CGFloat(min(max(endpointCount, 1), 5)) * 56
-    let expandedHeight = CGFloat(min(expandedCount, 2)) * 80
-
-    let height = min(max(baseHeight + rowHeight + expandedHeight, 280), 520)
-    popover.contentSize = NSSize(width: 460, height: height)
+    contentView.frame.size.width = width
+    contentView.layoutSubtreeIfNeeded()
+    let fittedHeight = contentView.fittingSize.height
+    let height = min(max(fittedHeight, 180), 520)
+    popover.contentSize = NSSize(width: width, height: height)
   }
 
   private static func LoadStatusIcon() -> NSImage? {

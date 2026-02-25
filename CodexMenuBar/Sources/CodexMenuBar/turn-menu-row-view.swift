@@ -75,7 +75,10 @@ struct TurnMenuRowView: View {
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 8)
-    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    .background(
+      Color(nsColor: NSColor.controlBackgroundColor).opacity(0.78),
+      in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+    )
     .overlay(
       RoundedRectangle(cornerRadius: 8, style: .continuous)
         .stroke(Color(nsColor: NSColor.separatorColor).opacity(0.2), lineWidth: 0.5)
@@ -568,7 +571,10 @@ private struct RunHistoryRowView: View {
     }
     .padding(.horizontal, 6)
     .padding(.vertical, 4)
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+    .background(
+      Color(nsColor: NSColor.controlBackgroundColor).opacity(0.62),
+      in: RoundedRectangle(cornerRadius: 4, style: .continuous)
+    )
     .overlay {
       if !isExpanded {
         Rectangle()
@@ -649,7 +655,10 @@ private struct SectionCard<Header: View, Content: View>: View {
     }
     .padding(6)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+    .background(
+      Color(nsColor: NSColor.controlBackgroundColor).opacity(0.62),
+      in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+    )
     .overlay(
       RoundedRectangle(cornerRadius: 6, style: .continuous)
         .stroke(Color(nsColor: NSColor.separatorColor).opacity(0.3), lineWidth: 0.5)
