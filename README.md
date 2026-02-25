@@ -15,9 +15,13 @@ This fork adds several TUI features, better diff rendering, message queueing, an
 
 ### TUI & Diff Rendering
 
-![Side-by-side diff view and syntax highlighting](docs/assets/diff-view.png)
+<p align="center">
+  <img src="docs/assets/diff-view.png" alt="Side-by-side diff view and syntax highlighting" />
+</p>
 
-![Syntax highlighting preview](docs/assets/syntax-highlighting.png)
+<p align="center">
+  <img src="docs/assets/syntax-highlighting.png" alt="Syntax highlighting preview" width="70%" />
+</p>
 
 *   **Syntax Highlighting**: Added `syntect` for actual syntax highlighting in Markdown and code blocks. You can use the built-in themes or point it to a VS Code `.json` theme file.
 *   **Diff Views**: Rewrote `/diff` and the patch approval UI. It now supports four modes: `pretty` (highlighted with line numbers), `side-by-side` (with intra-line word diffs), `inline`, and `line`.
@@ -27,7 +31,9 @@ This fork adds several TUI features, better diff rendering, message queueing, an
 
 *   **Advanced Session Manager**: Added `/session` and `/archived` commands that open a paginated, full-screen data table of your past chats. It features columns for timestamps, git branches, and working directories, and allows you to toggle sorting (`Tab`), toggle active/archived views (`a`), and type to search.
 
-![Queue editing interface](docs/assets/queue-editor.png)
+<p align="center">
+  <img src="docs/assets/queue-editor.png" alt="Queue editing interface" width="70%" />
+</p>
 
 *   **Queue Editing**: Messages typed while the agent is running are now queued instead of blocked. Added a `/queue` command (and an `Alt+Up` shortcut) that opens a UI to edit, reorder, or delete your queued drafts.
 *   **Model & Reasoning Hotkeys**: Use `Ctrl+Shift+Left/Right` to cycle models and `Ctrl+Shift+Up/Down` to change reasoning effort on the fly. You can switch these mid-turn, or assign specific overrides to individual messages in your queue.
@@ -41,15 +47,21 @@ This fork adds several TUI features, better diff rendering, message queueing, an
 
 Added a standalone Swift menu bar app (`CodexMenuBar`) and a local background daemon (`codexd`). The menu bar app connects to the daemon to show live states across all your active terminal sessions without needing to keep the terminal focused.
 
-![Menu bar app showing an active session with progress timeline](docs/assets/menubar-active.png)
+<p align="center">
+  <img src="docs/assets/menubar-active.png" alt="Menu bar app showing an active session with progress timeline" width="70%" />
+</p>
 
 *   **Live Progress**: Tracks active turns and renders the same terminal-style progress timeline (Working, Done, Interrupted) with precise elapsed timers.
 
-![Expanded menu bar view showing file edits, commands, and token usage](docs/assets/menubar-expanded.png)
+<p align="center">
+  <img src="docs/assets/menubar-expanded.png" alt="Expanded menu bar view showing file edits, commands, and token usage" width="70%" />
+</p>
 
 *   **Expanded Details**: Clicking a session expands it to show the current prompt, running terminal commands, active file edits, and live token usage.
 
-![Menu bar app idle state with quick start button](docs/assets/menubar-idle.png)
+<p align="center">
+  <img src="docs/assets/menubar-idle.png" alt="Menu bar app idle state with quick start button" width="70%" />
+</p>
 
 *   **Quick Actions & Warnings**: Includes a "Quick Start" button to launch a new terminal session, buttons to open a session's working directory in Finder/Terminal, and warnings when your API rate limits drop below 10%.
 
