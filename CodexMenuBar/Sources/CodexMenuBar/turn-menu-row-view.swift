@@ -54,6 +54,13 @@ struct TurnMenuRowView: View {
         TimelineBarView(segments: activeTurn?.TimelineSegments(now: now) ?? [])
           .frame(maxWidth: .infinity)
           .frame(height: 8)
+
+        if let modelSummary = ModelSummary() {
+          Text(modelSummary)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+        }
       } else {
         if isExpanded, let cwd = endpointRow.cwd {
           Text(cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
@@ -593,19 +600,19 @@ private struct RunHistoryRowView: View {
           .frame(height: 7)
       }
 
+      if let modelLine = ModelLine() {
+        Text(modelLine)
+          .font(.system(size: 9, weight: .medium))
+          .foregroundStyle(.tertiary)
+          .lineLimit(1)
+      }
+
       if isExpanded {
         VStack(alignment: .leading, spacing: 4) {
           Text("Prompt: \(run.promptPreview ?? "Prompt unavailable")")
             .font(.system(size: 10))
             .foregroundStyle(.secondary)
             .lineLimit(2)
-
-          if let modelLine = ModelLine() {
-            Text(modelLine)
-              .font(.system(size: 10, weight: .medium))
-              .foregroundStyle(.tertiary)
-              .lineLimit(1)
-          }
 
           TimelineBarView(segments: run.TimelineSegments())
             .frame(maxWidth: .infinity)
