@@ -197,7 +197,9 @@ final class TurnStore {
     }
     metadata.turnId = turnId
 
-    if (item["type"] as? String) == "userMessage" {
+    let itemType = CanonicalItemType(item["type"])
+
+    if itemType == "usermessage" {
       let pseudoTurn: [String: Any] = [
         "items": [item]
       ]
@@ -206,7 +208,7 @@ final class TurnStore {
       }
     }
 
-    if (item["type"] as? String) == "commandExecution" {
+    if itemType == "commandexecution" {
       if let cwd = NonEmptyString(item["cwd"]) {
         metadata.cwd = cwd
       }
@@ -493,7 +495,7 @@ final class TurnStore {
     }
 
     for item in items.reversed() {
-      guard (item["type"] as? String) == "userMessage" else {
+      guard CanonicalItemType(item["type"]) == "usermessage" else {
         continue
       }
 
@@ -540,7 +542,7 @@ final class TurnStore {
     }
 
     for item in items.reversed() {
-      guard (item["type"] as? String) == "commandExecution" else {
+      guard CanonicalItemType(item["type"]) == "commandexecution" else {
         continue
       }
       if let cwd = NonEmptyString(item["cwd"]) {
@@ -557,6 +559,15 @@ final class TurnStore {
     }
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? nil : trimmed
+  }
+
+  private func CanonicalItemType(_ value: Any?) -> String? {
+    guard let value = NonEmptyString(value) else {
+      return nil
+    }
+    return value
+      .replacingOccurrences(of: "_", with: "")
+      .lowercased()
   }
 
   private func ExtractModelIdentifier(from payload: [String: Any]) -> String? {

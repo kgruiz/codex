@@ -162,6 +162,28 @@ final class TurnStoreHistoryTests: XCTestCase {
     XCTAssertEqual(rows.first?.promptPreview, "Single string prompt")
   }
 
+  func testApplyItemMetadataExtractsPromptPreviewFromPascalCaseUserMessageType() {
+    let store = TurnStore()
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+    store.ApplyItemMetadata(
+      endpointId: "ep-1",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: [
+        "type": "UserMessage",
+        "content": [
+          ["type": "text", "text": "Plan"],
+          ["type": "text", "text": "next steps"],
+        ],
+      ],
+      at: now
+    )
+
+    let rows = store.EndpointRows(activeEndpointIds: ["ep-1"])
+    XCTAssertEqual(rows.first?.promptPreview, "Plan next steps")
+  }
+
   func testCompletedRunHistoryIsCappedAtFifty() {
     let store = TurnStore()
     let base = Date(timeIntervalSince1970: 1_700_000_000)
