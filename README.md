@@ -25,8 +25,6 @@ This fork adds several TUI features, better diff rendering, message queueing, an
 
 ### Workflow & Quality of Life
 
-![Advanced session manager table](docs/assets/session-manager.png)
-
 *   **Advanced Session Manager**: Added `/session` and `/archived` commands that open a paginated, full-screen data table of your past chats. It features columns for timestamps, git branches, and working directories, and allows you to toggle sorting (`Tab`), toggle active/archived views (`a`), and type to search.
 
 ![Queue editing interface](docs/assets/queue-editor.png)
