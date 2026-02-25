@@ -131,6 +131,17 @@ mod imp {
                         self.ensure_turn_started(event.thread_id.clone(), event.turn_id.clone()),
                     );
                 }
+                EventMsg::TokenCount(event) => {
+                    if let Some(info) = &event.info {
+                        let turn_id = normalize_turn_id(event_turn_id);
+                        let thread_id = turn_id
+                            .as_deref()
+                            .and_then(|id| self.resolve_thread_id_for_turn(id))
+                            .or(active_thread_id.clone());
+                        notifications
+                            .push(Self::token_usage_notification(info, thread_id, turn_id));
+                    }
+                }
                 EventMsg::TurnComplete(_) | EventMsg::TurnAborted(_) => {
                     notifications.extend(self.complete_turn(normalize_turn_id(event_turn_id)));
                 }
@@ -188,6 +199,49 @@ mod imp {
                     }
                 })),
             }]
+        }
+
+        fn resolve_thread_id_for_turn(&self, turn_id: &str) -> Option<String> {
+            let key = self.turn_key_by_turn_id.get(turn_id)?;
+            self.active_turns.get(key).cloned()
+        }
+
+        fn token_usage_notification(
+            info: &codex_core::protocol::TokenUsageInfo,
+            thread_id: Option<String>,
+            turn_id: Option<String>,
+        ) -> HubNotification {
+            let mut params = serde_json::Map::new();
+            if let Some(thread_id) = thread_id {
+                params.insert("threadId".to_string(), json!(thread_id));
+            }
+            if let Some(turn_id) = turn_id {
+                params.insert("turnId".to_string(), json!(turn_id));
+            }
+            params.insert(
+                "tokenUsage".to_string(),
+                json!({
+                    "total": {
+                        "totalTokens": info.total_token_usage.total_tokens,
+                        "inputTokens": info.total_token_usage.input_tokens,
+                        "cachedInputTokens": info.total_token_usage.cached_input_tokens,
+                        "outputTokens": info.total_token_usage.output_tokens,
+                        "reasoningOutputTokens": info.total_token_usage.reasoning_output_tokens,
+                    },
+                    "last": {
+                        "totalTokens": info.last_token_usage.total_tokens,
+                        "inputTokens": info.last_token_usage.input_tokens,
+                        "cachedInputTokens": info.last_token_usage.cached_input_tokens,
+                        "outputTokens": info.last_token_usage.output_tokens,
+                        "reasoningOutputTokens": info.last_token_usage.reasoning_output_tokens,
+                    },
+                    "modelContextWindow": info.model_context_window,
+                }),
+            );
+            HubNotification {
+                method: "thread/tokenUsage/updated".to_string(),
+                params: Some(serde_json::Value::Object(params)),
+            }
         }
 
         fn complete_turn(&mut self, turn_id: Option<String>) -> Vec<HubNotification> {
