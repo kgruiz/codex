@@ -131,6 +131,7 @@ final class TurnStore {
     metadata.cwd = NonEmptyString(thread["cwd"]) ?? metadata.cwd
     metadata.model = ExtractModelIdentifier(from: thread) ?? metadata.model
     metadata.modelProvider = ExtractModelProvider(from: thread) ?? metadata.modelProvider
+    metadata.thinkingLevel = ExtractThinkingLevel(from: thread) ?? metadata.thinkingLevel
 
     if let fallbackPreview = NonEmptyString(thread["preview"]) {
       metadata.promptPreview = fallbackPreview
@@ -142,6 +143,7 @@ final class TurnStore {
         metadata.turnId = NonEmptyString(latestTurn["id"]) ?? metadata.turnId
         metadata.model = ExtractModelIdentifier(from: latestTurn) ?? metadata.model
         metadata.modelProvider = ExtractModelProvider(from: latestTurn) ?? metadata.modelProvider
+        metadata.thinkingLevel = ExtractThinkingLevel(from: latestTurn) ?? metadata.thinkingLevel
         if let threadId = metadata.threadId,
           let turnId = metadata.turnId
         {
@@ -179,6 +181,7 @@ final class TurnStore {
 
       metadata.model = ExtractModelIdentifier(from: turn) ?? metadata.model
       metadata.modelProvider = ExtractModelProvider(from: turn) ?? metadata.modelProvider
+      metadata.thinkingLevel = ExtractThinkingLevel(from: turn) ?? metadata.thinkingLevel
     }
     metadata.lastEventAt = now
     metadataByEndpoint[endpointId] = metadata
@@ -268,6 +271,7 @@ final class TurnStore {
       promptPreview: run.promptPreview,
       model: run.model,
       modelProvider: run.modelProvider,
+      thinkingLevel: run.thinkingLevel,
       tokenUsage: tokenUsage,
       fileChanges: run.fileChanges,
       commands: run.commands,
@@ -423,6 +427,7 @@ final class TurnStore {
         cwd: metadata?.cwd,
         model: metadata?.model,
         modelProvider: metadata?.modelProvider,
+        thinkingLevel: metadata?.thinkingLevel,
         threadId: activeTurn?.threadId ?? metadata?.threadId,
         turnId: activeTurn?.turnId ?? metadata?.turnId,
         lastTraceCategory: metadata?.lastTraceCategory,
@@ -475,6 +480,7 @@ final class TurnStore {
         promptPreview: metadata?.promptPreview,
         model: metadata?.model,
         modelProvider: metadata?.modelProvider,
+        thinkingLevel: metadata?.thinkingLevel,
         tokenUsage: metadata?.tokenUsage,
         fileChanges: turn.fileChanges,
         commands: turn.commands,
@@ -613,6 +619,47 @@ final class TurnStore {
 
     if let modelInfo = payload["modelInfo"] as? [String: Any] {
       if let value = NonEmptyString(modelInfo["provider"]) ?? NonEmptyString(modelInfo["vendor"]) {
+        return value
+      }
+    }
+
+    return nil
+  }
+
+  private func ExtractThinkingLevel(from payload: [String: Any]) -> String? {
+    let directKeys = [
+      "thinkingLevel",
+      "thinking_level",
+      "reasoningEffort",
+      "reasoning_effort",
+      "effort",
+    ]
+    for key in directKeys {
+      if let value = NonEmptyString(payload[key]) {
+        return value
+      }
+    }
+
+    if let reasoning = payload["reasoning"] as? [String: Any] {
+      if let value = NonEmptyString(reasoning["effort"]) {
+        return value
+      }
+    }
+
+    if let model = payload["model"] as? [String: Any] {
+      if let value = NonEmptyString(model["reasoningEffort"])
+        ?? NonEmptyString(model["reasoning_effort"])
+        ?? NonEmptyString(model["effort"])
+      {
+        return value
+      }
+    }
+
+    if let modelInfo = payload["modelInfo"] as? [String: Any] {
+      if let value = NonEmptyString(modelInfo["reasoningEffort"])
+        ?? NonEmptyString(modelInfo["reasoning_effort"])
+        ?? NonEmptyString(modelInfo["effort"])
+      {
         return value
       }
     }

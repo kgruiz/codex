@@ -196,6 +196,7 @@ struct EndpointMetadata {
   var cwd: String?
   var model: String?
   var modelProvider: String?
+  var thinkingLevel: String?
   var threadId: String?
   var turnId: String?
   var lastTraceCategory: ProgressCategory?
@@ -218,6 +219,7 @@ struct EndpointRow {
   let cwd: String?
   let model: String?
   let modelProvider: String?
+  let thinkingLevel: String?
   let threadId: String?
   let turnId: String?
   let lastTraceCategory: ProgressCategory?
@@ -255,6 +257,7 @@ struct CompletedRun: Equatable {
   let promptPreview: String?
   let model: String?
   let modelProvider: String?
+  let thinkingLevel: String?
   let tokenUsage: TokenUsageInfo?
   let fileChanges: [FileChangeSummary]
   let commands: [CommandSummary]

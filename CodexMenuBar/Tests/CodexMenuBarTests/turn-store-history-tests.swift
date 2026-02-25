@@ -184,6 +184,37 @@ final class TurnStoreHistoryTests: XCTestCase {
     XCTAssertEqual(rows.first?.promptPreview, "Plan next steps")
   }
 
+  func testTurnMetadataCapturesThinkingLevelAndPersistsToHistory() {
+    let store = TurnStore()
+    let start = Date(timeIntervalSince1970: 1_700_000_000)
+    let turn: [String: Any] = [
+      "id": "turn-1",
+      "model": "gpt-5",
+      "modelProvider": "openai",
+      "reasoningEffort": "high",
+    ]
+
+    store.UpsertTurnStarted(endpointId: "ep-1", threadId: "thread-1", turnId: "turn-1", at: start)
+    store.UpdateTurnMetadata(
+      endpointId: "ep-1",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      turn: turn,
+      at: start.addingTimeInterval(1)
+    )
+    store.MarkTurnCompleted(
+      endpointId: "ep-1",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      status: .completed,
+      at: start.addingTimeInterval(2)
+    )
+
+    let rows = store.EndpointRows(activeEndpointIds: ["ep-1"])
+    XCTAssertEqual(rows.first?.thinkingLevel, "high")
+    XCTAssertEqual(rows.first?.recentRuns.first?.thinkingLevel, "high")
+  }
+
   func testCompletedRunHistoryIsCappedAtFifty() {
     let store = TurnStore()
     let base = Date(timeIntervalSince1970: 1_700_000_000)

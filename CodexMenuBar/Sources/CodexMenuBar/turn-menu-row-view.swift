@@ -281,6 +281,7 @@ struct TurnMenuRowView: View {
                 run: run,
                 fallbackModel: endpointRow.model,
                 fallbackModelProvider: endpointRow.modelProvider,
+                fallbackThinkingLevel: endpointRow.thinkingLevel,
                 isLastRun: run.turnId == endpointRow.recentRuns.first?.turnId,
                 isExpanded: expandedRunKeys.contains(run.runKey),
                 onToggle: { onToggleHistoryRun(run.runKey) }
@@ -389,10 +390,28 @@ struct TurnMenuRowView: View {
   private func ModelSummary() -> String? {
     guard endpointRow.activeTurn != nil else { return nil }
     let model = endpointRow.model?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let thinking = ThinkingLabel(endpointRow.thinkingLevel)
     if let model, !model.isEmpty {
+      if let thinking {
+        return "Model: \(model) · Thinking: \(thinking)"
+      }
       return "Model: \(model)"
     }
+    if let thinking {
+      return "Thinking: \(thinking)"
+    }
     return nil
+  }
+
+  private func ThinkingLabel(_ value: String?) -> String? {
+    guard let value else {
+      return nil
+    }
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty {
+      return nil
+    }
+    return trimmed.replacingOccurrences(of: "_", with: "-")
   }
 
   private func TokenTitle(usage: TokenUsageInfo) -> String {
@@ -565,6 +584,7 @@ private struct RunHistoryRowView: View {
   let run: CompletedRun
   let fallbackModel: String?
   let fallbackModelProvider: String?
+  let fallbackThinkingLevel: String?
   let isLastRun: Bool
   let isExpanded: Bool
   let onToggle: () -> Void
@@ -706,13 +726,25 @@ private struct RunHistoryRowView: View {
   private func ModelLine() -> String? {
     let model = NonEmpty(run.model) ?? NonEmpty(fallbackModel)
     let provider = NonEmpty(run.modelProvider) ?? NonEmpty(fallbackModelProvider)
+    let thinkingLevel = ThinkingLabel(run.thinkingLevel) ?? ThinkingLabel(fallbackThinkingLevel)
 
-    if let model, let provider {
-      return "Model: \(model) (\(provider))"
+    var details: [String] = []
+    if let provider {
+      details.append(provider)
+    }
+    if let thinkingLevel {
+      details.append("Thinking: \(thinkingLevel)")
     }
 
     if let model {
-      return "Model: \(model)"
+      if details.isEmpty {
+        return "Model: \(model)"
+      }
+      return "Model: \(model) (\(details.joined(separator: ", ")))"
+    }
+
+    if let thinkingLevel {
+      return "Thinking: \(thinkingLevel)"
     }
 
     if let provider {
@@ -745,6 +777,19 @@ private struct RunHistoryRowView: View {
 
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? nil : trimmed
+  }
+
+  private func ThinkingLabel(_ value: String?) -> String? {
+    guard let value else {
+      return nil
+    }
+
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty {
+      return nil
+    }
+
+    return trimmed.replacingOccurrences(of: "_", with: "-")
   }
 }
 
