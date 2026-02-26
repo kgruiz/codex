@@ -5254,7 +5254,7 @@ async fn status_line_branch_refreshes_after_turn_complete() {
 }
 
 #[tokio::test]
-async fn turn_complete_emits_chat_log_entry() {
+async fn turn_complete_does_not_emit_chat_log_entry() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
 
     chat.handle_codex_event(Event {
@@ -5265,13 +5265,9 @@ async fn turn_complete_emits_chat_log_entry() {
     });
 
     let cells = drain_insert_history(&mut rx);
-    let combined = cells
-        .iter()
-        .map(|lines| lines_to_single_string(lines))
-        .collect::<String>();
     assert!(
-        combined.contains("Turn complete"),
-        "expected turn completion log in chat history: {combined}"
+        cells.is_empty(),
+        "unexpected turn completion log in chat history"
     );
 }
 

@@ -1338,10 +1338,6 @@ impl ChatWidget {
         // still show the prompt once after thread switch replay.
         if !from_replay {
             self.saw_plan_item_this_turn = false;
-            self.add_to_history(history_cell::new_info_event(
-                "Turn complete".to_string(),
-                None,
-            ));
         }
         // If there is a queued user message, send exactly one now to begin the next turn.
         self.maybe_send_next_queued_input();

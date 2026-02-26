@@ -18,4 +18,3 @@ expression: term.backend().vt100().screen().contents()
   │   "path": "C:\\Program Files\\App",
   │   "regex": "^foo.*(bar)?$"
   │ }
-• Turn complete
