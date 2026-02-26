@@ -1332,8 +1332,16 @@ impl TokenUsage {
     /// baseline, so immediately after the first prompt the UI shows 100% left
     /// and trends toward 0% as the user fills the effective window.
     pub fn percent_of_context_window_remaining(&self, context_window: i64) -> i64 {
-        if context_window <= BASELINE_TOKENS {
+        if context_window <= 0 {
             return 0;
+        }
+
+        if context_window <= BASELINE_TOKENS {
+            let used = self.tokens_in_context_window().max(0);
+            let remaining = (context_window - used).max(0);
+            return ((remaining as f64 / context_window as f64) * 100.0)
+                .clamp(0.0, 100.0)
+                .round() as i64;
         }
 
         let effective_window = context_window - BASELINE_TOKENS;
@@ -2543,6 +2551,43 @@ mod tests {
         };
         assert!(enabled.has_full_disk_write_access());
         assert!(enabled.has_full_network_access());
+    }
+
+    #[test]
+    fn context_remaining_percent_small_windows_use_direct_ratio() {
+        let usage = TokenUsage {
+            total_tokens: 4_000,
+            ..TokenUsage::default()
+        };
+        assert_eq!(usage.percent_of_context_window_remaining(8_000), 50);
+    }
+
+    #[test]
+    fn context_remaining_percent_small_windows_clamps_to_zero_when_full() {
+        let usage = TokenUsage {
+            total_tokens: 9_000,
+            ..TokenUsage::default()
+        };
+        assert_eq!(usage.percent_of_context_window_remaining(8_000), 0);
+    }
+
+    #[test]
+    fn context_remaining_percent_non_positive_window_is_zero() {
+        let usage = TokenUsage {
+            total_tokens: 100,
+            ..TokenUsage::default()
+        };
+        assert_eq!(usage.percent_of_context_window_remaining(0), 0);
+        assert_eq!(usage.percent_of_context_window_remaining(-1), 0);
+    }
+
+    #[test]
+    fn context_remaining_percent_large_windows_keep_baseline_behavior() {
+        let usage = TokenUsage {
+            total_tokens: 12_500,
+            ..TokenUsage::default()
+        };
+        assert_eq!(usage.percent_of_context_window_remaining(14_000), 75);
     }
 
     #[test]
