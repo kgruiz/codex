@@ -42,11 +42,26 @@ use codex_protocol::ThreadId;
 const PAGE_SIZE: usize = 25;
 const LOAD_NEAR_THRESHOLD: usize = 5;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionSelection {
     StartFresh,
     Resume(PathBuf),
+    Manage(SessionManagementAction),
     Exit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionManagementActionKind {
+    Archive,
+    DeletePermanent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionManagementAction {
+    pub kind: SessionManagementActionKind,
+    pub path: PathBuf,
+    pub thread_id: Option<ThreadId>,
+    pub is_current_session: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -278,6 +293,12 @@ struct PickerState {
     thread_name_cache: HashMap<ThreadId, Option<String>>,
     thread_label_cache: HashMap<ThreadId, Option<String>>,
     fork_parent_id_cache: HashMap<PathBuf, Option<ThreadId>>,
+    pending_management_confirmation: Option<PendingManagementConfirmation>,
+}
+
+#[derive(Clone, Debug)]
+struct PendingManagementConfirmation {
+    action: SessionManagementAction,
 }
 
 struct PaginationState {
@@ -401,6 +422,7 @@ impl PickerState {
             thread_name_cache: HashMap::new(),
             thread_label_cache: HashMap::new(),
             fork_parent_id_cache: HashMap::new(),
+            pending_management_confirmation: None,
         }
     }
 
@@ -409,6 +431,28 @@ impl PickerState {
     }
 
     async fn handle_key(&mut self, key: KeyEvent) -> Result<Option<SessionSelection>> {
+        if let Some(pending) = self.pending_management_confirmation.clone() {
+            match key.code {
+                KeyCode::Esc => {
+                    self.pending_management_confirmation = None;
+                    self.request_frame();
+                }
+                KeyCode::Enter => {
+                    self.pending_management_confirmation = None;
+                    return Ok(Some(SessionSelection::Manage(pending.action)));
+                }
+                KeyCode::Char('c')
+                    if key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                {
+                    return Ok(Some(SessionSelection::Exit));
+                }
+                _ => {}
+            }
+            return Ok(None);
+        }
+
         match key.code {
             KeyCode::Esc => {
                 let exit = match self.exit_behavior {
@@ -493,6 +537,15 @@ impl PickerState {
             {
                 self.toggle_show_all();
                 self.request_frame();
+            }
+            KeyCode::Char('d')
+                if self.query.is_empty()
+                    && !key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(crossterm::event::KeyModifiers::ALT) =>
+            {
+                self.begin_management_confirmation_for_selected();
             }
             KeyCode::Backspace => {
                 let mut new_query = self.query.clone();
@@ -925,6 +978,63 @@ impl PickerState {
         };
         self.start_initial_load();
     }
+
+    fn begin_management_confirmation_for_selected(&mut self) {
+        let Some(row) = self.filtered_rows.get(self.selected) else {
+            return;
+        };
+
+        let is_current_session = self
+            .current_session_path
+            .as_ref()
+            .is_some_and(|path| paths_match(path, &row.path));
+        let kind = match self.view {
+            SessionView::Active => SessionManagementActionKind::Archive,
+            SessionView::Archived => SessionManagementActionKind::DeletePermanent,
+        };
+        let action = SessionManagementAction {
+            kind,
+            path: row.path.clone(),
+            thread_id: row.thread_id,
+            is_current_session,
+        };
+        self.pending_management_confirmation = Some(PendingManagementConfirmation { action });
+        self.request_frame();
+    }
+
+    fn confirmation_hint_line(&self) -> Option<Line<'static>> {
+        let pending = self.pending_management_confirmation.as_ref()?;
+        let action = pending.action.kind;
+        let warning = if pending.action.is_current_session {
+            match action {
+                SessionManagementActionKind::Archive => {
+                    "This is the currently open chat. Archiving it will end this session."
+                }
+                SessionManagementActionKind::DeletePermanent => {
+                    "This is the currently open chat. Permanent delete will end this session."
+                }
+            }
+        } else {
+            match action {
+                SessionManagementActionKind::Archive => "Archive this chat?",
+                SessionManagementActionKind::DeletePermanent => {
+                    "Delete this archived chat permanently? This cannot be undone."
+                }
+            }
+        };
+
+        Some(
+            vec![
+                warning.bold(),
+                "  ".into(),
+                key_hint::plain(KeyCode::Enter).into(),
+                " confirm ".dim(),
+                key_hint::plain(KeyCode::Esc).into(),
+                " cancel".dim(),
+            ]
+            .into(),
+        )
+    }
 }
 
 fn rows_from_items(items: Vec<ThreadItem>) -> Vec<Row> {
@@ -1023,31 +1133,38 @@ fn draw_picker(tui: &mut Tui, state: &PickerState) -> std::io::Result<()> {
             SessionView::Archived => "active",
         };
         let toggle_scope = if state.show_all { "scoped" } else { "all" };
-        let hint_line: Line = vec![
-            key_hint::plain(KeyCode::Enter).into(),
-            format!(" to {action_label} ").dim(),
-            "    ".dim(),
-            key_hint::plain(KeyCode::Esc).into(),
-            " to start new ".dim(),
-            "    ".dim(),
-            key_hint::ctrl(KeyCode::Char('c')).into(),
-            " to quit ".dim(),
-            "    ".dim(),
-            key_hint::plain(KeyCode::Tab).into(),
-            " to toggle sort ".dim(),
-            "    ".dim(),
-            key_hint::plain(KeyCode::Char('a')).into(),
-            format!(" {toggle_archived} ").dim(),
-            "    ".dim(),
-            key_hint::plain(KeyCode::Char('o')).into(),
-            format!(" {toggle_scope} ").dim(),
-            "    ".dim(),
-            key_hint::plain(KeyCode::Up).into(),
-            "/".dim(),
-            key_hint::plain(KeyCode::Down).into(),
-            " to browse".dim(),
-        ]
-        .into();
+        let hint_line: Line = if let Some(confirm_line) = state.confirmation_hint_line() {
+            confirm_line
+        } else {
+            vec![
+                key_hint::plain(KeyCode::Enter).into(),
+                format!(" to {action_label} ").dim(),
+                "    ".dim(),
+                key_hint::plain(KeyCode::Esc).into(),
+                " to start new ".dim(),
+                "    ".dim(),
+                key_hint::ctrl(KeyCode::Char('c')).into(),
+                " to quit ".dim(),
+                "    ".dim(),
+                key_hint::plain(KeyCode::Tab).into(),
+                " to toggle sort ".dim(),
+                "    ".dim(),
+                key_hint::plain(KeyCode::Char('a')).into(),
+                format!(" {toggle_archived} ").dim(),
+                "    ".dim(),
+                key_hint::plain(KeyCode::Char('o')).into(),
+                format!(" {toggle_scope} ").dim(),
+                "    ".dim(),
+                key_hint::plain(KeyCode::Char('d')).into(),
+                " manage ".dim(),
+                "    ".dim(),
+                key_hint::plain(KeyCode::Up).into(),
+                "/".dim(),
+                key_hint::plain(KeyCode::Down).into(),
+                " to browse".dim(),
+            ]
+            .into()
+        };
         frame.render_widget_ref(hint_line, hint);
     })
 }
@@ -1468,5 +1585,137 @@ fn column_visibility(
         show_updated,
         show_branch,
         show_cwd,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyModifiers;
+    use pretty_assertions::assert_eq;
+    use tokio::sync::broadcast;
+
+    fn make_state(
+        view: SessionView,
+        row_path: PathBuf,
+        thread_id: Option<ThreadId>,
+        current_session_path: Option<PathBuf>,
+    ) -> PickerState {
+        let (draw_tx, _draw_rx) = broadcast::channel(1);
+        let requester = FrameRequester::new(draw_tx);
+        let loader: PageLoader = Arc::new(|_request| {});
+        let mut state = PickerState::new(
+            PathBuf::from("/tmp/codex-home"),
+            requester,
+            loader,
+            "openai".to_string(),
+            true,
+            None,
+            view,
+            SessionPickerExit::Close,
+            current_session_path,
+        );
+        let row = Row {
+            path: row_path,
+            preview: "preview".to_string(),
+            thread_id,
+            thread_name: None,
+            created_at: None,
+            updated_at: None,
+            cwd: None,
+            git_branch: None,
+        };
+        state.all_rows = vec![row.clone()];
+        state.filtered_rows = vec![row];
+        state
+    }
+
+    #[tokio::test]
+    async fn d_then_enter_emits_archive_management_action_in_active_view() {
+        let thread_id = ThreadId::new();
+        let row_path = PathBuf::from("/tmp/codex-home/sessions/rollout-a.jsonl");
+        let mut state = make_state(SessionView::Active, row_path.clone(), Some(thread_id), None);
+
+        let first = state
+            .handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+            .await
+            .expect("key handling should succeed");
+        assert_eq!(first, None);
+        assert!(state.pending_management_confirmation.is_some());
+
+        let second = state
+            .handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .await
+            .expect("key handling should succeed");
+        assert_eq!(
+            second,
+            Some(SessionSelection::Manage(SessionManagementAction {
+                kind: SessionManagementActionKind::Archive,
+                path: row_path,
+                thread_id: Some(thread_id),
+                is_current_session: false,
+            }))
+        );
+    }
+
+    #[tokio::test]
+    async fn d_then_enter_emits_permanent_delete_management_action_in_archived_view() {
+        let thread_id = ThreadId::new();
+        let row_path = PathBuf::from("/tmp/codex-home/archived_sessions/rollout-a.jsonl");
+        let mut state = make_state(
+            SessionView::Archived,
+            row_path.clone(),
+            Some(thread_id),
+            None,
+        );
+
+        let first = state
+            .handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+            .await
+            .expect("key handling should succeed");
+        assert_eq!(first, None);
+        assert!(state.pending_management_confirmation.is_some());
+
+        let second = state
+            .handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .await
+            .expect("key handling should succeed");
+        assert_eq!(
+            second,
+            Some(SessionSelection::Manage(SessionManagementAction {
+                kind: SessionManagementActionKind::DeletePermanent,
+                path: row_path,
+                thread_id: Some(thread_id),
+                is_current_session: false,
+            }))
+        );
+    }
+
+    #[tokio::test]
+    async fn current_session_delete_sets_current_session_flag() {
+        let thread_id = ThreadId::new();
+        let row_path = PathBuf::from("/tmp/codex-home/archived_sessions/rollout-a.jsonl");
+        let mut state = make_state(
+            SessionView::Archived,
+            row_path.clone(),
+            Some(thread_id),
+            Some(row_path),
+        );
+
+        let first = state
+            .handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+            .await
+            .expect("key handling should succeed");
+        assert_eq!(first, None);
+
+        let pending = state
+            .pending_management_confirmation
+            .as_ref()
+            .expect("pending confirmation should be set");
+        assert!(pending.action.is_current_session);
+        assert!(
+            state.confirmation_hint_line().is_some(),
+            "expected confirmation hint line to be visible"
+        );
     }
 }

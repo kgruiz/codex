@@ -30,10 +30,13 @@ use crate::pager_overlay::Overlay;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::render::renderable::Renderable;
 use crate::resume_picker::SessionSelection as ResumeSessionSelection;
+use crate::sessions_picker::SessionManagementAction;
+use crate::sessions_picker::SessionManagementActionKind;
 use crate::sessions_picker::SessionSelection as ManagedSessionSelection;
 use crate::tui;
 use crate::tui::TuiEvent;
 use crate::update_action::UpdateAction;
+use chrono::Utc;
 use codex_app_server_protocol::ConfigLayerSource;
 use codex_core::AuthManager;
 use codex_core::CodexAuth;
@@ -667,6 +670,207 @@ impl App {
             self.chat_widget.submit_op(Op::Shutdown);
             self.server.remove_thread(&thread_id).await;
         }
+    }
+
+    async fn reset_to_new_session(&mut self, tui: &mut tui::Tui, include_previous_summary: bool) {
+        let model = self.chat_widget.current_model().to_string();
+        let summary = if include_previous_summary {
+            session_summary(
+                self.chat_widget.token_usage(),
+                self.chat_widget.thread_id(),
+                self.chat_widget.thread_name(),
+            )
+        } else {
+            None
+        };
+        self.shutdown_current_thread().await;
+        if let Err(err) = self.server.remove_and_close_all_threads().await {
+            tracing::warn!(error = %err, "failed to close all threads");
+        }
+        let init = crate::chatwidget::ChatWidgetInit {
+            config: self.config.clone(),
+            frame_requester: tui.frame_requester(),
+            app_event_tx: self.app_event_tx.clone(),
+            initial_user_message: None,
+            enhanced_keys_supported: self.enhanced_keys_supported,
+            auth_manager: self.auth_manager.clone(),
+            models_manager: self.server.get_models_manager(),
+            feedback: self.feedback.clone(),
+            is_first_run: false,
+            feedback_audience: self.feedback_audience,
+            model: Some(model),
+            status_line_invalid_items_warned: self.status_line_invalid_items_warned.clone(),
+            otel_manager: self.otel_manager.clone(),
+        };
+        self.chat_widget = ChatWidget::new(init, self.server.clone());
+        self.reset_thread_event_state();
+        if let Some(summary) = summary {
+            let mut lines: Vec<Line<'static>> = vec![summary.usage_line.clone().into()];
+            if let Some(command) = summary.resume_command {
+                let spans = vec!["To continue this session, run ".into(), command.cyan()];
+                lines.push(spans.into());
+            }
+            self.chat_widget.add_plain_history_lines(lines);
+        }
+        tui.frame_requester().schedule_frame();
+    }
+
+    async fn apply_session_management_action(
+        &mut self,
+        tui: &mut tui::Tui,
+        action: SessionManagementAction,
+    ) -> Result<()> {
+        if action.is_current_session {
+            self.reset_to_new_session(tui, false).await;
+        }
+
+        match action.kind {
+            SessionManagementActionKind::Archive => {
+                self.archive_session_rollout(action.path.as_path(), action.thread_id)
+                    .await?
+            }
+            SessionManagementActionKind::DeletePermanent => {
+                self.delete_archived_session_rollout(action.path.as_path(), action.thread_id)
+                    .await?
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn archive_session_rollout(
+        &self,
+        path: &Path,
+        thread_id: Option<ThreadId>,
+    ) -> Result<()> {
+        let sessions_dir = self.config.codex_home.join(codex_core::SESSIONS_SUBDIR);
+        let canonical_sessions_dir = tokio::fs::canonicalize(&sessions_dir)
+            .await
+            .wrap_err("failed to resolve sessions directory")?;
+        let canonical_path = tokio::fs::canonicalize(path)
+            .await
+            .wrap_err_with(|| format!("failed to resolve rollout path {}", path.display()))?;
+        if !canonical_path.starts_with(&canonical_sessions_dir) {
+            return Err(color_eyre::eyre::eyre!(
+                "rollout path `{}` must be in sessions directory",
+                path.display()
+            ));
+        }
+        if let Some(thread_id) = thread_id {
+            let required_suffix = format!("{thread_id}.jsonl");
+            let file_name = canonical_path
+                .file_name()
+                .map(|f| f.to_string_lossy().to_string())
+                .ok_or_else(|| {
+                    color_eyre::eyre::eyre!("rollout path `{}` missing file name", path.display())
+                })?;
+            if !file_name.ends_with(required_suffix.as_str()) {
+                return Err(color_eyre::eyre::eyre!(
+                    "rollout path `{}` does not match thread id {thread_id}",
+                    path.display()
+                ));
+            }
+        }
+
+        let file_name = canonical_path
+            .file_name()
+            .ok_or_else(|| {
+                color_eyre::eyre::eyre!("rollout path `{}` missing file name", path.display())
+            })?
+            .to_owned();
+        let archive_dir = self
+            .config
+            .codex_home
+            .join(codex_core::ARCHIVED_SESSIONS_SUBDIR);
+        tokio::fs::create_dir_all(&archive_dir)
+            .await
+            .wrap_err("failed to create archived sessions directory")?;
+        let archived_path = archive_dir.join(file_name);
+        if tokio::fs::try_exists(&archived_path).await.unwrap_or(false) {
+            return Err(color_eyre::eyre::eyre!(
+                "cannot archive session because destination already exists: {}",
+                archived_path.display()
+            ));
+        }
+        tokio::fs::rename(&canonical_path, &archived_path)
+            .await
+            .wrap_err("failed to move session into archived sessions directory")?;
+
+        if let Some(thread_id) = thread_id {
+            let state_db_ctx = codex_core::state_db::open_if_present(
+                &self.config.codex_home,
+                self.config.model_provider_id.as_str(),
+            )
+            .await;
+            if let Some(ctx) = state_db_ctx
+                && let Err(err) = ctx
+                    .mark_archived(thread_id, archived_path.as_path(), Utc::now())
+                    .await
+            {
+                tracing::warn!(
+                    "failed to mark archived session in state db for thread {thread_id}: {err}"
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn delete_archived_session_rollout(
+        &self,
+        path: &Path,
+        thread_id: Option<ThreadId>,
+    ) -> Result<()> {
+        let archived_dir = self
+            .config
+            .codex_home
+            .join(codex_core::ARCHIVED_SESSIONS_SUBDIR);
+        let canonical_archived_dir = tokio::fs::canonicalize(&archived_dir)
+            .await
+            .wrap_err("failed to resolve archived sessions directory")?;
+        let canonical_path = tokio::fs::canonicalize(path)
+            .await
+            .wrap_err_with(|| format!("failed to resolve rollout path {}", path.display()))?;
+        if !canonical_path.starts_with(&canonical_archived_dir) {
+            return Err(color_eyre::eyre::eyre!(
+                "rollout path `{}` must be in archived sessions directory",
+                path.display()
+            ));
+        }
+        if let Some(thread_id) = thread_id {
+            let required_suffix = format!("{thread_id}.jsonl");
+            let file_name = canonical_path
+                .file_name()
+                .map(|f| f.to_string_lossy().to_string())
+                .ok_or_else(|| {
+                    color_eyre::eyre::eyre!("rollout path `{}` missing file name", path.display())
+                })?;
+            if !file_name.ends_with(required_suffix.as_str()) {
+                return Err(color_eyre::eyre::eyre!(
+                    "rollout path `{}` does not match thread id {thread_id}",
+                    path.display()
+                ));
+            }
+        }
+
+        tokio::fs::remove_file(&canonical_path)
+            .await
+            .wrap_err_with(|| format!("failed to delete session {}", canonical_path.display()))?;
+        if let Some(thread_id) = thread_id {
+            let state_db_ctx = codex_core::state_db::open_if_present(
+                &self.config.codex_home,
+                self.config.model_provider_id.as_str(),
+            )
+            .await;
+            codex_core::state_db::delete_thread_metadata(
+                state_db_ctx.as_deref(),
+                thread_id,
+                "tui_delete_archived_session",
+            )
+            .await;
+        }
+
+        Ok(())
     }
 
     fn ensure_thread_channel(&mut self, thread_id: ThreadId) -> &mut ThreadEventChannel {
@@ -1328,43 +1532,7 @@ impl App {
     async fn handle_event(&mut self, tui: &mut tui::Tui, event: AppEvent) -> Result<AppRunControl> {
         match event {
             AppEvent::NewSession => {
-                let model = self.chat_widget.current_model().to_string();
-                let summary = session_summary(
-                    self.chat_widget.token_usage(),
-                    self.chat_widget.thread_id(),
-                    self.chat_widget.thread_name(),
-                );
-                self.shutdown_current_thread().await;
-                if let Err(err) = self.server.remove_and_close_all_threads().await {
-                    tracing::warn!(error = %err, "failed to close all threads");
-                }
-                let init = crate::chatwidget::ChatWidgetInit {
-                    config: self.config.clone(),
-                    frame_requester: tui.frame_requester(),
-                    app_event_tx: self.app_event_tx.clone(),
-                    // New sessions start without prefilled message content.
-                    initial_user_message: None,
-                    enhanced_keys_supported: self.enhanced_keys_supported,
-                    auth_manager: self.auth_manager.clone(),
-                    models_manager: self.server.get_models_manager(),
-                    feedback: self.feedback.clone(),
-                    is_first_run: false,
-                    feedback_audience: self.feedback_audience,
-                    model: Some(model),
-                    status_line_invalid_items_warned: self.status_line_invalid_items_warned.clone(),
-                    otel_manager: self.otel_manager.clone(),
-                };
-                self.chat_widget = ChatWidget::new(init, self.server.clone());
-                self.reset_thread_event_state();
-                if let Some(summary) = summary {
-                    let mut lines: Vec<Line<'static>> = vec![summary.usage_line.clone().into()];
-                    if let Some(command) = summary.resume_command {
-                        let spans = vec!["To continue this session, run ".into(), command.cyan()];
-                        lines.push(spans.into());
-                    }
-                    self.chat_widget.add_plain_history_lines(lines);
-                }
-                tui.frame_requester().schedule_frame();
+                self.reset_to_new_session(tui, true).await;
             }
             AppEvent::OpenResumePicker => {
                 match crate::resume_picker::run_resume_picker(
@@ -1463,96 +1631,122 @@ impl App {
                 tui.frame_requester().schedule_frame();
             }
             AppEvent::OpenSessionsPicker { view } => {
-                match crate::sessions_picker::run_sessions_picker(
-                    tui,
-                    &self.config.codex_home,
-                    &self.config.model_provider_id,
-                    false,
-                    view,
-                    crate::sessions_picker::SessionPickerExit::Close,
-                    self.chat_widget.rollout_path(),
-                )
-                .await?
-                {
-                    ManagedSessionSelection::Resume(path) => {
-                        let current_cwd = self.config.cwd.clone();
-                        let resume_cwd = match crate::resolve_cwd_for_resume_or_fork(
-                            tui,
-                            &current_cwd,
-                            &path,
-                            CwdPromptAction::Resume,
-                            true,
-                        )
-                        .await?
-                        {
-                            Some(cwd) => cwd,
-                            None => current_cwd.clone(),
-                        };
-                        let mut resume_config = if crate::cwds_differ(&current_cwd, &resume_cwd) {
-                            match self.rebuild_config_for_cwd(resume_cwd).await {
-                                Ok(cfg) => cfg,
-                                Err(err) => {
-                                    self.chat_widget.add_error_message(format!(
-                                        "Failed to rebuild configuration for resume: {err}"
-                                    ));
-                                    return Ok(AppRunControl::Continue);
-                                }
-                            }
-                        } else {
-                            self.config.clone()
-                        };
-                        self.apply_runtime_policy_overrides(&mut resume_config);
-                        let summary = session_summary(
-                            self.chat_widget.token_usage(),
-                            self.chat_widget.thread_id(),
-                            self.chat_widget.thread_name(),
-                        );
-                        match self
-                            .server
-                            .resume_thread_from_rollout(
-                                resume_config.clone(),
-                                path.clone(),
-                                self.auth_manager.clone(),
+                let mut picker_view = view;
+                loop {
+                    match crate::sessions_picker::run_sessions_picker(
+                        tui,
+                        &self.config.codex_home,
+                        &self.config.model_provider_id,
+                        false,
+                        picker_view,
+                        crate::sessions_picker::SessionPickerExit::Close,
+                        self.chat_widget.rollout_path(),
+                    )
+                    .await?
+                    {
+                        ManagedSessionSelection::Resume(path) => {
+                            let current_cwd = self.config.cwd.clone();
+                            let resume_cwd = match crate::resolve_cwd_for_resume_or_fork(
+                                tui,
+                                &current_cwd,
+                                &path,
+                                CwdPromptAction::Resume,
+                                true,
                             )
-                            .await
-                        {
-                            Ok(resumed) => {
-                                self.shutdown_current_thread().await;
-                                self.config = resume_config;
-                                tui.set_notification_method(self.config.tui_notification_method);
-                                self.file_search.update_search_dir(self.config.cwd.clone());
-                                let init = self.chatwidget_init_for_forked_or_resumed_thread(
-                                    tui,
-                                    self.config.clone(),
-                                );
-                                self.chat_widget = ChatWidget::new_from_existing(
-                                    init,
-                                    resumed.thread,
-                                    resumed.session_configured,
-                                );
-                                self.reset_thread_event_state();
-                                if let Some(summary) = summary {
-                                    let mut lines: Vec<Line<'static>> =
-                                        vec![summary.usage_line.clone().into()];
-                                    if let Some(command) = summary.resume_command {
-                                        let spans = vec![
-                                            "To continue this session, run ".into(),
-                                            command.cyan(),
-                                        ];
-                                        lines.push(spans.into());
+                            .await?
+                            {
+                                Some(cwd) => cwd,
+                                None => current_cwd.clone(),
+                            };
+                            let mut resume_config = if crate::cwds_differ(&current_cwd, &resume_cwd)
+                            {
+                                match self.rebuild_config_for_cwd(resume_cwd).await {
+                                    Ok(cfg) => cfg,
+                                    Err(err) => {
+                                        self.chat_widget.add_error_message(format!(
+                                            "Failed to rebuild configuration for resume: {err}"
+                                        ));
+                                        return Ok(AppRunControl::Continue);
                                     }
-                                    self.chat_widget.add_plain_history_lines(lines);
+                                }
+                            } else {
+                                self.config.clone()
+                            };
+                            self.apply_runtime_policy_overrides(&mut resume_config);
+                            let summary = session_summary(
+                                self.chat_widget.token_usage(),
+                                self.chat_widget.thread_id(),
+                                self.chat_widget.thread_name(),
+                            );
+                            match self
+                                .server
+                                .resume_thread_from_rollout(
+                                    resume_config.clone(),
+                                    path.clone(),
+                                    self.auth_manager.clone(),
+                                )
+                                .await
+                            {
+                                Ok(resumed) => {
+                                    self.shutdown_current_thread().await;
+                                    self.config = resume_config;
+                                    tui.set_notification_method(
+                                        self.config.tui_notification_method,
+                                    );
+                                    self.file_search.update_search_dir(self.config.cwd.clone());
+                                    let init = self.chatwidget_init_for_forked_or_resumed_thread(
+                                        tui,
+                                        self.config.clone(),
+                                    );
+                                    self.chat_widget = ChatWidget::new_from_existing(
+                                        init,
+                                        resumed.thread,
+                                        resumed.session_configured,
+                                    );
+                                    self.reset_thread_event_state();
+                                    if let Some(summary) = summary {
+                                        let mut lines: Vec<Line<'static>> =
+                                            vec![summary.usage_line.clone().into()];
+                                        if let Some(command) = summary.resume_command {
+                                            let spans = vec![
+                                                "To continue this session, run ".into(),
+                                                command.cyan(),
+                                            ];
+                                            lines.push(spans.into());
+                                        }
+                                        self.chat_widget.add_plain_history_lines(lines);
+                                    }
+                                }
+                                Err(err) => {
+                                    let path_display = path.display();
+                                    self.chat_widget.add_error_message(format!(
+                                        "Failed to resume session from {path_display}: {err}"
+                                    ));
                                 }
                             }
-                            Err(err) => {
-                                let path_display = path.display();
-                                self.chat_widget.add_error_message(format!(
-                                    "Failed to resume session from {path_display}: {err}"
-                                ));
+                            break;
+                        }
+                        ManagedSessionSelection::Manage(action) => {
+                            let action_kind = action.kind;
+                            if let Err(err) =
+                                self.apply_session_management_action(tui, action).await
+                            {
+                                self.chat_widget
+                                    .add_error_message(format!("Failed to manage session: {err}"));
                             }
+                            picker_view = match action_kind {
+                                SessionManagementActionKind::Archive => {
+                                    crate::sessions_picker::SessionView::Active
+                                }
+                                SessionManagementActionKind::DeletePermanent => {
+                                    crate::sessions_picker::SessionView::Archived
+                                }
+                            };
+                        }
+                        ManagedSessionSelection::Exit | ManagedSessionSelection::StartFresh => {
+                            break;
                         }
                     }
-                    ManagedSessionSelection::Exit | ManagedSessionSelection::StartFresh => {}
                 }
 
                 // Leaving alt-screen may blank the inline viewport; force a redraw either way.
