@@ -12,8 +12,10 @@ use codex_core::RolloutRecorder;
 use codex_core::ThreadItem;
 use codex_core::ThreadSortKey;
 use codex_core::ThreadsPage;
+use codex_core::find_thread_labels_by_ids;
 use codex_core::find_thread_names_by_ids;
 use codex_core::path_utils;
+use codex_core::read_session_meta_line;
 use color_eyre::eyre::Result;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -274,6 +276,8 @@ struct PickerState {
     current_session_path: Option<PathBuf>,
     sort_key: ThreadSortKey,
     thread_name_cache: HashMap<ThreadId, Option<String>>,
+    thread_label_cache: HashMap<ThreadId, Option<String>>,
+    fork_parent_id_cache: HashMap<PathBuf, Option<ThreadId>>,
 }
 
 struct PaginationState {
@@ -395,6 +399,8 @@ impl PickerState {
             current_session_path,
             sort_key: ThreadSortKey::CreatedAt,
             thread_name_cache: HashMap::new(),
+            thread_label_cache: HashMap::new(),
+            fork_parent_id_cache: HashMap::new(),
         }
     }
 
@@ -612,28 +618,89 @@ impl PickerState {
             missing_ids.insert(thread_id);
         }
 
-        if missing_ids.is_empty() {
-            return;
+        if !missing_ids.is_empty() {
+            let names = find_thread_names_by_ids(&self.codex_home, &missing_ids)
+                .await
+                .unwrap_or_default();
+            for thread_id in missing_ids {
+                let thread_name = names.get(&thread_id).cloned();
+                self.thread_name_cache.insert(thread_id, thread_name);
+            }
         }
 
-        let names = find_thread_names_by_ids(&self.codex_home, &missing_ids)
-            .await
-            .unwrap_or_default();
-        for thread_id in missing_ids {
-            let thread_name = names.get(&thread_id).cloned();
-            self.thread_name_cache.insert(thread_id, thread_name);
+        let mut paths_to_check_for_forks = Vec::new();
+        for row in &self.all_rows {
+            if self.fork_parent_id_cache.contains_key(&row.path) {
+                continue;
+            }
+            paths_to_check_for_forks.push(row.path.clone());
+        }
+        for path in paths_to_check_for_forks {
+            let parent_id = read_session_meta_line(path.as_path())
+                .await
+                .ok()
+                .and_then(|meta| meta.meta.forked_from_id);
+            self.fork_parent_id_cache.insert(path, parent_id);
+        }
+
+        let mut missing_parent_ids = HashSet::new();
+        for row in &self.all_rows {
+            let Some(thread_id) = row.thread_id else {
+                continue;
+            };
+            if self
+                .thread_name_cache
+                .get(&thread_id)
+                .cloned()
+                .flatten()
+                .is_some()
+            {
+                continue;
+            }
+            let Some(parent_id) = self.fork_parent_id_cache.get(&row.path).cloned().flatten()
+            else {
+                continue;
+            };
+            if self.thread_label_cache.contains_key(&parent_id) {
+                continue;
+            }
+            missing_parent_ids.insert(parent_id);
+        }
+
+        if !missing_parent_ids.is_empty() {
+            let labels = find_thread_labels_by_ids(&self.codex_home, &missing_parent_ids)
+                .await
+                .unwrap_or_default();
+            for parent_id in missing_parent_ids {
+                let label = labels.get(&parent_id).cloned();
+                self.thread_label_cache.insert(parent_id, label);
+            }
         }
 
         let mut updated = false;
         for row in self.all_rows.iter_mut() {
-            let Some(thread_id) = row.thread_id else {
-                continue;
+            let explicit_thread_name = row
+                .thread_id
+                .and_then(|thread_id| self.thread_name_cache.get(&thread_id).cloned().flatten());
+            let next_thread_name = if explicit_thread_name.is_some() {
+                explicit_thread_name
+            } else if let Some(parent_id) =
+                self.fork_parent_id_cache.get(&row.path).cloned().flatten()
+            {
+                let parent_label = self
+                    .thread_label_cache
+                    .get(&parent_id)
+                    .cloned()
+                    .flatten()
+                    .unwrap_or_else(|| "Untitled".to_string());
+                Some(format!("Fork of {parent_label}"))
+            } else {
+                None
             };
-            let thread_name = self.thread_name_cache.get(&thread_id).cloned().flatten();
-            if row.thread_name == thread_name {
+            if row.thread_name == next_thread_name {
                 continue;
             }
-            row.thread_name = thread_name;
+            row.thread_name = next_thread_name;
             updated = true;
         }
 
