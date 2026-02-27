@@ -1009,7 +1009,7 @@ impl Session {
                 otel_manager.clone(),
             );
         }
-        let thread_name =
+        let mut thread_name =
             match session_index::find_thread_name_by_id(&config.codex_home, &conversation_id).await
             {
                 Ok(name) => name,
@@ -1018,8 +1018,38 @@ impl Session {
                     None
                 }
             };
+        if thread_name.is_none()
+            && let Some(parent_id) = forked_from_id
+        {
+            let parent_label = match session_index::find_thread_label_by_id(
+                &config.codex_home,
+                &parent_id,
+            )
+            .await
+            {
+                Ok(Some(label)) => label,
+                Ok(None) => "Untitled".to_string(),
+                Err(err) => {
+                    warn!("Failed to resolve parent thread label for forked session: {err}");
+                    "Untitled".to_string()
+                }
+            };
+            let derived_name = format!("Fork of {parent_label}");
+            if !config.ephemeral
+                && let Err(err) = session_index::append_thread_name(
+                    &config.codex_home,
+                    conversation_id,
+                    &derived_name,
+                )
+                .await
+            {
+                warn!("Failed to write derived fork title to session index: {err}");
+            }
+            thread_name = Some(derived_name);
+        }
         session_configuration.thread_name = thread_name.clone();
-        let state = SessionState::new(session_configuration.clone());
+        let mut state = SessionState::new(session_configuration.clone());
+        state.set_is_forked_session(forked_from_id.is_some());
 
         let services = SessionServices {
             mcp_connection_manager: Arc::new(RwLock::new(McpConnectionManager::default())),
@@ -1172,7 +1202,10 @@ impl Session {
 
     pub(crate) async fn prepare_auto_rename(&self) -> bool {
         let mut state = self.state.lock().await;
-        if state.session_configuration.thread_name.is_some() || state.auto_rename_attempted() {
+        if state.is_forked_session()
+            || state.session_configuration.thread_name.is_some()
+            || state.auto_rename_attempted()
+        {
             return false;
         }
         state.mark_auto_rename_attempted();

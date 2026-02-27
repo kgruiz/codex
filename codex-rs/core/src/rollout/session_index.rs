@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs::File;
+use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
@@ -8,6 +9,9 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use codex_protocol::ThreadId;
+use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::RolloutItem;
+use codex_protocol::protocol::USER_MESSAGE_BEGIN;
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::io::AsyncBufReadExt;
@@ -15,6 +19,7 @@ use tokio::io::AsyncWriteExt;
 
 const SESSION_INDEX_FILE: &str = "session_index.jsonl";
 const READ_CHUNK_SIZE: usize = 8192;
+const IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER: &str = "[Image]";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionIndexEntry {
@@ -79,6 +84,21 @@ pub async fn find_thread_name_by_id(
     Ok(entry.map(|entry| entry.thread_name))
 }
 
+/// Find a display label for a thread id.
+///
+/// Uses the explicit thread name from session index when available, otherwise
+/// falls back to the first user message from rollout history.
+pub async fn find_thread_label_by_id(
+    codex_home: &Path,
+    thread_id: &ThreadId,
+) -> std::io::Result<Option<String>> {
+    if let Some(name) = find_thread_name_by_id(codex_home, thread_id).await? {
+        return Ok(Some(name));
+    }
+
+    find_first_user_message_by_id(codex_home, thread_id).await
+}
+
 /// Find the latest thread names for a batch of thread ids.
 pub async fn find_thread_names_by_ids(
     codex_home: &Path,
@@ -109,6 +129,28 @@ pub async fn find_thread_names_by_ids(
     }
 
     Ok(names)
+}
+
+/// Find display labels for a batch of thread ids.
+///
+/// Prefers explicit thread names from session index, then falls back to first
+/// user message previews from rollout history for ids without a saved name.
+pub async fn find_thread_labels_by_ids(
+    codex_home: &Path,
+    thread_ids: &HashSet<ThreadId>,
+) -> std::io::Result<HashMap<ThreadId, String>> {
+    let mut labels = find_thread_names_by_ids(codex_home, thread_ids).await?;
+
+    for thread_id in thread_ids {
+        if labels.contains_key(thread_id) {
+            continue;
+        }
+        if let Some(message) = find_first_user_message_by_id(codex_home, thread_id).await? {
+            labels.insert(*thread_id, message);
+        }
+    }
+
+    Ok(labels)
 }
 
 /// Find the most recently updated thread id for a thread name, if any.
@@ -144,6 +186,61 @@ pub async fn find_thread_path_by_name_str(
 
 fn session_index_path(codex_home: &Path) -> PathBuf {
     codex_home.join(SESSION_INDEX_FILE)
+}
+
+async fn find_rollout_path_by_id(
+    codex_home: &Path,
+    thread_id: &ThreadId,
+) -> std::io::Result<Option<PathBuf>> {
+    let id = thread_id.to_string();
+    if let Some(path) = super::list::find_thread_path_by_id_str(codex_home, &id).await? {
+        return Ok(Some(path));
+    }
+    super::list::find_archived_thread_path_by_id_str(codex_home, &id).await
+}
+
+fn strip_user_message_prefix(text: &str) -> &str {
+    match text.find(USER_MESSAGE_BEGIN) {
+        Some(idx) => text[idx + USER_MESSAGE_BEGIN.len()..].trim(),
+        None => text.trim(),
+    }
+}
+
+fn first_user_message_from_items(items: &[RolloutItem]) -> Option<String> {
+    for item in items {
+        if let RolloutItem::EventMsg(EventMsg::UserMessage(user)) = item {
+            let message = strip_user_message_prefix(user.message.as_str());
+            if !message.is_empty() {
+                return Some(message.to_string());
+            }
+
+            if user
+                .images
+                .as_ref()
+                .is_some_and(|images| !images.is_empty())
+                || !user.local_images.is_empty()
+            {
+                return Some(IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+async fn find_first_user_message_by_id(
+    codex_home: &Path,
+    thread_id: &ThreadId,
+) -> std::io::Result<Option<String>> {
+    let Some(path) = find_rollout_path_by_id(codex_home, thread_id).await? else {
+        return Ok(None);
+    };
+
+    match super::recorder::RolloutRecorder::load_rollout_items(path.as_path()).await {
+        Ok((items, _, _)) => Ok(first_user_message_from_items(items.as_slice())),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err),
+    }
 }
 
 fn scan_index_from_end_by_id(
@@ -396,5 +493,34 @@ mod tests {
         let found_other_by_id = scan_index_from_end_by_id(&path, &id_other)?;
         assert_eq!(found_other_by_id, Some(expected_other));
         Ok(())
+    }
+
+    #[test]
+    fn first_user_message_from_items_uses_trimmed_message_or_image_placeholder() {
+        let user = RolloutItem::EventMsg(EventMsg::UserMessage(
+            codex_protocol::protocol::UserMessageEvent {
+                message: "help me debug this test".to_string(),
+                images: None,
+                text_elements: Vec::new(),
+                local_images: Vec::new(),
+            },
+        ));
+        assert_eq!(
+            first_user_message_from_items(&[user]),
+            Some("help me debug this test".to_string())
+        );
+
+        let image_only = RolloutItem::EventMsg(EventMsg::UserMessage(
+            codex_protocol::protocol::UserMessageEvent {
+                message: String::new(),
+                images: Some(vec!["https://example.com/image.png".to_string()]),
+                text_elements: Vec::new(),
+                local_images: Vec::new(),
+            },
+        ));
+        assert_eq!(
+            first_user_message_from_items(&[image_only]),
+            Some(IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER.to_string())
+        );
     }
 }

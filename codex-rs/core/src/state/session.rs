@@ -28,6 +28,8 @@ pub(crate) struct SessionState {
     pub(crate) pending_resume_previous_model: Option<String>,
     /// Tracks whether automatic thread naming has already been attempted.
     pub(crate) auto_rename_attempted: bool,
+    /// Tracks whether this session originated from a fork.
+    pub(crate) is_forked_session: bool,
 }
 
 impl SessionState {
@@ -44,6 +46,7 @@ impl SessionState {
             initial_context_seeded: false,
             pending_resume_previous_model: None,
             auto_rename_attempted: false,
+            is_forked_session: false,
         }
     }
 
@@ -138,6 +141,14 @@ impl SessionState {
 
     pub(crate) fn mark_auto_rename_attempted(&mut self) {
         self.auto_rename_attempted = true;
+    }
+
+    pub(crate) fn is_forked_session(&self) -> bool {
+        self.is_forked_session
+    }
+
+    pub(crate) fn set_is_forked_session(&mut self, is_forked_session: bool) {
+        self.is_forked_session = is_forked_session;
     }
 }
 

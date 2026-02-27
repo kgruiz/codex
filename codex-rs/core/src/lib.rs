@@ -112,6 +112,8 @@ pub use rollout::SessionMeta;
 pub use rollout::find_archived_thread_path_by_id_str;
 #[deprecated(note = "use find_thread_path_by_id_str")]
 pub use rollout::find_conversation_path_by_id_str;
+pub use rollout::find_thread_label_by_id;
+pub use rollout::find_thread_labels_by_ids;
 pub use rollout::find_thread_name_by_id;
 pub use rollout::find_thread_path_by_id_str;
 pub use rollout::find_thread_path_by_name_str;
