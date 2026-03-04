@@ -207,7 +207,8 @@ struct ResumeCommand {
 
 #[derive(Debug, Parser)]
 struct ForkCommand {
-    /// Conversation/session id (UUID). When provided, forks this session.
+    /// Conversation/session id (UUID) or thread name. UUIDs take precedence if it parses.
+    /// When provided, forks this session.
     /// If omitted, use --last to pick the most recent recorded session.
     #[arg(value_name = "SESSION_ID")]
     session_id: Option<String>,
@@ -425,9 +426,7 @@ fn format_exit_messages(exit_info: AppExitInfo, color_enabled: bool) -> Vec<Stri
         codex_core::protocol::FinalOutput::from(token_usage)
     )];
 
-    if let Some(resume_cmd) =
-        codex_core::util::resume_command(thread_name.as_deref(), conversation_id)
-    {
+    for resume_cmd in codex_core::util::resume_commands(thread_name.as_deref(), conversation_id) {
         let command = if color_enabled {
             resume_cmd.cyan().to_string()
         } else {
@@ -1427,6 +1426,8 @@ mod tests {
             vec![
                 "Token usage: total=2 input=0 output=2".to_string(),
                 "To continue this session, run codex resume my-thread".to_string(),
+                "To continue this session, run codex resume 123e4567-e89b-12d3-a456-426614174000"
+                    .to_string(),
             ]
         );
     }

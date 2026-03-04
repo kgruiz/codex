@@ -156,10 +156,10 @@ fn session_summary(
     }
 
     let usage_line = FinalOutput::from(token_usage).to_string();
-    let resume_command = codex_core::util::resume_command(thread_name.as_deref(), thread_id);
+    let resume_commands = codex_core::util::resume_commands(thread_name.as_deref(), thread_id);
     Some(SessionSummary {
         usage_line,
-        resume_command,
+        resume_commands,
     })
 }
 
@@ -251,7 +251,7 @@ fn emit_syntax_theme_warning(app_event_tx: &AppEventSender, config: &Config) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SessionSummary {
     usage_line: String,
-    resume_command: Option<String>,
+    resume_commands: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -706,7 +706,7 @@ impl App {
         self.reset_thread_event_state();
         if let Some(summary) = summary {
             let mut lines: Vec<Line<'static>> = vec![summary.usage_line.clone().into()];
-            if let Some(command) = summary.resume_command {
+            for command in summary.resume_commands {
                 let spans = vec!["To continue this session, run ".into(), command.cyan()];
                 lines.push(spans.into());
             }
@@ -1604,7 +1604,7 @@ impl App {
                                 if let Some(summary) = summary {
                                     let mut lines: Vec<Line<'static>> =
                                         vec![summary.usage_line.clone().into()];
-                                    if let Some(command) = summary.resume_command {
+                                    for command in summary.resume_commands {
                                         let spans = vec![
                                             "To continue this session, run ".into(),
                                             command.cyan(),
@@ -1707,7 +1707,7 @@ impl App {
                                     if let Some(summary) = summary {
                                         let mut lines: Vec<Line<'static>> =
                                             vec![summary.usage_line.clone().into()];
-                                        if let Some(command) = summary.resume_command {
+                                        for command in summary.resume_commands {
                                             let spans = vec![
                                                 "To continue this session, run ".into(),
                                                 command.cyan(),
@@ -1783,7 +1783,7 @@ impl App {
                             if let Some(summary) = summary {
                                 let mut lines: Vec<Line<'static>> =
                                     vec![summary.usage_line.clone().into()];
-                                if let Some(command) = summary.resume_command {
+                                for command in summary.resume_commands {
                                     let spans = vec![
                                         "To continue this session, run ".into(),
                                         command.cyan(),
@@ -3650,8 +3650,8 @@ mod tests {
             "Token usage: total=12 input=10 output=2"
         );
         assert_eq!(
-            summary.resume_command,
-            Some("codex resume 123e4567-e89b-12d3-a456-426614174000".to_string())
+            summary.resume_commands,
+            vec!["codex resume 123e4567-e89b-12d3-a456-426614174000".to_string()]
         );
     }
 
@@ -3668,8 +3668,11 @@ mod tests {
         let summary = session_summary(usage, Some(conversation), Some("my-session".to_string()))
             .expect("summary");
         assert_eq!(
-            summary.resume_command,
-            Some("codex resume my-session".to_string())
+            summary.resume_commands,
+            vec![
+                "codex resume my-session".to_string(),
+                "codex resume 123e4567-e89b-12d3-a456-426614174000".to_string()
+            ]
         );
     }
 }

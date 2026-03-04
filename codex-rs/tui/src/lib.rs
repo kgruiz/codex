@@ -536,7 +536,7 @@ async fn run_ratatui_app(
             thread_name: None,
             update_action: None,
             exit_reason: ExitReason::Fatal(format!(
-                "No saved session found with ID {id_str}. Run `codex {action}` without an ID to choose from existing sessions."
+                "No saved session found with ID or name `{id_str}`. Run `codex {action}` without a target to choose from existing sessions."
             )),
         })
     };
@@ -546,7 +546,10 @@ async fn run_ratatui_app(
         if let Some(id_str) = cli.fork_session_id.as_deref() {
             let is_uuid = Uuid::parse_str(id_str).is_ok();
             let path = if is_uuid {
-                find_thread_path_by_id_str(&config.codex_home, id_str).await?
+                match find_thread_path_by_id_str(&config.codex_home, id_str).await? {
+                    Some(path) => Some(path),
+                    None => find_thread_path_by_name_str(&config.codex_home, id_str).await?,
+                }
             } else {
                 find_thread_path_by_name_str(&config.codex_home, id_str).await?
             };
@@ -602,7 +605,10 @@ async fn run_ratatui_app(
     } else if let Some(id_str) = cli.resume_session_id.as_deref() {
         let is_uuid = Uuid::parse_str(id_str).is_ok();
         let path = if is_uuid {
-            find_thread_path_by_id_str(&config.codex_home, id_str).await?
+            match find_thread_path_by_id_str(&config.codex_home, id_str).await? {
+                Some(path) => Some(path),
+                None => find_thread_path_by_name_str(&config.codex_home, id_str).await?,
+            }
         } else {
             find_thread_path_by_name_str(&config.codex_home, id_str).await?
         };
