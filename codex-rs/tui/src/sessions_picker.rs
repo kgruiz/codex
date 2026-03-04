@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
@@ -662,7 +663,7 @@ impl PickerState {
     async fn update_thread_names(&mut self) {
         let mut missing_ids = HashSet::new();
         for row in &self.all_rows {
-            let Some(thread_id) = row.thread_id else {
+            let Some(thread_id) = row_thread_id(row) else {
                 continue;
             };
             if self.thread_name_cache.contains_key(&thread_id) {
@@ -698,7 +699,7 @@ impl PickerState {
 
         let mut missing_parent_ids = HashSet::new();
         for row in &self.all_rows {
-            let Some(thread_id) = row.thread_id else {
+            let Some(thread_id) = row_thread_id(row) else {
                 continue;
             };
             if self
@@ -730,10 +731,44 @@ impl PickerState {
             }
         }
 
+        let mut fork_rows_by_parent: HashMap<ThreadId, Vec<usize>> = HashMap::new();
+        for (index, row) in self.all_rows.iter().enumerate() {
+            let Some(thread_id) = row_thread_id(row) else {
+                continue;
+            };
+            if self
+                .thread_name_cache
+                .get(&thread_id)
+                .cloned()
+                .flatten()
+                .is_some()
+            {
+                continue;
+            }
+
+            let Some(parent_id) = self.fork_parent_id_cache.get(&row.path).cloned().flatten()
+            else {
+                continue;
+            };
+            fork_rows_by_parent
+                .entry(parent_id)
+                .or_default()
+                .push(index);
+        }
+
+        let mut fork_numbers_by_index: HashMap<usize, usize> = HashMap::new();
+        for row_indexes in fork_rows_by_parent.values_mut() {
+            row_indexes.sort_by(|left, right| {
+                compare_fork_rows(&self.all_rows[*left], &self.all_rows[*right])
+            });
+            for (offset, row_index) in row_indexes.iter().enumerate() {
+                fork_numbers_by_index.insert(*row_index, offset + 1);
+            }
+        }
+
         let mut updated = false;
-        for row in self.all_rows.iter_mut() {
-            let explicit_thread_name = row
-                .thread_id
+        for (row_index, row) in self.all_rows.iter_mut().enumerate() {
+            let explicit_thread_name = row_thread_id(row)
                 .and_then(|thread_id| self.thread_name_cache.get(&thread_id).cloned().flatten());
             let next_thread_name = if explicit_thread_name.is_some() {
                 explicit_thread_name
@@ -746,7 +781,8 @@ impl PickerState {
                     .cloned()
                     .flatten()
                     .unwrap_or_else(|| "Untitled".to_string());
-                Some(format!("Fork of {parent_label}"))
+                let fork_number = fork_numbers_by_index.get(&row_index).copied().unwrap_or(1);
+                Some(format!("Fork {fork_number} of {parent_label}"))
             } else {
                 None
             };
@@ -995,7 +1031,7 @@ impl PickerState {
         let action = SessionManagementAction {
             kind,
             path: row.path.clone(),
-            thread_id: row.thread_id,
+            thread_id: row_thread_id(row),
             is_current_session,
         };
         self.pending_management_confirmation = Some(PendingManagementConfirmation { action });
@@ -1060,13 +1096,34 @@ fn head_to_row(item: &ThreadItem) -> Row {
     Row {
         path: item.path.clone(),
         preview,
-        thread_id: item.thread_id,
+        thread_id: thread_id_from_rollout_path(item.path.as_path()).or(item.thread_id),
         thread_name: None,
         created_at,
         updated_at,
         cwd: item.cwd.clone(),
         git_branch: item.git_branch.clone(),
     }
+}
+
+fn row_thread_id(row: &Row) -> Option<ThreadId> {
+    thread_id_from_rollout_path(row.path.as_path()).or(row.thread_id)
+}
+
+fn thread_id_from_rollout_path(path: &Path) -> Option<ThreadId> {
+    let file_name = path.file_name()?.to_str()?;
+    let stem = file_name.strip_suffix(".jsonl")?;
+    if !stem.starts_with("rollout-") || stem.len() < 36 {
+        return None;
+    }
+    let uuid_text = &stem[stem.len().saturating_sub(36)..];
+    ThreadId::from_string(uuid_text).ok()
+}
+
+fn compare_fork_rows(left: &Row, right: &Row) -> Ordering {
+    left.created_at
+        .cmp(&right.created_at)
+        .then_with(|| left.updated_at.cmp(&right.updated_at))
+        .then_with(|| left.path.cmp(&right.path))
 }
 
 fn paths_match(a: &Path, b: &Path) -> bool {
@@ -1591,6 +1648,8 @@ fn column_visibility(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::DateTime;
+    use chrono::Utc;
     use crossterm::event::KeyModifiers;
     use pretty_assertions::assert_eq;
     use tokio::sync::broadcast;
@@ -1716,6 +1775,126 @@ mod tests {
         assert!(
             state.confirmation_hint_line().is_some(),
             "expected confirmation hint line to be visible"
+        );
+    }
+
+    #[tokio::test]
+    async fn management_action_uses_thread_id_from_rollout_path() {
+        let expected_id = ThreadId::new();
+        let wrong_id = ThreadId::new();
+        let row_path = PathBuf::from(format!(
+            "/tmp/codex-home/sessions/rollout-2025-01-01T00-00-00-{expected_id}.jsonl"
+        ));
+        let mut state = make_state(SessionView::Active, row_path.clone(), Some(wrong_id), None);
+
+        let first = state
+            .handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+            .await
+            .expect("key handling should succeed");
+        assert_eq!(first, None);
+
+        let second = state
+            .handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .await
+            .expect("key handling should succeed");
+        assert_eq!(
+            second,
+            Some(SessionSelection::Manage(SessionManagementAction {
+                kind: SessionManagementActionKind::Archive,
+                path: row_path,
+                thread_id: Some(expected_id),
+                is_current_session: false,
+            }))
+        );
+    }
+
+    #[tokio::test]
+    async fn update_thread_names_numbers_multiple_untitled_forks() {
+        let (draw_tx, _draw_rx) = broadcast::channel(1);
+        let requester = FrameRequester::new(draw_tx);
+        let loader: PageLoader = Arc::new(|_request| {});
+        let mut state = PickerState::new(
+            PathBuf::from("/tmp/codex-home"),
+            requester,
+            loader,
+            "openai".to_string(),
+            true,
+            None,
+            SessionView::Active,
+            SessionPickerExit::Close,
+            None,
+        );
+
+        let parent_id = ThreadId::new();
+        let path_a = PathBuf::from(format!(
+            "/tmp/codex-home/sessions/rollout-2025-01-01T00-00-00-{}.jsonl",
+            ThreadId::new()
+        ));
+        let path_b = PathBuf::from(format!(
+            "/tmp/codex-home/sessions/rollout-2025-01-01T00-00-00-{}.jsonl",
+            ThreadId::new()
+        ));
+        let path_c = PathBuf::from(format!(
+            "/tmp/codex-home/sessions/rollout-2025-01-01T00-00-00-{}.jsonl",
+            ThreadId::new()
+        ));
+
+        let row = |path: PathBuf, preview: &str, created_at: DateTime<Utc>| Row {
+            path,
+            preview: preview.to_string(),
+            thread_id: None,
+            thread_name: None,
+            created_at: Some(created_at),
+            updated_at: None,
+            cwd: None,
+            git_branch: None,
+        };
+        state.all_rows = vec![
+            row(
+                path_c.clone(),
+                "third",
+                DateTime::parse_from_rfc3339("2025-01-03T00:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+            ),
+            row(
+                path_a.clone(),
+                "first",
+                DateTime::parse_from_rfc3339("2025-01-01T00:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+            ),
+            row(
+                path_b.clone(),
+                "second",
+                DateTime::parse_from_rfc3339("2025-01-02T00:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+            ),
+        ];
+        state.filtered_rows = state.all_rows.clone();
+        state.fork_parent_id_cache.insert(path_a, Some(parent_id));
+        state.fork_parent_id_cache.insert(path_b, Some(parent_id));
+        state.fork_parent_id_cache.insert(path_c, Some(parent_id));
+        state
+            .thread_label_cache
+            .insert(parent_id, Some("Parent thread title".to_string()));
+
+        state.update_thread_names().await;
+
+        let names: Vec<String> = state
+            .all_rows
+            .iter()
+            .map(Row::display_preview)
+            .map(str::to_string)
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "Fork 3 of Parent thread title".to_string(),
+                "Fork 1 of Parent thread title".to_string(),
+                "Fork 2 of Parent thread title".to_string(),
+            ]
         );
     }
 }

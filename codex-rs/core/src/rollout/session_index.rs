@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fs;
 use std::fs::File;
+use std::io::BufRead;
+use std::io::BufReader;
 use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Seek;
@@ -184,8 +187,87 @@ pub async fn find_thread_path_by_name_str(
     super::list::find_thread_path_by_id_str(codex_home, &thread_id.to_string()).await
 }
 
+/// Compute the next fork number for a parent thread id.
+///
+/// Fork numbering is based on the number of recorded sessions (active + archived)
+/// whose session metadata contains `forked_from_id == parent_id`.
+pub async fn next_fork_number_for_parent(
+    codex_home: &Path,
+    parent_id: &ThreadId,
+) -> std::io::Result<usize> {
+    let codex_home = codex_home.to_path_buf();
+    let parent_id = *parent_id;
+    tokio::task::spawn_blocking(move || {
+        let active = count_forks_in_root(codex_home.join(super::SESSIONS_SUBDIR), parent_id)?;
+        let archived =
+            count_forks_in_root(codex_home.join(super::ARCHIVED_SESSIONS_SUBDIR), parent_id)?;
+        Ok(active.saturating_add(archived).saturating_add(1))
+    })
+    .await
+    .map_err(std::io::Error::other)?
+}
+
 fn session_index_path(codex_home: &Path) -> PathBuf {
     codex_home.join(SESSION_INDEX_FILE)
+}
+
+fn count_forks_in_root(root: PathBuf, parent_id: ThreadId) -> std::io::Result<usize> {
+    if !root.exists() {
+        return Ok(0);
+    }
+
+    let mut stack = vec![root];
+    let mut count = 0usize;
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+            let is_rollout = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("rollout-") && name.ends_with(".jsonl"));
+            if !is_rollout {
+                continue;
+            }
+
+            if rollout_is_fork_of(path.as_path(), parent_id)? {
+                count = count.saturating_add(1);
+            }
+        }
+    }
+
+    Ok(count)
+}
+
+fn rollout_is_fork_of(path: &Path, parent_id: ThreadId) -> std::io::Result<bool> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    for line in reader.lines() {
+        let line = line?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(rollout_line) =
+            serde_json::from_str::<codex_protocol::protocol::RolloutLine>(trimmed)
+        else {
+            return Ok(false);
+        };
+        return Ok(matches!(
+            rollout_line.item,
+            RolloutItem::SessionMeta(meta_line) if meta_line.meta.forked_from_id == Some(parent_id)
+        ));
+    }
+
+    Ok(false)
 }
 
 async fn find_rollout_path_by_id(
@@ -328,6 +410,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use codex_protocol::protocol::RolloutLine;
+    use codex_protocol::protocol::SessionMeta;
+    use codex_protocol::protocol::SessionMetaLine;
+    use codex_protocol::protocol::SessionSource;
     use pretty_assertions::assert_eq;
     use std::collections::HashMap;
     use std::collections::HashSet;
@@ -522,5 +608,69 @@ mod tests {
             first_user_message_from_items(&[image_only]),
             Some(IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER.to_string())
         );
+    }
+
+    fn write_rollout_with_parent(
+        codex_home: &Path,
+        subdir: &str,
+        thread_id: ThreadId,
+        forked_from_id: Option<ThreadId>,
+    ) -> std::io::Result<()> {
+        let root = codex_home.join(subdir);
+        std::fs::create_dir_all(&root)?;
+        let path = root.join(format!("rollout-2025-01-01T00-00-00-{thread_id}.jsonl"));
+        let rollout_line = RolloutLine {
+            timestamp: "2025-01-01T00:00:00Z".to_string(),
+            item: RolloutItem::SessionMeta(SessionMetaLine {
+                meta: SessionMeta {
+                    id: thread_id,
+                    forked_from_id,
+                    timestamp: "2025-01-01T00:00:00Z".to_string(),
+                    cwd: codex_home.to_path_buf(),
+                    originator: "test".to_string(),
+                    cli_version: "test".to_string(),
+                    source: SessionSource::Cli,
+                    model_provider: None,
+                    base_instructions: None,
+                    dynamic_tools: None,
+                },
+                git: None,
+            }),
+        };
+        std::fs::write(path, format!("{}\n", serde_json::to_string(&rollout_line)?))
+    }
+
+    #[tokio::test]
+    async fn next_fork_number_for_parent_counts_active_and_archived() -> std::io::Result<()> {
+        let temp = TempDir::new()?;
+        let parent_id = ThreadId::new();
+        write_rollout_with_parent(
+            temp.path(),
+            super::super::SESSIONS_SUBDIR,
+            ThreadId::new(),
+            Some(parent_id),
+        )?;
+        write_rollout_with_parent(
+            temp.path(),
+            super::super::SESSIONS_SUBDIR,
+            ThreadId::new(),
+            Some(parent_id),
+        )?;
+        write_rollout_with_parent(
+            temp.path(),
+            super::super::ARCHIVED_SESSIONS_SUBDIR,
+            ThreadId::new(),
+            Some(parent_id),
+        )?;
+        write_rollout_with_parent(
+            temp.path(),
+            super::super::SESSIONS_SUBDIR,
+            ThreadId::new(),
+            Some(ThreadId::new()),
+        )?;
+
+        let next = next_fork_number_for_parent(temp.path(), &parent_id).await?;
+        assert_eq!(next, 4);
+        Ok(())
     }
 }

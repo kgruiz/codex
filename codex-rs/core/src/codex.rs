@@ -1034,7 +1034,17 @@ impl Session {
                     "Untitled".to_string()
                 }
             };
-            let derived_name = format!("Fork of {parent_label}");
+            let fork_number =
+                match session_index::next_fork_number_for_parent(&config.codex_home, &parent_id)
+                    .await
+                {
+                    Ok(number) => number,
+                    Err(err) => {
+                        warn!("Failed to compute fork number for derived thread title: {err}");
+                        1
+                    }
+                };
+            let derived_name = format!("Fork {fork_number} of {parent_label}");
             if !config.ephemeral
                 && let Err(err) = session_index::append_thread_name(
                     &config.codex_home,
